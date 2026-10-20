@@ -171,7 +171,7 @@ func TestStressReconnectResources(t *testing.T) {
 	}()
 	opts := Options{BufferBytes: 256 * 1024, MaxStreams: streams + 16, Heartbeat: 5 * time.Second, DialTimeout: 2 * time.Second, WriteTimeout: 10 * time.Second, Logf: func(string, ...any) {}}
 	key := bytes.Repeat([]byte{42}, 32)
-	server, e := NewServer(ServerConfig{Key: key, Target: backend.Addr().String(), SessionTTL: 10 * time.Second, Options: opts})
+	server, e := NewServer(ServerConfig{Password: testPassword, Key: key, Target: backend.Addr().String(), SessionTTL: 10 * time.Second, Options: opts})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -192,7 +192,7 @@ func TestStressReconnectResources(t *testing.T) {
 	for i := range addrs {
 		l := listen(&localCount)
 		addrs[i] = l.Addr().String()
-		c, err := NewClient(ClientConfig{Key: key, URL: "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/tunnel", ReconnectMin: 5 * time.Millisecond, ReconnectMax: 25 * time.Millisecond, Options: opts})
+		c, err := NewClient(ClientConfig{Password: testPassword, Key: key, URL: "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/tunnel", ReconnectMin: 5 * time.Millisecond, ReconnectMax: 25 * time.Millisecond, Options: opts})
 		if err != nil {
 			t.Fatal(err)
 		}

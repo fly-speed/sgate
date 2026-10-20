@@ -94,7 +94,7 @@ func newRecoveryFixtureOptions(t *testing.T, ttl, offline time.Duration, initial
 			}()
 		}
 	}()
-	f.cfg = ServerConfig{Key: bytes.Repeat([]byte{27}, 32), Target: f.backend.Addr().String(), SessionTTL: ttl, Options: options}
+	f.cfg = ServerConfig{Password: testPassword, Key: bytes.Repeat([]byte{27}, 32), Target: f.backend.Addr().String(), SessionTTL: ttl, Options: options}
 	f.blocked.Store(initialMode == "offline")
 	f.stalled.Store(initialMode == "stall")
 	f.tls = initialMode == "tls"
@@ -104,7 +104,7 @@ func newRecoveryFixtureOptions(t *testing.T, ttl, offline time.Duration, initial
 		t.Fatal(e)
 	}
 	f.local = countedListener{local, &f.localCount}
-	clientConfig := ClientConfig{Key: f.cfg.Key, URL: strings.Replace(f.http.URL, "http", "ws", 1) + "/tunnel", OfflineTimeout: offline, ReconnectMin: 10 * time.Millisecond, ReconnectMax: 30 * time.Millisecond, Options: options}
+	clientConfig := ClientConfig{Password: testPassword, Key: f.cfg.Key, URL: strings.Replace(f.http.URL, "http", "ws", 1) + "/tunnel", OfflineTimeout: offline, ReconnectMin: 10 * time.Millisecond, ReconnectMax: 30 * time.Millisecond, Options: options}
 	if f.tls {
 		roots := x509.NewCertPool()
 		roots.AddCert(f.http.Certificate())

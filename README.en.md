@@ -25,17 +25,23 @@ openssl rand -hex 32 > sgate.key
 On the server:
 
 ```sh
-./bin/sgate-server -listen :8080 -target 127.0.0.1:5432 -key-file sgate.key
+./bin/sgate-server -listen :8080 -target 127.0.0.1:5432 -key-file sgate.key -password 'your-password'
 ```
 
 On the client:
 
 ```sh
 ./bin/sgate-client -listen 127.0.0.1:15432 \
-  -server ws://SERVER_IP:8080/tunnel -key-file sgate.key
+  -server ws://SERVER_IP:8080/tunnel -key-file sgate.key -password 'your-password'
 ```
 
 Connect your application to `127.0.0.1:15432`. Alternatively, supply the 64-character hexadecimal key through `SGATE_KEY`.
+
+Both endpoints require the same `-password` value (1–1024 bytes). Replace `your-password` in the examples. The password is separate from `sgate.key`.
+
+The client includes an `X-Sgate-Password` header in every HTTP/HTTPS WebSocket handshake, including reconnects. It contains a versioned Base64URL encoding of a fresh nonce and AES-256-GCM ciphertext, using a dedicated encryption key derived from the shared key. Authentication binds the encrypted credential to the session, request nonce, timestamp, resume flag and URI. Request and response proofs also bind the credential.
+
+The server decrypts and verifies the password before upgrading or allocating a proxy session. Missing, incorrect, tampered or duplicated credentials return HTTP 404 without creating a proxy session or backend connection. Replayed handshakes are also rejected within the running server's in-memory replay window. Passwords are required at startup and are never sent as plaintext headers. The ordinary HTTP homepage remains public. Upgrade both programs together: older key-only handshakes are no longer accepted.
 
 For public deployments use `wss://`. The server supports `-tls-cert` and `-tls-key`; the client verifies certificates and supports additional trust roots with `-tls-ca`. A WebSocket-capable HTTPS reverse proxy can terminate TLS instead.
 

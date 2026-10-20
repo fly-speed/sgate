@@ -19,6 +19,7 @@ import (
 
 type ClientConfig struct {
 	Key            []byte
+	Password       string
 	URL            string
 	ReconnectMin   time.Duration
 	ReconnectMax   time.Duration
@@ -31,6 +32,9 @@ type Client struct{ cfg ClientConfig }
 func NewClient(cfg ClientConfig) (*Client, error) {
 	if len(cfg.Key) != 32 {
 		return nil, errors.New("client key must contain 32 bytes")
+	}
+	if err := validatePassword(cfg.Password); err != nil {
+		return nil, err
 	}
 	u, err := url.Parse(cfg.URL)
 	if err != nil || u.Host == "" || (u.Scheme != "ws" && u.Scheme != "wss") || u.User != nil || u.Fragment != "" {
@@ -69,12 +73,10 @@ func (c *Client) dial(ctx context.Context, id string, resume bool) (*websocket.C
 		r = "1"
 	}
 	u, _ := url.Parse(c.cfg.URL)
-	headers := http.Header{}
-	headers.Set("X-Sgate-Session", id)
-	headers.Set("X-Sgate-Nonce", nonce)
-	headers.Set("X-Sgate-Time", ts)
-	headers.Set("X-Sgate-Resume", r)
-	headers.Set("X-Sgate-Auth", mac(c.cfg.Key, protocol, "client", id, nonce, ts, r, u.RequestURI()))
+	headers, err := requestHeaders(c.cfg.Key, c.cfg.Password, id, nonce, ts, r, u.RequestURI())
+	if err != nil {
+		return nil, nil, 0, err
+	}
 	d := websocket.Dialer{Proxy: http.ProxyFromEnvironment, HandshakeTimeout: c.cfg.Options.DialTimeout, TLSClientConfig: c.cfg.TLSConfig, ReadBufferSize: chunkSize, WriteBufferSize: chunkSize}
 	ws, response, err := d.DialContext(ctx, c.cfg.URL, headers)
 	if err != nil {
@@ -84,7 +86,7 @@ func (c *Client) dial(ctx context.Context, id string, resume bool) (*websocket.C
 			response.Body.Close()
 			if status == http.StatusGone {
 				serverNonce := response.Header.Get("X-Sgate-Nonce")
-				expected := mac(c.cfg.Key, protocol, "gone", id, nonce, serverNonce, ts)
+				expected := mac(c.cfg.Key, protocol, "gone", id, nonce, serverNonce, ts, headers.Get(passwordHeader))
 				if !validID(serverNonce) || !hmac.Equal([]byte(expected), []byte(response.Header.Get("X-Sgate-Auth"))) {
 					return nil, nil, 0, errors.New("unauthenticated session expiry response")
 				}
@@ -93,7 +95,7 @@ func (c *Client) dial(ctx context.Context, id string, resume bool) (*websocket.C
 		return nil, nil, status, err
 	}
 	serverNonce := response.Header.Get("X-Sgate-Nonce")
-	expected := mac(c.cfg.Key, protocol, "server", id, nonce, serverNonce, ts)
+	expected := mac(c.cfg.Key, protocol, "server", id, nonce, serverNonce, ts, headers.Get(passwordHeader))
 	if !validID(serverNonce) || !hmac.Equal([]byte(expected), []byte(response.Header.Get("X-Sgate-Auth"))) {
 		ws.Close()
 		return nil, nil, 0, errors.New("server authentication failed")

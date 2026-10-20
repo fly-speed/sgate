@@ -14,6 +14,7 @@ import (
 
 type ServerConfig struct {
 	Key         []byte
+	Password    string
 	Target      string
 	Path        string
 	SessionTTL  time.Duration
@@ -39,6 +40,9 @@ type Server struct {
 func NewServer(cfg ServerConfig) (*Server, error) {
 	if len(cfg.Key) != 32 {
 		return nil, errors.New("server key must contain 32 bytes")
+	}
+	if err := validatePassword(cfg.Password); err != nil {
+		return nil, err
 	}
 	if _, _, err := net.SplitHostPort(cfg.Target); err != nil {
 		return nil, errors.New("target must be host:port")
@@ -132,8 +136,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	nonce := r.Header.Get("X-Sgate-Nonce")
 	ts := r.Header.Get("X-Sgate-Time")
 	resume := r.Header.Get("X-Sgate-Resume")
-	expected := mac(s.cfg.Key, protocol, "client", id, nonce, ts, resume, r.URL.RequestURI())
+	credential := r.Header.Get(passwordHeader)
+	expected := mac(s.cfg.Key, protocol, "client", id, nonce, ts, resume, r.URL.RequestURI(), credential)
 	if r.Method != http.MethodGet || !websocket.IsWebSocketUpgrade(r) || !validID(id) || !validID(nonce) || !freshTimestamp(ts) || (resume != "0" && resume != "1") || !hmac.Equal([]byte(expected), []byte(r.Header.Get("X-Sgate-Auth"))) {
+		http.NotFound(w, r)
+		return
+	}
+	if len(r.Header.Values(passwordHeader)) != 1 || !verifyPassword(s.cfg.Key, s.cfg.Password, credential, id, nonce, ts, resume, r.URL.RequestURI()) {
 		http.NotFound(w, r)
 		return
 	}
@@ -170,7 +179,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.mu.Unlock()
 			serverNonce := randomID()
 			w.Header().Set("X-Sgate-Nonce", serverNonce)
-			w.Header().Set("X-Sgate-Auth", mac(s.cfg.Key, protocol, "gone", id, nonce, serverNonce, ts))
+			w.Header().Set("X-Sgate-Auth", mac(s.cfg.Key, protocol, "gone", id, nonce, serverNonce, ts, credential))
 			http.Error(w, "session expired", http.StatusGone)
 			return
 		}
@@ -193,7 +202,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	serverNonce := randomID()
 	headers := http.Header{}
 	headers.Set("X-Sgate-Nonce", serverNonce)
-	headers.Set("X-Sgate-Auth", mac(s.cfg.Key, protocol, "server", id, nonce, serverNonce, ts))
+	headers.Set("X-Sgate-Auth", mac(s.cfg.Key, protocol, "server", id, nonce, serverNonce, ts, credential))
 	upgrader := websocket.Upgrader{HandshakeTimeout: s.cfg.Options.DialTimeout, ReadBufferSize: chunkSize, WriteBufferSize: chunkSize}
 	ws, err := upgrader.Upgrade(w, r, headers)
 	if err != nil {

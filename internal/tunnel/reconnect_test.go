@@ -47,12 +47,10 @@ func TestDownstreamLostACKIsDeduplicatedAndBuffersReleased(t *testing.T) {
 	connect := func(resume string) (*websocket.Conn, chan error) {
 		t.Helper()
 		nonce, ts := randomID(), strconv.FormatInt(time.Now().Unix(), 10)
-		h := http.Header{}
-		h.Set("X-Sgate-Session", id)
-		h.Set("X-Sgate-Nonce", nonce)
-		h.Set("X-Sgate-Time", ts)
-		h.Set("X-Sgate-Resume", resume)
-		h.Set("X-Sgate-Auth", mac(key, protocol, "client", id, nonce, ts, resume, "/tunnel"))
+		h, err := requestHeaders(key, testPassword, id, nonce, ts, resume, "/tunnel")
+		if err != nil {
+			t.Fatal(err)
+		}
 		d := websocket.Dialer{NetDialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			c, err := (&net.Dialer{}).DialContext(ctx, network, addr)
 			if err != nil {
@@ -127,7 +125,7 @@ func TestDownstreamLostACKIsDeduplicatedAndBuffersReleased(t *testing.T) {
 func TestUnauthenticatedGoneDoesNotDiscardSession(t *testing.T) {
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "proxy error", http.StatusGone) }))
 	defer proxy.Close()
-	c, err := NewClient(ClientConfig{Key: bytes.Repeat([]byte{8}, 32), URL: "ws" + strings.TrimPrefix(proxy.URL, "http") + "/tunnel"})
+	c, err := NewClient(ClientConfig{Password: testPassword, Key: bytes.Repeat([]byte{8}, 32), URL: "ws" + strings.TrimPrefix(proxy.URL, "http") + "/tunnel"})
 	if err != nil {
 		t.Fatal(err)
 	}

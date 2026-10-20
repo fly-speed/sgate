@@ -20,6 +20,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const testPassword = "sgate-test-password"
+
 func testOptions() Options {
 	return Options{BufferBytes: 64 * 1024, Heartbeat: time.Second, DialTimeout: time.Second, WriteTimeout: 2 * time.Second, Logf: func(string, ...any) {}}
 }
@@ -96,7 +98,7 @@ func newFixtureWithBackend(t *testing.T, ttl time.Duration, handle func(net.Conn
 		}
 	}()
 	key := bytes.Repeat([]byte{8}, 32)
-	f.server, err = NewServer(ServerConfig{Key: key, Target: f.backend.Addr().String(), SessionTTL: ttl, Options: testOptions()})
+	f.server, err = NewServer(ServerConfig{Password: testPassword, Key: key, Target: f.backend.Addr().String(), SessionTTL: ttl, Options: testOptions()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +113,7 @@ func newFixtureWithBackend(t *testing.T, ttl time.Duration, handle func(net.Conn
 	if err != nil {
 		t.Fatal(err)
 	}
-	client, err := NewClient(ClientConfig{Key: key, URL: "ws" + strings.TrimPrefix(f.http.URL, "http") + "/tunnel", ReconnectMin: 10 * time.Millisecond, ReconnectMax: 30 * time.Millisecond, Options: testOptions()})
+	client, err := NewClient(ClientConfig{Password: testPassword, Key: key, URL: "ws" + strings.TrimPrefix(f.http.URL, "http") + "/tunnel", ReconnectMin: 10 * time.Millisecond, ReconnectMax: 30 * time.Millisecond, Options: testOptions()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +270,7 @@ func TestSessionExpiryClosesOldSocketAndAllowsNew(t *testing.T) {
 }
 func TestWrongKeyRejectedAndHTTPHealth(t *testing.T) {
 	f := newFixture(t, 2*time.Minute)
-	client, err := NewClient(ClientConfig{Key: bytes.Repeat([]byte{9}, 32), URL: "ws" + strings.TrimPrefix(f.http.URL, "http") + "/tunnel", Options: testOptions()})
+	client, err := NewClient(ClientConfig{Password: testPassword, Key: bytes.Repeat([]byte{9}, 32), URL: "ws" + strings.TrimPrefix(f.http.URL, "http") + "/tunnel", Options: testOptions()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +293,7 @@ func TestWrongKeyRejectedAndHTTPHealth(t *testing.T) {
 // Simulate an ACK lost with the old WebSocket: resend OPEN and DATA after resume.
 func TestLostAcknowledgementDoesNotRepeatApplicationData(t *testing.T) {
 	f := newFixture(t, 2*time.Minute)
-	client, e := NewClient(ClientConfig{Key: bytes.Repeat([]byte{8}, 32), URL: "ws" + strings.TrimPrefix(f.http.URL, "http") + "/tunnel", Options: testOptions()})
+	client, e := NewClient(ClientConfig{Password: testPassword, Key: bytes.Repeat([]byte{8}, 32), URL: "ws" + strings.TrimPrefix(f.http.URL, "http") + "/tunnel", Options: testOptions()})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -373,7 +375,7 @@ func TestTLSCertificateVerification(t *testing.T) {
 	f := newFixture(t, 2*time.Minute)
 	secure := httptest.NewTLSServer(f.server)
 	defer secure.Close()
-	cfg := ClientConfig{Key: bytes.Repeat([]byte{8}, 32), URL: "wss" + strings.TrimPrefix(secure.URL, "https") + "/tunnel", Options: testOptions()}
+	cfg := ClientConfig{Password: testPassword, Key: bytes.Repeat([]byte{8}, 32), URL: "wss" + strings.TrimPrefix(secure.URL, "https") + "/tunnel", Options: testOptions()}
 	client, e := NewClient(cfg)
 	if e != nil {
 		t.Fatal(e)
@@ -435,12 +437,10 @@ func TestHandshakeReplayRejected(t *testing.T) {
 	f := newFixture(t, 2*time.Minute)
 	key := bytes.Repeat([]byte{8}, 32)
 	id, nonce, ts := randomID(), randomID(), strconv.FormatInt(time.Now().Unix(), 10)
-	headers := http.Header{}
-	headers.Set("X-Sgate-Session", id)
-	headers.Set("X-Sgate-Nonce", nonce)
-	headers.Set("X-Sgate-Time", ts)
-	headers.Set("X-Sgate-Resume", "0")
-	headers.Set("X-Sgate-Auth", mac(key, protocol, "client", id, nonce, ts, "0", "/tunnel"))
+	headers, err := requestHeaders(key, testPassword, id, nonce, ts, "0", "/tunnel")
+	if err != nil {
+		t.Fatal(err)
+	}
 	endpoint := "ws" + strings.TrimPrefix(f.http.URL, "http") + "/tunnel"
 	ws, _, e := websocket.DefaultDialer.Dial(endpoint, headers)
 	if e != nil {

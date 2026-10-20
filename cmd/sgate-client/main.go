@@ -20,6 +20,7 @@ func main() {
 	listen := flag.String("listen", "127.0.0.1:9000", "local TCP listen address")
 	server := flag.String("server", "", "server WebSocket URL (required)")
 	keyFile := flag.String("key-file", "", "shared key file (defaults to SGATE_KEY environment variable)")
+	password := flag.String("password", "", "connection authentication password (required)")
 	ca := flag.String("tls-ca", "", "additional trusted CA PEM file")
 	minRetry := flag.Duration("reconnect-min", 250*time.Millisecond, "minimum reconnect interval")
 	maxRetry := flag.Duration("reconnect-max", 10*time.Second, "maximum reconnect interval")
@@ -48,7 +49,7 @@ func main() {
 		}
 		tlsConfig.RootCAs = roots
 	}
-	client, err := tunnel.NewClient(tunnel.ClientConfig{Key: secret, URL: *server, TLSConfig: tlsConfig, ReconnectMin: *minRetry, ReconnectMax: *maxRetry, OfflineTimeout: *offlineTimeout, Options: tunnel.Options{BufferBytes: *buffer, MaxStreams: *maxStreams, Heartbeat: *heartbeat, HeartbeatTimeout: *heartbeatTimeout}})
+	client, err := tunnel.NewClient(tunnel.ClientConfig{Key: secret, Password: *password, URL: *server, TLSConfig: tlsConfig, ReconnectMin: *minRetry, ReconnectMax: *maxRetry, OfflineTimeout: *offlineTimeout, Options: tunnel.Options{BufferBytes: *buffer, MaxStreams: *maxStreams, Heartbeat: *heartbeat, HeartbeatTimeout: *heartbeatTimeout}})
 	if err != nil {
 		log.Fatal(err)
 	}

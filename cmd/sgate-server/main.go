@@ -19,6 +19,7 @@ func main() {
 	target := flag.String("target", "", "fixed backend TCP host:port (required)")
 	path := flag.String("path", "/tunnel", "WebSocket endpoint")
 	keyFile := flag.String("key-file", "", "shared key file (defaults to SGATE_KEY environment variable)")
+	password := flag.String("password", "", "connection authentication password (required)")
 	cert := flag.String("tls-cert", "", "TLS certificate PEM file")
 	key := flag.String("tls-key", "", "TLS private key PEM file")
 	ttl := flag.Duration("session-ttl", 2*time.Minute, "retain disconnected sessions for this duration")
@@ -35,7 +36,7 @@ func main() {
 	if (*cert == "") != (*key == "") {
 		log.Fatal("both -tls-cert and -tls-key are required for TLS")
 	}
-	proxy, err := tunnel.NewServer(tunnel.ServerConfig{Key: secret, Target: *target, Path: *path, SessionTTL: *ttl, MaxSessions: *maxSessions, Options: tunnel.Options{BufferBytes: *buffer, MaxStreams: *maxStreams, Heartbeat: *heartbeat, HeartbeatTimeout: *heartbeatTimeout}})
+	proxy, err := tunnel.NewServer(tunnel.ServerConfig{Key: secret, Password: *password, Target: *target, Path: *path, SessionTTL: *ttl, MaxSessions: *maxSessions, Options: tunnel.Options{BufferBytes: *buffer, MaxStreams: *maxStreams, Heartbeat: *heartbeat, HeartbeatTimeout: *heartbeatTimeout}})
 	if err != nil {
 		log.Fatal(err)
 	}

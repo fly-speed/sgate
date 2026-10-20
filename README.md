@@ -50,13 +50,15 @@ openssl rand -hex 32 > sgate.key
 
 假设应用服务器在服务端机器的 `127.0.0.1:5432` 监听。
 
+两端必须通过 `-password` 配置相同的连接验证密码，下例中的 `your-password` 请替换为自己的密码。密码与 `sgate.key` 是两项独立配置。
+
 服务端：
 
 ```sh
 ./bin/sgate-server \
   -listen :8080 \
   -target 127.0.0.1:5432 \
-  -key-file sgate.key
+  -key-file sgate.key -password 'your-password'
 ```
 
 客户端：
@@ -65,12 +67,20 @@ openssl rand -hex 32 > sgate.key
 ./bin/sgate-client \
   -listen 127.0.0.1:15432 \
   -server ws://SERVER_IP:8080/tunnel \
-  -key-file sgate.key
+  -key-file sgate.key -password 'your-password'
 ```
 
 应用客户端连接 `127.0.0.1:15432` 即可。服务端的目标地址固定在服务端配置中，客户端不指定任意转发目标。多个客户端进程可以共享同一个服务端，各自建立独立会话。
 
 也可以在两端用 `SGATE_KEY` 环境变量传入 64 位十六进制密钥；指定 `-key-file` 时优先使用文件内容。
+
+### HTTP 请求头密码验证
+
+客户端在 HTTP/HTTPS WebSocket 握手请求中发送 `X-Sgate-Password: v1.<Base64URL密文>`。密码使用 `sgate.key` 所指定的 256 位密钥派生独立 AES-256-GCM 密钥后加密，每次握手和重连都生成新的随机 nonce。会话 ID、请求随机数、时间戳、恢复标志和请求 URI 参与认证，密文不能移到另一次握手中使用；请求签名及服务端响应证明也绑定该密文。
+
+服务端在升级为 WebSocket 和分配代理会话之前解密、核对密码。缺失、错误、篡改或重复的密码头均拒绝；当前服务端进程防重放窗口内的握手重放也会被拒绝。拒绝时统一返回 HTTP 404，不创建代理会话或目标 TCP 连接。两端启动时均要求非空密码，最长 1024 字节；密码不会以明文出现在请求头中。普通 HTTP 首页仍可访问。
+
+此版本需同时更新客户端和服务端，并为两端补充 `-password`；旧版仅使用密钥的握手不再接受。
 
 ### TLS
 
@@ -78,13 +88,13 @@ openssl rand -hex 32 > sgate.key
 
 ```sh
 ./bin/sgate-server \
-  -listen :8443 -target 127.0.0.1:5432 -key-file sgate.key \
+  -listen :8443 -target 127.0.0.1:5432 -key-file sgate.key -password 'your-password' \
   -tls-cert server.crt -tls-key server.key
 
 ./bin/sgate-client \
   -listen 127.0.0.1:15432 \
   -server wss://gateway.example.com:8443/tunnel \
-  -key-file sgate.key
+  -key-file sgate.key -password 'your-password'
 ```
 
 私有 CA 可以在客户端加上 `-tls-ca ca.crt`。客户端会校验证书链和服务器名称。
@@ -115,6 +125,7 @@ location /tunnel {
 | 参数 | 默认值 | 含义 |
 | --- | --- | --- |
 | `-key-file` | 无 | 密钥文件；未指定时读取 `SGATE_KEY` |
+| `-password` | 必填 | 连接验证密码，两端保持一致，1～1024 字节 |
 | `-max-streams` | `128` | 每个会话允许的 TCP 流数 |
 | `-buffer-bytes` | `4194304` | 每个方向未确认帧的缓存上限，至少 `16409` 字节 |
 | `-heartbeat` | `20s` | WebSocket 心跳间隔 |
