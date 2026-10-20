@@ -46,7 +46,7 @@ service ssh-server {
 #	进程启动参数，只能为: -u [是否允许以某普通用户的身份运行]
 	master_args = -listen :1088 -target 127.0.0.1:2900 \
 		-key-file /opt/soft/sgate/conf/sgate.key \
-		-password 8ik.%^.lo9&*(MJ
+		-password 8ik.%^.lo9&*(MJ \
 		-tls-cert /opt/soft/nginx/conf/webcool.cn_ecc/fullchain.cer \
 		-tls-key /opt/soft/nginx/conf/webcool.cn_ecc/webcool.cn.key
 	master_home = /opt/soft/sgate/var
