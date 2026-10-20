@@ -48,7 +48,7 @@ service ssh-server {
         -key-file /opt/soft/sgate/conf/sgate.key \
         -password !QAZXSW@.$%^^& \
         -tls-cert /opt/soft/nginx/conf/webcool.cn_ecc/fullchain.cer \
-        -tls-key opt/soft/nginx/conf/webcool.cn_ecc/webcool.cn.key
+        -tls-key /opt/soft/nginx/conf/webcool.cn_ecc/webcool.cn.key
 	master_home = /opt/soft/sgate/var
 #	传递给服务子进程的环境变量, 可以通过 getenv("SERVICE_ENV") 获得此值
 #	master_env = mempool_limit:512000000
