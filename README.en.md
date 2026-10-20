@@ -45,6 +45,12 @@ The client reconnects automatically with exponential backoff and jitter. Both en
 
 The default disconnected-session retention is two minutes (`-session-ttl`). Restarting either process, session expiry, backend disconnects, or application timeouts cannot preserve existing application sockets. On session loss, old application connections close and the client starts a new session for subsequent connections. An ACK confirms forwarding to a TCP socket, not completion of a business transaction.
 
+The client also expires offline connections and replay buffers after two minutes (`-offline-timeout`), even if the network never returns. It keeps retrying with a fresh session. This also bounds application connections accepted before the initial tunnel handshake; a stalled handshake or reconnect backoff cannot extend retention. Healthy online sessions are unaffected. Adjust both client and server retention when extending the recovery window. For silent packet loss, offline retention starts after transport failure is detected, for example by heartbeat timeout.
+
+Both programs expose `-heartbeat` (default `20s`) and `-heartbeat-timeout` (default three heartbeat intervals, or `60s`). Slow payload reads refresh the receive deadline before a whole message completes; local TCP processing does not consume the next read's idle window, and a busy send queue cannot starve probes. Ping replies use the configured write budget. For high-latency links, configure a sufficient receive window on both endpoints, for example `-heartbeat 10s -heartbeat-timeout 90s`. The window must exceed the heartbeat, dial and write budgets and accommodate expected quiet periods, jitter and retransmission delays; exceeding it still triggers reconnection.
+
+Session-expiry HTTP 410 responses must carry a valid server signature. An unsigned 410 from an intermediary triggers a retry without discarding live connections. Upgrade both endpoints together: older servers send unsigned expiry responses that newer clients will reject.
+
 Each direction buffers at most 4 MiB of unacknowledged frames by default (`-buffer-bytes`), then applies TCP backpressure. The default limits are 128 streams per session (`-max-streams`) and 128 retained sessions on the server (`-max-sessions`). Socket buffers and per-stream read buffers consume additional memory. Slow backend writes can temporarily delay other streams in the same session.
 
 Transport messages and controls are encrypted even with `ws://`; HTTP upgrade headers remain visible without TLS. Standard HTTP/WebSocket compatibility does not guarantee resistance to traffic classification. The ordinary HTTP root returns a small page.
@@ -56,4 +62,32 @@ go test -race ./...
 go vet ./...
 ```
 
-Tests cover tampering, replay, authentication failures, multiplexing, half-close, reconnect with a 2 MiB payload on the original backend socket, lost acknowledgements, bounded buffering, expiration, and backend failure.
+Tests cover tampering, replay, authentication failures, multiplexing, half-close, reconnect with a 2 MiB payload on the original backend socket, lost acknowledgements in both directions, eight successive disconnects during independent bidirectional transfers, bounded buffering, blocked producer cancellation after reset, storage release after acknowledgement, session cleanup, expiration, and backend failure.
+
+Recovery tests fill both replay queues, restart the server on the same port, repeat five restarts, simulate silent downstream packet loss and stalled handshakes, and verify that new TCP streams never receive stale data. Run the real two-minute offline window with:
+
+```sh
+SGATE_RECOVERY_LONG=1 go test -race \
+  -run '^TestLongRecoveryDefaultOfflineWindow$' -v -timeout 3m ./internal/tunnel
+```
+
+## Resource stress test
+
+```sh
+make stress
+SGATE_STRESS_DURATION=3m GOMAXPROCS=4 make stress
+SGATE_STRESS=1 GOMAXPROCS=4 go test -race \
+  -run '^TestStressReconnectResources$' -v -timeout 10m ./internal/tunnel
+```
+
+The default workload uses four clients and 64 TCP streams per client, cycling through 12 rounds with 128 KiB exchanges and an injected outage every 30 ms. Each outage blocks reconnects for 10 ms. When a duration is configured, each batch keeps its sockets open for repeated exchanges before half-closing and cycling connections.
+
+`SGATE_STRESS_CLIENTS`, `SGATE_STRESS_STREAMS`, `SGATE_STRESS_ROUNDS`, `SGATE_STRESS_BYTES`, and `SGATE_STRESS_DURATION` control the workload. `make stress` saves JSON samples to `artifacts/stress.json`; override with `SGATE_STRESS_REPORT`. Direct `go test` invocation only saves a report when that variable is set.
+
+Samples include heap, stack, goroutines, file descriptors, accepted TCP connections, retained sessions, replay buffers, and authentication nonce counts. Idle checkpoints force GC and also record RSS (`ps`); macOS descriptor counting uses `lsof`. Runtime pages and race-detector shadow memory can remain resident, so assess RSS trends together with retained heap and resource counts. Nonces expire within a two-minute retention window. Assertions check idle recovery and shutdown cleanup. Concurrent error reports for the same stream produce only one RESET, preventing duplicate notifications from exhausting control work and closing unrelated streams.
+
+## Weak-network tests
+
+Run `make weaknet` for three race-enabled repetitions. A bounded local TCP relay models 150ms one-way delay, ±100ms jitter, 15% delayed segment retransmissions at 200ms, slow payload delivery and short/long blackholes in each direction, including TLS transport coverage. It preserves ordered TCP delivery: synthetic losses delay retransmission rather than remove bytes from a TCP stream. It does not modify NIC or kernel packet-loss rules. Size the receive timeout to include complete TLS record delivery on TLS links.
+
+Checks cover idle heartbeat stability, random byte-for-byte exchanges, exact backend byte counts, half-close tails, resume on the original application socket, expiry and fresh connections. Already-delivered bytes can remain in the old application's receive buffer before EOF/reset. Relay connections, queued bytes, application sockets, replay queues and goroutines must all be released during cleanup.

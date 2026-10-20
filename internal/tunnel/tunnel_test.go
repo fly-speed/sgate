@@ -48,6 +48,11 @@ type fixture struct {
 
 func newFixture(t *testing.T, ttl time.Duration) *fixture {
 	t.Helper()
+	return newFixtureWithBackend(t, ttl, nil)
+}
+
+func newFixtureWithBackend(t *testing.T, ttl time.Duration, handle func(net.Conn)) *fixture {
+	t.Helper()
 	f := &fixture{}
 	var err error
 	f.backend, err = net.Listen("tcp", "127.0.0.1:0")
@@ -70,6 +75,10 @@ func newFixture(t *testing.T, ttl time.Duration) *fixture {
 				defer f.wg.Done()
 				defer c.Close()
 				defer connections.Delete(c)
+				if handle != nil {
+					handle(c)
+					return
+				}
 				buf := make([]byte, 8192)
 				for {
 					n, e := c.Read(buf)

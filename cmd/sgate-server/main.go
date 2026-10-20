@@ -25,6 +25,8 @@ func main() {
 	maxSessions := flag.Int("max-sessions", 128, "maximum retained sessions")
 	maxStreams := flag.Int("max-streams", 128, "maximum TCP streams per session")
 	buffer := flag.Int("buffer-bytes", 4*1024*1024, "unacknowledged bytes per session and direction")
+	heartbeat := flag.Duration("heartbeat", 20*time.Second, "WebSocket heartbeat interval")
+	heartbeatTimeout := flag.Duration("heartbeat-timeout", 0, "receive idle timeout (0 uses three heartbeat intervals)")
 	flag.Parse()
 	secret, err := cli.LoadKey(*keyFile)
 	if err != nil {
@@ -33,7 +35,7 @@ func main() {
 	if (*cert == "") != (*key == "") {
 		log.Fatal("both -tls-cert and -tls-key are required for TLS")
 	}
-	proxy, err := tunnel.NewServer(tunnel.ServerConfig{Key: secret, Target: *target, Path: *path, SessionTTL: *ttl, MaxSessions: *maxSessions, Options: tunnel.Options{BufferBytes: *buffer, MaxStreams: *maxStreams}})
+	proxy, err := tunnel.NewServer(tunnel.ServerConfig{Key: secret, Target: *target, Path: *path, SessionTTL: *ttl, MaxSessions: *maxSessions, Options: tunnel.Options{BufferBytes: *buffer, MaxStreams: *maxStreams, Heartbeat: *heartbeat, HeartbeatTimeout: *heartbeatTimeout}})
 	if err != nil {
 		log.Fatal(err)
 	}

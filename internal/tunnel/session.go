@@ -24,6 +24,7 @@ const (
 )
 
 var errSessionClosed = errors.New("session closed")
+var errStreamClosed = errors.New("stream closed")
 
 type frame struct {
 	op               byte
@@ -77,6 +78,7 @@ func newSession(parent context.Context, target string, opts Options) *session {
 	ctx, cancel := context.WithCancel(parent)
 	s := &session{ctx: ctx, cancel: cancel, target: target, opts: opts, changed: make(chan struct{}), resets: make(chan uint64, opts.MaxStreams), streams: make(map[uint64]*stream)}
 	go func() {
+		defer s.close()
 		for {
 			select {
 			case <-ctx.Done():
@@ -111,12 +113,22 @@ func (s *session) close() {
 	s.signalLocked()
 }
 func (s *session) enqueue(op byte, id uint64, data []byte) error {
+	return s.enqueueStream(op, id, data, nil)
+}
+
+// A producer belongs to a particular stream. Resetting that stream must wake
+// blocked producers without waiting for unrelated traffic to be acknowledged.
+func (s *session) enqueueStream(op byte, id uint64, data []byte, st *stream) error {
 	cost := len(data) + frameHeader
 	for {
 		s.mu.Lock()
-		if s.closed {
+		if s.closed || s.ctx.Err() != nil {
 			s.mu.Unlock()
 			return errSessionClosed
+		}
+		if st != nil && s.streams[id] != st {
+			s.mu.Unlock()
+			return errStreamClosed
 		}
 		if s.pendingBytes+cost <= s.opts.BufferBytes {
 			s.next++
@@ -135,16 +147,27 @@ func (s *session) enqueue(op byte, id uint64, data []byte) error {
 		}
 	}
 }
-func (s *session) drop(id uint64) {
+func (s *session) drop(id uint64) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if st := s.streams[id]; st != nil {
 		st.conn.Close()
 		delete(s.streams, id)
+		s.signalLocked()
+		return true
 	}
+	return false
 }
 func (s *session) reset(id uint64) {
-	s.drop(id)
+	// Reader and writer failures can race. Only the caller that removes the
+	// live stream may queue a RESET; duplicates must not exhaust control work.
+	if !s.drop(id) {
+		return
+	}
+	s.enqueueReset(id)
+}
+
+func (s *session) enqueueReset(id uint64) {
 	// A full retransmission buffer must never block the transport reader's ACK processing.
 	select {
 	case s.resets <- id:
@@ -171,18 +194,21 @@ func (s *session) halfDone(id uint64, read bool) {
 		delete(s.streams, id)
 	}
 }
-func (s *session) readStream(id uint64, c net.Conn) {
+func (s *session) readStream(id uint64, st *stream) {
+	c := st.conn
 	buf := make([]byte, chunkSize)
 	for {
 		n, err := c.Read(buf)
 		if n > 0 {
-			if s.enqueue(opData, id, buf[:n]) != nil {
+			if s.enqueueStream(opData, id, buf[:n], st) != nil {
 				return
 			}
 		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				_ = s.enqueue(opFin, id, nil)
+				if s.enqueueStream(opFin, id, nil, st) != nil {
+					return
+				}
 				s.halfDone(id, true)
 			} else {
 				s.mu.Lock()
@@ -198,20 +224,21 @@ func (s *session) readStream(id uint64, c net.Conn) {
 }
 func (s *session) addLocal(c net.Conn) error {
 	s.mu.Lock()
-	if s.closed || len(s.streams) >= s.opts.MaxStreams {
+	if s.closed || s.ctx.Err() != nil || len(s.streams) >= s.opts.MaxStreams {
 		s.mu.Unlock()
 		c.Close()
 		return errors.New("session closed or stream limit reached")
 	}
 	s.nextStream++
 	id := s.nextStream
-	s.streams[id] = &stream{conn: c}
+	st := &stream{conn: c}
+	s.streams[id] = st
 	s.mu.Unlock()
-	if err := s.enqueue(opOpen, id, nil); err != nil {
+	if err := s.enqueueStream(opOpen, id, nil, st); err != nil {
 		s.drop(id)
 		return err
 	}
-	go s.readStream(id, c)
+	go s.readStream(id, st)
 	return nil
 }
 func (s *session) apply(f frame) error {
@@ -228,12 +255,12 @@ func (s *session) apply(f frame) error {
 		full := len(s.streams) >= s.opts.MaxStreams
 		s.mu.Unlock()
 		if full {
-			s.reset(f.stream)
+			s.enqueueReset(f.stream)
 			return nil
 		}
 		c, err := (&net.Dialer{Timeout: s.opts.DialTimeout, KeepAlive: 30 * time.Second}).DialContext(s.ctx, "tcp", s.target)
 		if err != nil {
-			s.reset(f.stream)
+			s.enqueueReset(f.stream)
 			return nil
 		}
 		s.mu.Lock()
@@ -242,9 +269,10 @@ func (s *session) apply(f frame) error {
 			c.Close()
 			return errSessionClosed
 		}
-		s.streams[f.stream] = &stream{conn: c}
+		st := &stream{conn: c}
+		s.streams[f.stream] = st
 		s.mu.Unlock()
-		go s.readStream(f.stream, c)
+		go s.readStream(f.stream, st)
 		return nil
 	}
 	s.mu.Lock()
@@ -271,7 +299,10 @@ func (s *session) apply(f frame) error {
 		_ = st.conn.SetWriteDeadline(time.Time{})
 	case opFin:
 		if c, ok := st.conn.(interface{ CloseWrite() error }); ok {
-			_ = c.CloseWrite()
+			if err := c.CloseWrite(); err != nil {
+				s.reset(f.stream)
+				return nil
+			}
 		} else {
 			s.reset(f.stream)
 			return nil
@@ -295,7 +326,11 @@ func (s *session) acknowledge(ack uint64) error {
 		n++
 	}
 	if n > 0 {
-		s.pending = s.pending[n:]
+		if n == len(s.pending) {
+			s.pending = nil
+		} else {
+			s.pending = s.pending[n:]
+		}
 		s.signalLocked()
 	}
 	return nil
@@ -322,21 +357,26 @@ func (s *session) transport(ws *websocket.Conn, crypt *codec) error {
 		s.mu.Unlock()
 	}()
 	ws.SetReadLimit(frameHeader + chunkSize + 24)
-	_ = ws.SetReadDeadline(time.Now().Add(s.opts.Heartbeat * 3))
-	ws.SetPongHandler(func(string) error { return ws.SetReadDeadline(time.Now().Add(s.opts.Heartbeat * 3)) })
+	touch := func() error { return ws.SetReadDeadline(time.Now().Add(s.opts.HeartbeatTimeout)) }
+	ws.SetPongHandler(func(string) error { return touch() })
+	ws.SetPingHandler(func(data string) error {
+		// Use the configured write budget rather than the library's one-second default.
+		if err := ws.WriteControl(websocket.PongMessage, []byte(data), time.Now().Add(s.opts.WriteTimeout)); err != nil {
+			return err
+		}
+		return touch()
+	})
 	done := make(chan struct{})
 	writerDone := make(chan error, 1)
 	go func() { err := s.writeTransport(ws, crypt, done); ws.Close(); writerDone <- err }()
 	err := func() error {
 		for {
-			typ, p, err := ws.ReadMessage()
+			// Local TCP work and a large, slowly arriving frame must not consume the
+			// next read's idle budget. Refresh on each payload read, not just per message.
+			p, err := readTransportMessage(ws, touch)
 			if err != nil {
 				return err
 			}
-			if typ != websocket.BinaryMessage {
-				return errors.New("expected binary WebSocket message")
-			}
-			_ = ws.SetReadDeadline(time.Now().Add(s.opts.Heartbeat * 3))
 			p, err = crypt.open(p)
 			if err != nil {
 				return fmt.Errorf("decrypt: %w", err)
@@ -377,12 +417,50 @@ func (s *session) transport(ws *websocket.Conn, crypt *codec) error {
 	<-writerDone
 	return err
 }
+
+type progressReader struct {
+	io.Reader
+	touch func() error
+}
+
+func (r progressReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if n > 0 {
+		if touchErr := r.touch(); err == nil {
+			err = touchErr
+		}
+	}
+	return n, err
+}
+
+func readTransportMessage(ws *websocket.Conn, touch func() error) ([]byte, error) {
+	if err := touch(); err != nil {
+		return nil, err
+	}
+	typ, reader, err := ws.NextReader()
+	if err != nil {
+		return nil, err
+	}
+	if typ != websocket.BinaryMessage {
+		return nil, errors.New("expected binary WebSocket message")
+	}
+	return io.ReadAll(progressReader{Reader: reader, touch: touch})
+}
+
 func (s *session) writeTransport(ws *websocket.Conn, crypt *codec, done <-chan struct{}) error {
 	ticker := time.NewTicker(s.opts.Heartbeat)
 	defer ticker.Stop()
 	var sent uint64
 	lastAck := ^uint64(0) // Send a resume ACK even when neither side has pending data.
 	for {
+		// A busy data/ACK queue must not starve heartbeat probes.
+		select {
+		case <-ticker.C:
+			if err := ws.WriteControl(websocket.PingMessage, nil, time.Now().Add(s.opts.WriteTimeout)); err != nil {
+				return err
+			}
+		default:
+		}
 		s.mu.Lock()
 		ack := s.received
 		var next frame

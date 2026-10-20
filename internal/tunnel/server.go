@@ -81,6 +81,7 @@ func (s *Server) Close() {
 		e.session.close()
 	}
 	s.sessions = make(map[string]*serverEntry)
+	s.nonces = nil
 }
 func (s *Server) reapLocked(now time.Time) {
 	for id, e := range s.sessions {
@@ -167,6 +168,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if e == nil {
 		if resume == "1" {
 			s.mu.Unlock()
+			serverNonce := randomID()
+			w.Header().Set("X-Sgate-Nonce", serverNonce)
+			w.Header().Set("X-Sgate-Auth", mac(s.cfg.Key, protocol, "gone", id, nonce, serverNonce, ts))
 			http.Error(w, "session expired", http.StatusGone)
 			return
 		}

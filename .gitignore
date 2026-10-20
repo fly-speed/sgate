@@ -17,3 +17,4 @@
 # Local builds and credentials
 /bin/
 /sgate.key
+/artifacts/

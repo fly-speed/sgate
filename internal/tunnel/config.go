@@ -8,12 +8,13 @@ import (
 )
 
 type Options struct {
-	BufferBytes  int
-	MaxStreams   int
-	DialTimeout  time.Duration
-	WriteTimeout time.Duration
-	Heartbeat    time.Duration
-	Logf         func(string, ...any)
+	BufferBytes      int
+	MaxStreams       int
+	DialTimeout      time.Duration
+	WriteTimeout     time.Duration
+	Heartbeat        time.Duration
+	HeartbeatTimeout time.Duration
+	Logf             func(string, ...any)
 }
 
 func (o Options) defaults() (Options, error) {
@@ -38,9 +39,15 @@ func (o Options) defaults() (Options, error) {
 	if o.BufferBytes < chunkSize+frameHeader || o.MaxStreams < 1 || o.DialTimeout <= 0 || o.WriteTimeout <= 0 || o.Heartbeat <= 0 {
 		return o, errors.New("invalid buffer, stream limit, or timeout")
 	}
-	// A TCP dial or write may temporarily occupy the receive loop.
-	if o.Heartbeat*3 <= o.DialTimeout || o.Heartbeat*3 <= o.WriteTimeout {
-		return o, errors.New("three heartbeat intervals must exceed dial and write timeouts")
+	if o.HeartbeatTimeout == 0 {
+		if o.Heartbeat > time.Duration(1<<63-1)/3 {
+			return o, errors.New("heartbeat interval is too large")
+		}
+		o.HeartbeatTimeout = o.Heartbeat * 3
+	}
+	// Leave enough time for both periodic probes and local TCP work.
+	if o.HeartbeatTimeout <= o.Heartbeat || o.HeartbeatTimeout <= o.DialTimeout || o.HeartbeatTimeout <= o.WriteTimeout {
+		return o, errors.New("heartbeat timeout must exceed heartbeat interval, dial timeout and write timeout")
 	}
 	return o, nil
 }

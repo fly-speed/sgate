@@ -18,12 +18,13 @@ import (
 )
 
 type ClientConfig struct {
-	Key          []byte
-	URL          string
-	ReconnectMin time.Duration
-	ReconnectMax time.Duration
-	TLSConfig    *tls.Config
-	Options      Options
+	Key            []byte
+	URL            string
+	ReconnectMin   time.Duration
+	ReconnectMax   time.Duration
+	OfflineTimeout time.Duration
+	TLSConfig      *tls.Config
+	Options        Options
 }
 type Client struct{ cfg ClientConfig }
 
@@ -43,6 +44,12 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	}
 	if cfg.ReconnectMin <= 0 || cfg.ReconnectMax < cfg.ReconnectMin {
 		return nil, errors.New("invalid reconnect interval")
+	}
+	if cfg.OfflineTimeout == 0 {
+		cfg.OfflineTimeout = 2 * time.Minute
+	}
+	if cfg.OfflineTimeout < 0 {
+		return nil, errors.New("offline timeout must be positive")
 	}
 	cfg.Options, err = cfg.Options.defaults()
 	if err != nil {
@@ -75,6 +82,13 @@ func (c *Client) dial(ctx context.Context, id string, resume bool) (*websocket.C
 		if response != nil {
 			status = response.StatusCode
 			response.Body.Close()
+			if status == http.StatusGone {
+				serverNonce := response.Header.Get("X-Sgate-Nonce")
+				expected := mac(c.cfg.Key, protocol, "gone", id, nonce, serverNonce, ts)
+				if !validID(serverNonce) || !hmac.Equal([]byte(expected), []byte(response.Header.Get("X-Sgate-Auth"))) {
+					return nil, nil, 0, errors.New("unauthenticated session expiry response")
+				}
+			}
 		}
 		return nil, nil, status, err
 	}
@@ -90,10 +104,22 @@ func (c *Client) dial(ctx context.Context, id string, resume bool) (*websocket.C
 // Run owns listener until ctx is canceled. Existing TCP streams survive transport
 // failure while the server retains its session and the target keeps its socket open.
 func (c *Client) Run(ctx context.Context, listener net.Listener) error {
+	return c.run(ctx, listener, &clientSessions{})
+}
+
+// clientSessions serializes listener admission with session replacement.
+type clientSessions struct {
+	mu      sync.Mutex
+	current *session
+}
+
+func (c *Client) run(ctx context.Context, listener net.Listener, state *clientSessions) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	var mu sync.Mutex
-	current := newSession(ctx, "", c.cfg.Options)
+	mu := &state.mu
+	mu.Lock()
+	state.current = newSession(ctx, "", c.cfg.Options)
+	mu.Unlock()
 	acceptErr := make(chan error, 1)
 	acceptDone := make(chan struct{})
 	go func() {
@@ -106,7 +132,7 @@ func (c *Client) Run(ctx context.Context, listener net.Listener) error {
 				return
 			}
 			mu.Lock()
-			s := current
+			s := state.current
 			mu.Unlock()
 			if err = s.addLocal(conn); err != nil {
 				c.cfg.Options.Logf("TCP connection rejected: %v", err)
@@ -118,37 +144,57 @@ func (c *Client) Run(ctx context.Context, listener net.Listener) error {
 		<-ctx.Done()
 		listener.Close()
 		mu.Lock()
-		current.close()
+		state.current.close()
 		mu.Unlock()
 		close(shutdownDone)
 	}()
-	defer func() { cancel(); <-shutdownDone; <-acceptDone }()
+	defer func() {
+		cancel()
+		<-shutdownDone
+		// No more replacements are possible once the run loop has returned.
+		mu.Lock()
+		state.current.close()
+		mu.Unlock()
+		<-acceptDone
+	}()
 	id := randomID()
 	resume := false
 	backoff := c.cfg.ReconnectMin
+	offlineSince := time.Now()
 	for ctx.Err() == nil {
-		current.mu.Lock()
-		closed := current.closed
-		current.mu.Unlock()
-		if closed {
+		state.current.mu.Lock()
+		closed := state.current.closed
+		state.current.mu.Unlock()
+		expired := time.Since(offlineSince) >= c.cfg.OfflineTimeout
+		if closed || expired {
 			if ctx.Err() != nil {
 				break
 			}
 			mu.Lock()
-			current = newSession(ctx, "", c.cfg.Options)
+			state.current.close()
+			state.current = newSession(ctx, "", c.cfg.Options)
 			mu.Unlock()
 			id, resume = randomID(), false
+			offlineSince = time.Now()
+			backoff = c.cfg.ReconnectMin
+			if expired {
+				c.cfg.Options.Logf("offline timeout; existing TCP connections and replay buffer released")
+			}
 		}
-		ws, crypt, status, err := c.dial(ctx, id, resume)
+		// A stalled HTTP/TLS handshake must not extend offline retention.
+		dialCtx, cancelDial := context.WithDeadline(ctx, offlineSince.Add(c.cfg.OfflineTimeout))
+		ws, crypt, status, err := c.dial(dialCtx, id, resume)
+		cancelDial()
 		if status == http.StatusGone && resume {
 			// A server restart/expired session cannot preserve the backend TCP sockets.
 			mu.Lock()
-			current.close()
-			current = newSession(ctx, "", c.cfg.Options)
+			state.current.close()
+			state.current = newSession(ctx, "", c.cfg.Options)
 			mu.Unlock()
 			id = randomID()
 			resume = false
 			backoff = c.cfg.ReconnectMin
+			offlineSince = time.Now()
 			c.cfg.Options.Logf("server session lost; existing TCP connections closed")
 			continue
 		}
@@ -156,12 +202,16 @@ func (c *Client) Run(ctx context.Context, listener net.Listener) error {
 			resume = true
 			backoff = c.cfg.ReconnectMin
 			c.cfg.Options.Logf("tunnel connected")
-			err = current.transport(ws, crypt)
+			err = state.current.transport(ws, crypt)
+			offlineSince = time.Now()
 		}
 		if ctx.Err() != nil {
 			break
 		}
 		delay := backoff/2 + time.Duration(rand.Int64N(int64(backoff/2)+1))
+		if remaining := time.Until(offlineSince.Add(c.cfg.OfflineTimeout)); delay > remaining {
+			delay = max(remaining, 0)
+		}
 		c.cfg.Options.Logf("tunnel unavailable: %v; retry in %s", err, delay)
 		timer := time.NewTimer(delay)
 		select {

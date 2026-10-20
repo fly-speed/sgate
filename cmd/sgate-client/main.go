@@ -23,8 +23,11 @@ func main() {
 	ca := flag.String("tls-ca", "", "additional trusted CA PEM file")
 	minRetry := flag.Duration("reconnect-min", 250*time.Millisecond, "minimum reconnect interval")
 	maxRetry := flag.Duration("reconnect-max", 10*time.Second, "maximum reconnect interval")
+	offlineTimeout := flag.Duration("offline-timeout", 2*time.Minute, "retain application sockets and replay buffer while offline")
 	maxStreams := flag.Int("max-streams", 128, "maximum simultaneous TCP streams")
 	buffer := flag.Int("buffer-bytes", 4*1024*1024, "unacknowledged bytes per session and direction")
+	heartbeat := flag.Duration("heartbeat", 20*time.Second, "WebSocket heartbeat interval")
+	heartbeatTimeout := flag.Duration("heartbeat-timeout", 0, "receive idle timeout (0 uses three heartbeat intervals)")
 	flag.Parse()
 	secret, err := cli.LoadKey(*keyFile)
 	if err != nil {
@@ -45,7 +48,7 @@ func main() {
 		}
 		tlsConfig.RootCAs = roots
 	}
-	client, err := tunnel.NewClient(tunnel.ClientConfig{Key: secret, URL: *server, TLSConfig: tlsConfig, ReconnectMin: *minRetry, ReconnectMax: *maxRetry, Options: tunnel.Options{BufferBytes: *buffer, MaxStreams: *maxStreams}})
+	client, err := tunnel.NewClient(tunnel.ClientConfig{Key: secret, URL: *server, TLSConfig: tlsConfig, ReconnectMin: *minRetry, ReconnectMax: *maxRetry, OfflineTimeout: *offlineTimeout, Options: tunnel.Options{BufferBytes: *buffer, MaxStreams: *maxStreams, Heartbeat: *heartbeat, HeartbeatTimeout: *heartbeatTimeout}})
 	if err != nil {
 		log.Fatal(err)
 	}
