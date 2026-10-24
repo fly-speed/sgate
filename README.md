@@ -20,6 +20,79 @@ Go 编写的通用 TCP 加密通道。客户端和服务端使用标准 HTTP Upg
 - 普通 `GET /` 返回 HTTP 页面；未通过鉴权的通道访问返回 404。
 - 支持 `ws://`、`wss://`、TLS 自定义 CA、HTTP 反向代理及正常退出。
 
+## acl_master 托管
+
+客户端接入 [go-service](https://github.com/acl-dev/go-service) 的 TCP 服务模板描述符接口；服务端接入 [gin-service](https://github.com/acl-dev/gin-service) 的 Gin 服务路由。两端识别 acl_master 注入的 `-f`、`-n`、`-t`、`-s` 等参数，继承状态通道 FD 5 和从 FD 6 起的监听套接字，支持多个监听地址共享一个代理实例。服务端在继承的监听上执行 TLS/WSS，证书仍由应用配置的 `tls-cert`、`tls-key` 指定。未提供框架参数时保持直接运行方式，也可显式使用 `-alone`。
+
+这里使用模板的配置/监听继承接口和 Gin 服务结构，由 sgate 管理可取消的停止通知及 HTTP/TLS 生命周期。这样可以在停止时关闭已升级的 WebSocket、释放 TCP 流和重放缓存，并在 Web 界面应用新配置时复用框架持有的端口；不依赖模板的全局 `Run/Wait/Stop` 循环。客户端构建只依赖 TCP 模板，Gin 依赖仅由服务端引入。
+
+与两个模板示例一样，手工启动可显式加 `-alone`，客户端和服务端使用相同方式：
+
+```sh
+./bin/sgate-client -alone -config conf/ssh-client.conf
+./bin/sgate-server -alone -config conf/ssh-server.conf
+```
+
+原有不带 `-alone` 的直接启动命令继续可用；也可以不提供 `-config`，全部通过命令行指定应用参数。需要 Web 管理时再加 `-admin-config`，并提供要管理的 `-config`。在 acl_master 下启动时，`master_args` 保持 `-config /opt/soft/sgate/conf/ssh-client.conf` 或对应服务端配置，**不要加 `-alone`**；框架自动注入监听描述符及控制参数。
+
+仓库根目录的 `ssh-client.cf`、`vpn-client.cf`、`web-client.cf`、`ssh-server.cf`、`vpn-server.cf` 已改为 `master_type = sock`，`master_service` 对应各自应用配置原有的监听地址。`master_args` 继续仅通过 `-config` 指定应用配置。VPN/Web 客户端服务名也已分别校正，注释统一为 UTF-8。两端 `.conf` 的地址、代理密码和证书内容不因本次接入修改。
+
+托管配置须设置：
+
+```ini
+master_type = sock
+master_maxproc = 1
+master_prefork = 1
+master_reuseport = no
+master_status_notify = 0
+master_unpriv = n
+master_chroot = n
+master_stop_kill = false
+master_stop_wait = true
+```
+
+会话和重放状态属于单个进程，因此限制为一个工作进程；不支持把同一个隧道会话分配给多个独立工作进程。监听端口由 `master_service` 决定，应用 `listen` 和 `-listen` 不会重新绑定或覆盖继承端口；其它应用参数仍按“命令行高于配置文件”处理。工作目录由 `.cf` 的 `master_home` 决定，业务相对路径按这个目录解析，管理配置的存储、静态目录及证书路径继续相对管理配置文件解析。运行身份由 acl_master/服务账户设置；模板内再次降权和 chroot 模式会明确拒绝。
+
+启用 Web 管理后，可以继续校验、保存并重启代理，PID 和实际监听端口保持不变，登录会话及本进程累计带宽保持有效。界面会显示监听由 acl_master 管理；若应用新配置尝试修改有效 `listen`，会拒绝并还原本次保存。更换监听地址请修改 `.cf` 的 `master_service`，再通过 `master_ctl` 停止并重新启动该服务。框架停止、重启和 Web 代理重启都会中断当前业务连接，恢复后可以建立新连接。
+
+从旧的 `master_type = none` 配置迁移时，先用旧配置停止服务，再安装新程序、应用配置和 `.cf`，最后启动，避免旧进程占用新框架要监听的端口。例如：
+
+```sh
+/opt/soft/acl-master/bin/master_ctl -f /opt/soft/acl-master/conf/service/ssh-client.cf -a stop
+# 安装 bin/sgate-client、ssh-client.cf 及对应应用/管理配置和 web/ 文件
+/opt/soft/acl-master/bin/master_ctl -f /opt/soft/acl-master/conf/service/ssh-client.cf -a start
+/opt/soft/acl-master/bin/master_ctl -a list
+```
+
+隔离框架集成测试（需要已安装的 acl_master 和 master_ctl）：
+
+```sh
+make build
+python3 scripts/test-acl-master.py --client bin/sgate-client --server bin/sgate-server --output artifacts/acl-master-test
+```
+
+该测试创建独立临时框架、Unix 管理套接字和随机回环端口，覆盖 WS/WSS、HTTP/HTTPS 管理、每端两个监听、32 路完整性校验、Web 应用、登录持久化和 `master_ctl` 启停/重启。不会载入现有 `/opt/soft/acl-master/conf/service`；`--master`、`--ctl` 可指定其它安装路径，`--client`、`--server` 可指向竞态构建。
+
+托管压力测试需使用带诊断采样的临时构建，采样代码通过 Go overlay 注入，不进入生产二进制：
+
+```sh
+python3 scripts/build-config-soak.py --managed --output artifacts/acl-stress/plain
+python3 scripts/test-acl-master.py --stress --concurrency 128 --rounds 6 \
+  --client artifacts/acl-stress/plain/sgate-client \
+  --server artifacts/acl-stress/plain/sgate-server --output artifacts/acl-stress/plain-results
+```
+
+带竞态检测时在构建命令添加 `--race`，测试指向生成的 `sgate-client-race`、`sgate-server-race`。压力测试使用默认重连退避，双端开启 10～30ms 随机间隔、128～512 字节随机白噪音，每轮在 128 路流传输中切断隧道，并交替重启客户端、服务端框架进程。隧道断线检查原业务连接续传完整性；进程重启检查旧连接结束、已有登录会话可继续使用、新连接传输正常。旧服务端会话按测试配置的 20 秒窗口保留，到期后检查释放。输出含空闲阶段内存、协程、描述符及会话/缓存采样，退出时要求会话、流、缓存和传输写协程归零，并检查子进程退出和端口可重新绑定。
+
+退出诊断最多等待 5 秒让异步关闭的协程收尾，并保存 `.metrics.closed-<pid>.stack`；避免将关闭套接字瞬间尚未调度退出的读协程误判为持续泄漏。采样未能按时收敛或旧进程未退出，测试仍会失败。
+
+独立启动回归测试同时覆盖两端的纯命令行、显式 `-alone`、配置文件及命令行覆盖，以及 WS/WSS 双向传输和退出后端口释放：
+
+```sh
+SGATE_ADMIN_CLIENT_BINARY="$PWD/bin/sgate-client" SGATE_ADMIN_SERVER_BINARY="$PWD/bin/sgate-server" \
+  go test ./internal/app -run '^TestStandaloneStartModesBinaries$' -v -count=1 -timeout=2m
+```
+
 ## Web 管理界面
 
 客户端与服务端均提供独立的管理工作台，包含实时发送/接收速率、累计流量、曲线、通道 TCP 连接数、配置编辑及账号管理。默认关闭，通过 `-admin-config` 启用；必须同时提供 `-config`，以明确要管理的代理配置文件。先将应用配置中的地址、密钥、代理密码填写正确：

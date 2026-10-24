@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"sgate/internal/aclgin"
+	"sgate/internal/aclservice"
 	"sgate/internal/app"
 	"sgate/internal/cli"
 	"sgate/internal/tunnel"
@@ -37,6 +39,14 @@ func main() {
 	noiseMax := flag.Int("noise-max-bytes", 10*1024, "maximum random padding payload bytes (up to 16384)")
 	if err := cli.Parse(flag.CommandLine, os.Args[1:]); err != nil {
 		log.Fatal(err)
+	}
+	if aclservice.Enabled() {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		if err := app.RunACL(ctx, "server", flag.CommandLine, os.Args[1:], *adminConfig, aclgin.HTTPHandler); err != nil {
+			log.Fatal(err)
+		}
+		return
 	}
 	if *adminConfig != "" {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

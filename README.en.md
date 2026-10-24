@@ -4,6 +4,52 @@ A Go TCP tunnel with two executables. `sgate-client` accepts local TCP connectio
 
 See [the Chinese documentation](README.md) for all options, protocol details, and reverse proxy configuration.
 
+## acl_master integration
+
+The client uses the [go-service](https://github.com/acl-dev/go-service) TCP descriptor APIs; the server uses the [gin-service](https://github.com/acl-dev/gin-service) routing structure with TLS/WSS on inherited listeners. Framework arguments (`-f`, `-n`, `-t`, `-s`) select managed operation, using status FD 5 and listening FDs starting at 6. Direct invocation remains supported, including explicit `-alone`. Gin is only imported by the server executable.
+
+sgate owns cancellable shutdown and HTTP/TLS serving around these template APIs so upgraded WebSockets are explicitly closed and Web management can restart workers without closing framework sockets. This avoids the upstream global Run/Wait/Stop loops. Each process may inherit multiple listening sockets, sharing one proxy instance.
+
+Like the template examples, both programs support explicit standalone startup:
+
+```sh
+./bin/sgate-client -alone -config conf/ssh-client.conf
+./bin/sgate-server -alone -config conf/ssh-server.conf
+```
+
+Existing direct commands without `-alone` remain valid. Without Web management, `-config` is optional and all application options may be passed on the command line. Web management requires both `-config` and `-admin-config`. Under acl_master, keep `master_args = -config /opt/soft/sgate/conf/ssh-client.conf` (or the server configuration) and omit `-alone`; the framework supplies control arguments and listening descriptors.
+
+The five root application `.cf` files now use `master_type = sock` with addresses taken from their existing application configurations. Keep `master_maxproc = 1`, `master_prefork = 1`, `master_reuseport = no`, `master_status_notify = 0`, `master_unpriv = n`, and `master_chroot = n`. Set `master_stop_kill = false` and `master_stop_wait = true` for status-channel shutdown. Credentials, certificates and application addresses are preserved. Process identity is established by acl_master or the service account; in-template privilege changes/chroot are rejected.
+
+`master_service` owns the effective listening addresses, including precedence over application `listen`/`-listen`. Other CLI overrides still win over file values. Web apply keeps the process PID, management login and byte counters while replacing the proxy worker. Changing the effective application listen address is rejected with file rollback; change `master_service` and stop/start the service to change ports. Both framework and Web proxy restarts interrupt existing business connections. Relative application paths use `master_home`; management paths remain relative to the management configuration.
+
+When migrating from `master_type = none`, stop the old service first, install the new executable/configuration, then start through `master_ctl`. The integration test below runs an isolated framework with random loopback ports and never loads installed production service configurations:
+
+```sh
+make build
+python3 scripts/test-acl-master.py --client bin/sgate-client --server bin/sgate-server --output artifacts/acl-master-test
+```
+
+Use `--master` and `--ctl` for other framework installations. The same test accepts race-instrumented binaries and covers WS/WSS, HTTP/HTTPS management, two listeners per role, 32-stream integrity, Web apply, persistent login and framework stop/start/restart.
+
+For managed stress testing, build disposable diagnostic binaries through Go overlays:
+
+```sh
+python3 scripts/build-config-soak.py --managed --output artifacts/acl-stress/plain
+python3 scripts/test-acl-master.py --stress --concurrency 128 --rounds 6 \
+  --client artifacts/acl-stress/plain/sgate-client \
+  --server artifacts/acl-stress/plain/sgate-server --output artifacts/acl-stress/plain-results
+```
+
+Add `--race` when building and point the test at the generated `-race` binaries for race detection. Each WS/WSS case uses default reconnect backoff, random padding (10–30ms, 128–512 bytes), 128 concurrent streams and alternating client/server framework restarts. Transport interruptions must preserve stream bytes; process restarts close old streams and must preserve login sessions and allow fresh streams. The test waits for the configured 20-second old-session retention window before checking release, records idle memory/goroutine/descriptor/cache samples, and checks shutdown censuses, child exits and port rebinding. Diagnostic sampling is absent from production binaries.
+
+The standalone regression checks both executables with CLI-only options, explicit `-alone`, configuration files and CLI overrides, including WS/WSS integrity and listener release:
+
+```sh
+SGATE_ADMIN_CLIENT_BINARY="$PWD/bin/sgate-client" SGATE_ADMIN_SERVER_BINARY="$PWD/bin/sgate-server" \
+  go test ./internal/app -run '^TestStandaloneStartModesBinaries$' -v -count=1 -timeout=2m
+```
+
 ## Web management
 
 Both programs support an independent, optional management listener. Enable it alongside the application file being managed:

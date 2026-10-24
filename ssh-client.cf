@@ -1,58 +1,63 @@
 service ssh-client {
-#	½ø³ÌÊÇ·ñ½ûÖ¹ÔËĞĞ
+#	è¿›ç¨‹æ˜¯å¦ç¦æ­¢è¿è¡Œ
 	master_disable = no
-#	·şÎñµØÖ·¼°¶Ë¿ÚºÅ
-	master_service = none
+#	æœåŠ¡åœ°å€åŠç«¯å£å·
+	master_service = 127.0.0.1|2022
 
-#	·şÎñÀàĞÍ
-	master_type = none
-	master_version = -v
+#	æœåŠ¡ç±»å‹
+	master_type = sock
+# acl_master æŒæœ‰ç›‘å¬ç«¯å£ï¼ŒGo æœåŠ¡ç»§æ‰¿å¥—æ¥å­—ï¼›ç®¡ç†ç•Œé¢é‡å¯ä»…æ›¿æ¢ä»£ç†å·¥ä½œå®ä¾‹ã€‚
+	master_reuseport = no
+	master_stop_kill = false
+	master_stop_wait = true
+
+
 	master_check_fds = true
 	master_check_mem = true
 	master_check_cpu = true
 	master_check_io  = true
 	master_check_limit = true
 
-#	µ±×Ó½ø³ÌÒì³£ÍË³öÊ±£¬Èç¹û¸ÃÖµ·Ç¿Õ£¬Ôò½«×Ó½ø³ÌÒì³£ÍË³öµÄÏûÏ¢Í¨Öª¸Ã·şÎñ
+#	å½“å­è¿›ç¨‹å¼‚å¸¸é€€å‡ºæ—¶ï¼Œå¦‚æœè¯¥å€¼éç©ºï¼Œåˆ™å°†å­è¿›ç¨‹å¼‚å¸¸é€€å‡ºçš„æ¶ˆæ¯é€šçŸ¥è¯¥æœåŠ¡
 	master_notify_addr = /opt/soft/acl-master/var/public/monitor.sock
-#	ÓÊ¼şÍ¨Öª½ÓÊÕÕß
+#	é‚®ä»¶é€šçŸ¥æ¥æ”¶è€…
 	master_notify_recipients = zhengshuxin@hotmail.com
 
-#	ÊÇ·ñÔÊĞíÑÓ³Ù½ÓÊÜ¿Í»§¶ËÁ¬½Ó£¬Èç¹ûÎª0Ôò±íÊ¾¹Ø±Õ¸Ã¹¦ÄÜ£¬Èç¹û´óÓÚ0Ôò±íÊ¾´ò¿ª´Ë¹¦ÄÜ
-#	²¢ÇÒ´ËÖµ´ú±íÑÓ³Ù½ÓÊÜÁ¬½ÓµÄ³¬Ê±Öµ£¬³¬¹ı´ËÖµÊ±Èç¹û¿Í»§¶ËÒÀÈ»Ã»ÓĞ·¢À´Êı¾İ£¬Ôò²Ù×÷
-#	ÏµÍ³»áÔÚÏµÍ³²ãÖ±½Ó¹Ø±Õ¸ÃÁ¬½Ó
+#	æ˜¯å¦å…è®¸å»¶è¿Ÿæ¥å—å®¢æˆ·ç«¯è¿æ¥ï¼Œå¦‚æœä¸º0åˆ™è¡¨ç¤ºå…³é—­è¯¥åŠŸèƒ½ï¼Œå¦‚æœå¤§äº0åˆ™è¡¨ç¤ºæ‰“å¼€æ­¤åŠŸèƒ½
+#	å¹¶ä¸”æ­¤å€¼ä»£è¡¨å»¶è¿Ÿæ¥å—è¿æ¥çš„è¶…æ—¶å€¼ï¼Œè¶…è¿‡æ­¤å€¼æ—¶å¦‚æœå®¢æˆ·ç«¯ä¾ç„¶æ²¡æœ‰å‘æ¥æ•°æ®ï¼Œåˆ™æ“ä½œ
+#	ç³»ç»Ÿä¼šåœ¨ç³»ç»Ÿå±‚ç›´æ¥å…³é—­è¯¥è¿æ¥
 #	master_defer_accept = 0
-#	ÊÇ·ñÖ»ÔÊĞíË½ÓĞ·ÃÎÊ, Èç¹ûÎª y, ÔòÓòÌ×½Ó¿Ú´´½¨ÔÚ /opt/soft/acl-master/var/log/private/ Ä¿Â¼ÏÂ,
-#	Èç¹ûÎª n, ÔòÓòÌ×½Ó¿Ú´´½¨ÔÚ /opt/soft/acl-master/var/log/public/ Ä¿Â¼ÏÂ,
+#	æ˜¯å¦åªå…è®¸ç§æœ‰è®¿é—®, å¦‚æœä¸º y, åˆ™åŸŸå¥—æ¥å£åˆ›å»ºåœ¨ /opt/soft/acl-master/var/log/private/ ç›®å½•ä¸‹,
+#	å¦‚æœä¸º n, åˆ™åŸŸå¥—æ¥å£åˆ›å»ºåœ¨ /opt/soft/acl-master/var/log/public/ ç›®å½•ä¸‹,
 	master_private = n
 	master_unpriv = n
-#	ÊÇ·ñĞèÒª chroot: n -- no, y -- yes
+#	æ˜¯å¦éœ€è¦ chroot: n -- no, y -- yes
 	master_chroot = n
-#	Ã¿¸ô¶à³¤Ê±¼ä´¥·¢Ò»´Î£¬µ¥Î»ÎªÃë(½ö¶Ô trigger Ä£Ê½ÓĞĞ§)
+#	æ¯éš”å¤šé•¿æ—¶é—´è§¦å‘ä¸€æ¬¡ï¼Œå•ä½ä¸ºç§’(ä»…å¯¹ trigger æ¨¡å¼æœ‰æ•ˆ)
 	master_wakeup = -
-#	×î´ó½ø³ÌÊı
+#	æœ€å¤§è¿›ç¨‹æ•°
 	master_maxproc = 1
-#	Ô¤Æô¶¯½ø³ÌÊı£¬¸ÃÖµ²»µÃ´óÓÚ master_maxproc
+#	é¢„å¯åŠ¨è¿›ç¨‹æ•°ï¼Œè¯¥å€¼ä¸å¾—å¤§äº master_maxproc
 	master_prefork = 1
-#	½ø³Ì³ÌĞòÃû
+#	è¿›ç¨‹ç¨‹åºå
 	master_command = /opt/soft/sgate/sbin/sgate-client
 	master_version = 1.0.0-0
-#	½ø³ÌÈÕÖ¾¼ÇÂ¼ÎÄ¼ş
+#	è¿›ç¨‹æ—¥å¿—è®°å½•æ–‡ä»¶
 	master_log = /opt/soft/sgate/logs/ssh-client.log
 	master_stdout = /opt/soft/sgate/logs/ssh-stdout.log
 	master_stderr = /opt/soft/sgate/logs/ssh-stderr.log
-#	µ÷ÊÔÈÕÖ¾·½Ê½£¬¸ñÊ½£ºtag:level; tag:level; tab:level, Èç£ºall:1; 101:2
+#	è°ƒè¯•æ—¥å¿—æ–¹å¼ï¼Œæ ¼å¼ï¼štag:level; tag:level; tab:level, å¦‚ï¼šall:1; 101:2
 #	master_debug =
-#	½ø³ÌÆô¶¯²ÎÊı£¬Ö»ÄÜÎª: -u [ÊÇ·ñÔÊĞíÒÔÄ³ÆÕÍ¨ÓÃ»§µÄÉí·İÔËĞĞ]
+#	è¿›ç¨‹å¯åŠ¨å‚æ•°ï¼Œåªèƒ½ä¸º: -u [æ˜¯å¦å…è®¸ä»¥æŸæ™®é€šç”¨æˆ·çš„èº«ä»½è¿è¡Œ]
 	master_args = -config /opt/soft/sgate/conf/ssh-client.conf
 	master_home = /opt/soft/sgate/var
-#	´«µİ¸ø·şÎñ×Ó½ø³ÌµÄ»·¾³±äÁ¿, ¿ÉÒÔÍ¨¹ı getenv("SERVICE_ENV") »ñµÃ´ËÖµ
+#	ä¼ é€’ç»™æœåŠ¡å­è¿›ç¨‹çš„ç¯å¢ƒå˜é‡, å¯ä»¥é€šè¿‡ getenv("SERVICE_ENV") è·å¾—æ­¤å€¼
 #	master_env = mempool_limit:512000000
 #	master_env = logme:FALSE, priority:E_LOG_INFO, action:E_LOG_PER_DAY, flush:sync_flush, imit_size:512,\
 #			sync_action:E_LOG_SEM, sem_name:/tmp/ioctl_echo.sem
 
-#	µ±Æô¶¯¶à¸ö×Ó½ø³ÌÊµÀıÊ±£¬¸Ã¿ª¹Ø¿ØÖÆ¶à¸ö×Ó½ø³ÌÔÚ½ÓÊÕÁ¬½ÓÊ±ÊÇ·ñÏò acl_master ·¢ËÍÏûÏ¢±¨¸æ×Ô¼ºµÄ×´Ì¬
-#	master_status_notify = 1
-#	ÊÇ·ñÔÊĞí²úÉú core ÎÄ¼ş
+#	å½“å¯åŠ¨å¤šä¸ªå­è¿›ç¨‹å®ä¾‹æ—¶ï¼Œè¯¥å¼€å…³æ§åˆ¶å¤šä¸ªå­è¿›ç¨‹åœ¨æ¥æ”¶è¿æ¥æ—¶æ˜¯å¦å‘ acl_master å‘é€æ¶ˆæ¯æŠ¥å‘Šè‡ªå·±çš„çŠ¶æ€
+	master_status_notify = 0
+#	æ˜¯å¦å…è®¸äº§ç”Ÿ core æ–‡ä»¶
 }
 
