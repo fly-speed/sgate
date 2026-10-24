@@ -35,6 +35,8 @@ func newStandaloneClient(options clientOptions) (*tunnel.Client, error) {
 		Key:            secret,
 		Password:       options.password,
 		URL:            options.server,
+		Addr:           options.addr,
+		OmitAddr:       !options.sendAddr,
 		TLSConfig:      tlsConfig,
 		ReconnectMin:   options.minRetry,
 		ReconnectMax:   options.maxRetry,

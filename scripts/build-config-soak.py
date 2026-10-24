@@ -47,6 +47,23 @@ var configSoakClients sync.Map
 var configSoakServers sync.Map
 var configSoakNextServerID atomic.Uint64
 
+// Report only target-selection fields, never credentials or arbitrary queries.
+func ConfigSoakEndpoints() []map[string]any {
+    endpoints := []map[string]any{}
+    configSoakClients.Range(func(key, value any) bool {
+        cfg := key.(*Client).cfg
+        u, _ := url.Parse(cfg.URL)
+        endpoints = append(endpoints, map[string]any{
+            "addr": u.Query()["addr"], "path": u.Path,
+            "keep": u.Query().Get("keep"), "omit_addr": cfg.OmitAddr,
+            "configured_addr": cfg.Addr,
+            "offline_timeout_ns": int64(cfg.OfflineTimeout),
+        })
+        return true
+    })
+    return endpoints
+}
+
 func ConfigSoakCensus() map[string]int64 {
 	v := map[string]int64{
 		"sessions":       0,
@@ -90,6 +107,7 @@ func ConfigSoakCensus() map[string]int64 {
 			return true
 		}
 		v["registered_servers"]++
+		v["session_ttl_ns"] = int64(s.cfg.SessionTTL)
 		v["sessions"] += int64(len(s.sessions))
 		v["nonces"] += int64(len(s.nonces))
 		for _, e := range s.sessions {
@@ -243,6 +261,7 @@ func configSoakMetrics() func() {
 				"transport_writers": bytes.Count(stack[:n], []byte(".(*session).writeTransport(")),
 				"stack_truncated":   n == len(stack),
 				"census":            tunnel.ConfigSoakCensus(),
+				"endpoints":         tunnel.ConfigSoakEndpoints(),
 				"noise_min":         flag.Lookup("noise-interval-min").Value.String(),
 				"noise_max":         flag.Lookup("noise-interval-max").Value.String(),
 				"noise_min_bytes":   flag.Lookup("noise-min-bytes").Value.String(),

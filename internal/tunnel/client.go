@@ -18,9 +18,12 @@ import (
 )
 
 type ClientConfig struct {
-	Key            []byte
-	Password       string
-	URL            string
+	Key      []byte
+	Password string
+	URL      string
+	Addr     string
+	// OmitAddr 强制使用服务端默认后端，但不修改保存的地址配置。
+	OmitAddr       bool
 	ReconnectMin   time.Duration
 	ReconnectMax   time.Duration
 	OfflineTimeout time.Duration
@@ -36,11 +39,11 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	if err := validatePassword(cfg.Password); err != nil {
 		return nil, err
 	}
-	u, err := url.Parse(cfg.URL)
-	if err != nil || u.Host == "" || (u.Scheme != "ws" && u.Scheme != "wss") || u.User != nil ||
-		u.Fragment != "" {
-		return nil, errors.New("server URL must be ws://host/path or wss://host/path")
+	endpoint, err := clientEndpoint(cfg.URL, cfg.Addr, cfg.OmitAddr)
+	if err != nil {
+		return nil, err
 	}
+	cfg.URL = endpoint
 	if cfg.ReconnectMin == 0 {
 		cfg.ReconnectMin = 250 * time.Millisecond
 	}
@@ -99,6 +102,7 @@ func (c *Client) dial(ctx context.Context, id string, resume bool) (*websocket.C
 		status := 0
 		if response != nil {
 			status = response.StatusCode
+			err = fmt.Errorf("tunnel handshake HTTP %d: %w", status, err)
 			response.Body.Close()
 			if status == http.StatusGone {
 				serverNonce := response.Header.Get("X-Sgate-Nonce")

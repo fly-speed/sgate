@@ -359,15 +359,21 @@ target = 127.0.0.1:9001
 allowed-targets = 127.0.0.1:8088,127.0.0.1:22,backend.example.com:443
 ```
 
-客户端将目标加入 `server` URL，无需新增客户端参数：
+客户端可以单独设置后端地址，程序会编码为握手 URL 中的 `addr` 参数：
 
 ```ini
-server = "wss://gateway.example.com/tunnel?addr=127.0.0.1:8088"
+server = "wss://gateway.example.com/tunnel"
+addr = 127.0.0.1:8088
+send-addr = true
 ```
+
+`send-addr` 默认 `true`，保持上述地址选择行为。设为 `false` 时，忽略独立 `addr` 并移除请求 URL 中所有 `addr` 参数，使用服务端默认后端，其他查询参数保留；配置中保存的地址不会被清空。命令行 `-send-addr=false` 或 `-send-addr=true` 优先于文件，可在管理界面修改并保存应用；应用会关闭受影响的旧应用连接。
+
+也可使用命令行 `-addr backend.example.com:443`；命令行显式参数优先于配置文件。非空的独立 `addr` 优先于 `server` URL 中的同名参数，其他查询参数保留。独立 `addr` 留空时兼容原来的 `server = "wss://gateway.example.com/tunnel?addr=127.0.0.1:8088"` 写法；两处均未指定才使用服务端默认后端。切回默认后端时，应清空独立 `addr` 并移除 URL 的 `addr`。客户端会提前拒绝非法地址、空值或重复的 URL `addr`；是否允许访问仍由服务端允许列表决定。
 
 域名示例为 `?addr=backend.example.com:443`，IPv6 使用 `[::1]:8088`；构造 URL 时可对参数值作 URL 编码。地址按完整字符串精确匹配，不支持通配符、网段或通过 DNS 解析结果匹配别名。即使显式指定默认后端，也必须把该地址列入 `allowed-targets`。参数为空、重复或格式错误返回 `400`，未获允许返回 `403`；这些检查在握手身份验证通过后、创建会话和连接后端前完成。
 
-后端绑定到隧道会话，同一会话的所有 TCP 流和重连均保持该目标；重连试图换成另一后端返回 `409`，不会续期或改变原会话。要切换目标，应修改客户端 URL 并重启客户端代理，建立新会话。允许列表同时支持 `-allowed-targets` 命令行覆盖和管理页面编辑；保存后应用代理配置即可生效，应用会关闭旧代理会话。
+后端绑定到隧道会话，同一会话的所有 TCP 流和重连均保持该目标；重连试图换成另一后端返回 `409`，不会续期或改变原会话。要切换目标，应修改客户端 `addr` 或 URL，并在管理页面保存应用或重启客户端代理，建立新会话。允许列表同时支持 `-allowed-targets` 命令行覆盖和管理页面编辑；保存后应用代理配置即可生效，应用会关闭旧代理会话。
 
 ### HTTP 反向代理
 
@@ -411,7 +417,7 @@ location /tunnel {
 
 | 参数 | 默认值 | 含义 |
 | --- | --- | --- |
-| `-listen` | `:8080` | HTTP/HTTPS 监听地址 |
+| `-listen` | `:8081` | HTTP/HTTPS 监听地址 |
 | `-target` | 必填 | 未传 `addr` 时默认连接的 `host:port` |
 | `-allowed-targets` | 空 | 客户端 `addr` 可选地址的完整允许列表，逗号分隔；空值禁止选择 |
 | `-path` | `/tunnel` | WebSocket 路径 |
@@ -425,6 +431,8 @@ location /tunnel {
 | --- | --- | --- |
 | `-listen` | `127.0.0.1:9000` | 应用客户端连接的本地 TCP 地址 |
 | `-server` | 必填 | 完整 `ws://` 或 `wss://` URL |
+| `-addr` | 空 | 服务端连接的可选后端 `host:port`；非空覆盖 URL 同名参数，空值保留 URL 选择 |
+| `-send-addr` | `true` | 是否携带目标地址；`false` 忽略独立 addr 并移除 URL addr，使用服务端默认后端 |
 | `-reconnect-min` | `250ms` | 初始重连退避上限，实际等待为其 50%～100% |
 | `-reconnect-max` | `10s` | 最大重连退避上限 |
 | `-offline-timeout` | `2m` | 客户端持续离线时保留应用连接和未确认数据的时限 |

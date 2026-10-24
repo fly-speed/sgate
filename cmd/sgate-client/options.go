@@ -15,6 +15,8 @@ type clientOptions struct {
 	adminConfig      string
 	listen           string
 	server           string
+	addr             string
+	sendAddr         bool
 	keyFile          string
 	password         string
 	ca               string
@@ -48,6 +50,13 @@ func parseClientOptions() (clientOptions, error) {
 	)
 	flag.StringVar(&options.listen, "listen", "127.0.0.1:9000", "local TCP listen address")
 	flag.StringVar(&options.server, "server", "", "server WebSocket URL (required)")
+	flag.BoolVar(
+		&options.sendAddr,
+		"send-addr",
+		true,
+		"include backend addr in the request URL; false uses the server default",
+	)
+	flag.StringVar(&options.addr, "addr", "", "optional server-side backend host:port; overrides server URL addr when nonempty")
 	flag.StringVar(&options.keyFile, "key-file", "", "shared key file (defaults to SGATE_KEY environment variable)")
 	flag.StringVar(&options.password, "password", "", "connection authentication password (required)")
 	flag.StringVar(&options.ca, "tls-ca", "", "additional trusted CA PEM file")

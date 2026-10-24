@@ -1,0 +1,126 @@
+// This code is appended only to diagnostic Go overlays, never production builds.
+func configSoakWatch(config string) func() {
+	done, finished := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(finished)
+		ticker := time.NewTicker(20 * time.Millisecond)
+		defer ticker.Stop()
+		path := config + ".metrics.watch-" + strconv.Itoa(os.Getpid())
+		appendJSON := func(name string, value any) {
+			b, err := json.Marshal(value)
+			if err != nil {
+				panic(err)
+			}
+			f, err := os.OpenFile(name, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+			if err != nil {
+				panic(err)
+			}
+			_, err = f.Write(append(b, 10))
+			f.Close()
+			if err != nil {
+				panic(err)
+			}
+		}
+		triggerG := 0
+		triggerReason := ""
+		capture := func(event, step int, started time.Time) {
+			observed := time.Now()
+			stack := make([]byte, 4<<20)
+			n := runtime.Stack(stack, true)
+			if n == len(stack) {
+				panic("watch goroutine stack truncated")
+			}
+			goroutines := runtime.NumGoroutine()
+			name := path + ".event-" + strconv.Itoa(event) + "-" + strconv.Itoa(step)
+			if err := os.WriteFile(name+".stack", stack[:n], 0600); err != nil {
+				panic(err)
+			}
+			var memory runtime.MemStats
+			runtime.ReadMemStats(&memory)
+			appendJSON(name+".json", map[string]any{
+				"pid": os.Getpid(), "event": event, "step": step,
+				"observed_unix_nano": observed.UnixNano(),
+				"elapsed_ms":         observed.Sub(started).Milliseconds(),
+				"goroutines":         goroutines, "heap_bytes": memory.HeapAlloc,
+				"trigger_goroutines": triggerG,
+				"trigger_reason":     triggerReason,
+				"census":             tunnel.ConfigSoakCensus(), "details": tunnel.ConfigSoakDetails(),
+			})
+		}
+		var started, lastTimeline time.Time
+		var lastMemory time.Time
+		var memory runtime.MemStats
+		event, step := 0, 0
+		follow := []time.Duration{0, 100 * time.Millisecond, 500 * time.Millisecond, 2 * time.Second, 10 * time.Second}
+		for {
+			select {
+			case <-done:
+				return
+			case now := <-ticker.C:
+				forced, forceErr := os.ReadFile(config + ".snapshot")
+				if forceErr == nil {
+					os.Remove(config + ".snapshot")
+				}
+				g := runtime.NumGoroutine()
+				census := tunnel.ConfigSoakCensus()
+				connections := tunnel.ConfigSoakConnectionCount()
+				if now.Sub(lastMemory) >= time.Second {
+					runtime.ReadMemStats(&memory)
+					lastMemory = now
+				}
+				// The observer adds one goroutine to the original 15/16 baseline.
+				// A nonempty stream table explains normal high-concurrency growth.
+				idleLimit := 24
+				if census["attached"] > 1 {
+					idleLimit += 8 * int(census["attached"]-1)
+				}
+				high := g > idleLimit && census["streams"] == 0 && census["pending_bytes"] == 0
+				reason := "idle goroutine count"
+				if g > 40+2*int(census["streams"]) {
+					high = true
+					reason = "goroutines relative to live streams"
+				}
+				if connections > 32+int(census["streams"]) {
+					high = true
+					reason = "tracked TCP connections"
+				}
+				if census["pending_bytes"] > 64<<20 {
+					high = true
+					reason = "pending replay buffers"
+				}
+				if memory.HeapAlloc > 256<<20 {
+					high = true
+					reason = "heap allocation above 256 MiB"
+				}
+				if forceErr == nil {
+					high = true
+					reason = string(forced)
+					started = time.Time{}
+				}
+				if high && started.IsZero() {
+					event++
+					step = 0
+					started = time.Now()
+					triggerG = g
+					triggerReason = reason
+				}
+				if !started.IsZero() && time.Since(started) >= follow[step] {
+					capture(event, step, started)
+					step++
+					if step == len(follow) {
+						started = time.Time{}
+					}
+				}
+				if now.Sub(lastTimeline) >= 200*time.Millisecond {
+					appendJSON(path+".jsonl", map[string]any{
+						"unix_nano": time.Now().UnixNano(), "goroutines": g,
+						"census": census, "idle_high": high,
+						"tracked_connections": connections, "heap_bytes": memory.HeapAlloc,
+					})
+					lastTimeline = now
+				}
+			}
+		}
+	}()
+	return func() { close(done); <-finished }
+}

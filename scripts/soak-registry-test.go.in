@@ -1,0 +1,59 @@
+// Diagnostic-only regression: registry cleanup must permit real garbage collection.
+func TestDiagnosticRegistryReleasesClosedServers(t *testing.T) {
+	for i := 0; i < 128; i++ {
+		server, err := NewServer(ServerConfig{Key: make([]byte, 32), Password: "diagnostic-password", Target: "127.0.0.1:1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		server.Close()
+	}
+	census := ConfigSoakCensus()
+	registered := 0
+	configSoakServers.Range(func(key, value any) bool { registered++; return true })
+	if registered != 0 {
+		t.Fatalf("diagnostic registry retains %d closed servers despite census=%v", registered, census)
+	}
+}
+
+func TestDiagnosticRegistryRetainsUnreleasedState(t *testing.T) {
+	server, err := NewServer(ServerConfig{Key: make([]byte, 32), Password: "diagnostic-password", Target: "127.0.0.1:1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { server.mu.Lock(); server.nonces = nil; server.mu.Unlock(); ConfigSoakCensus() }()
+	if ConfigSoakCensus()["registered_servers"] != 1 {
+		t.Fatal("active empty server disappeared")
+	}
+	server.mu.Lock()
+	server.closed = true
+	server.nonces["retained"] = time.Now()
+	server.cancel()
+	server.mu.Unlock()
+	census := ConfigSoakCensus()
+	if census["registered_servers"] != 1 || census["nonces"] != 1 {
+		t.Fatalf("incomplete cleanup hidden: %v", census)
+	}
+}
+
+func TestDiagnosticRegistryAllowsClosedServersCollection(t *testing.T) {
+	released := make(chan struct{}, 128)
+	func() {
+		for i := 0; i < 128; i++ {
+			server, err := NewServer(ServerConfig{Key: make([]byte, 32), Password: "diagnostic-password", Target: "127.0.0.1:1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			runtime.SetFinalizer(server, func(*Server) { released <- struct{}{} })
+			server.Close()
+		}
+	}()
+	ConfigSoakCensus()
+	deadline := time.Now().Add(2 * time.Second)
+	for len(released) < 128 && time.Now().Before(deadline) {
+		runtime.GC()
+		time.Sleep(5 * time.Millisecond)
+	}
+	if len(released) != 128 {
+		t.Fatalf("only %d/128 closed diagnostic servers collected", len(released))
+	}
+}

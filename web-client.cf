@@ -82,6 +82,11 @@ service web-client {
     listen = "127.0.0.1:1088"
     # 服务端 WebSocket URL；保留现有协议、地址、端口及路径。
     server = "ws://i18n.webcool.cn:8088/tunnel"
+    # 服务端所连接的后端；非空时覆盖 server URL 中的 addr，支持 IP:端口或域名:端口。
+    # 留空保留 URL 中的选择；URL 也无 addr 时使用服务端默认后端，所选地址须在服务端允许列表内。
+    addr =
+    # 是否在请求 URL 中携带目标地址；false 忽略独立 addr 并移除 URL 的 addr，使用服务端默认后端。
+    send-addr = true
     # 两端共享密钥文件路径；保留现有路径。
     key-file = "/opt/soft/sgate/conf/sgate.key"
     # 连接验证密码，须与服务端一致；Web 原配置留空，部署前填写或用 -password 提供。
@@ -127,6 +132,10 @@ service web-client {
     # 每次白噪音随机负载的最大字节数，默认 10240；允许范围为 1～16384。
     noise-max-bytes = 10240
 
+    # 可选的独立管理配置文件；非空时使用该文件并启用管理界面。
+    # 留空则通过 admin_enabled 或 -admin-enabled 开启本 .cf 中的管理配置。
+    admin-config =
+
 # Web 管理配置：默认关闭；命令行 -admin-enabled 可开启。
 # 账号和持久化会话仍是独立数据文件，下面的相对路径以本 .cf 所在目录为基准。
     # 是否启用 Web 管理，默认关闭；命令行 -admin-enabled 可覆盖
@@ -149,4 +158,8 @@ service web-client {
     admin_tls_cert =
     # 管理界面 HTTPS 私钥，须与证书同时配置
     admin_tls_key =
+    # acl_master 控制程序路径，用于管理页面重启客户端服务。
+    admin_master_ctl = /opt/soft/acl-master/bin/master_ctl
+    # 框架管理套接字路径；留空使用 master_ctl 默认设置，可填写绝对路径。
+    admin_master_socket =
 }

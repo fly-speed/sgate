@@ -1,0 +1,101 @@
+// Standalone diagnostic helper; stdin credentials never appear in saved reports.
+package main
+
+import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"net/http"
+	"os"
+	"strconv"
+	"time"
+)
+
+func mac(key []byte, parts ...string) string {
+	h := hmac.New(sha256.New, key)
+	for _, p := range parts {
+		h.Write([]byte(p))
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+func randomID() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(b)
+}
+func main() {
+	var input struct{ URL, Key, Password, CA, SignURI string }
+	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
+		panic(err)
+	}
+	key, err := hex.DecodeString(input.Key)
+	if err != nil {
+		panic(err)
+	}
+	r, err := http.NewRequest("GET", input.URL, nil)
+	if err != nil {
+		panic(err)
+	}
+	uri := r.URL.RequestURI()
+	if input.SignURI != "" {
+		uri = input.SignURI
+	}
+	id, nonce, ts := randomID(), randomID(), strconv.FormatInt(time.Now().Unix(), 10)
+	raw, _ := hex.DecodeString(mac(key, "sgate-v1", "password-header-key"))
+	block, err := aes.NewCipher(raw)
+	if err != nil {
+		panic(err)
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		panic(err)
+	}
+	iv := make([]byte, aead.NonceSize())
+	if _, err = rand.Read(iv); err != nil {
+		panic(err)
+	}
+	aad := []byte(mac(key, "sgate-v1", "password-context", id, nonce, ts, "0", uri))
+	token := "v1." + base64.RawURLEncoding.EncodeToString(aead.Seal(iv, iv, []byte(input.Password), aad))
+	webKey := make([]byte, 16)
+	if _, err = rand.Read(webKey); err != nil {
+		panic(err)
+	}
+	for k, v := range map[string]string{
+		"X-Sgate-Session": id, "X-Sgate-Nonce": nonce, "X-Sgate-Time": ts, "X-Sgate-Resume": "0",
+		"X-Sgate-Password": token, "X-Sgate-Auth": mac(key, "sgate-v1", "client", id, nonce, ts, "0", uri, token),
+		"Connection": "Upgrade", "Upgrade": "websocket", "Sec-WebSocket-Version": "13",
+		"Sec-WebSocket-Key": base64.StdEncoding.EncodeToString(webKey),
+	} {
+		r.Header.Set(k, v)
+	}
+	config := &tls.Config{MinVersion: tls.VersionTLS12}
+	if input.CA != "" {
+		b, err := os.ReadFile(input.CA)
+		if err != nil {
+			panic(err)
+		}
+		config.RootCAs = x509.NewCertPool()
+		if !config.RootCAs.AppendCertsFromPEM(b) {
+			panic("invalid test CA")
+		}
+	}
+	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: config}}
+	response, err := client.Do(r)
+	if err != nil {
+		panic(err)
+	}
+	defer response.Body.Close()
+	if err = json.NewEncoder(os.Stdout).Encode(map[string]int{"status": response.StatusCode}); err != nil {
+		panic(err)
+	}
+}

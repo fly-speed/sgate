@@ -97,9 +97,12 @@ func TestSelectableTargetsWSWSSIntegrityAndResumeBinding(t *testing.T) {
 				}
 			})
 			base := "ws" + strings.TrimPrefix(web.URL, "http") + "/tunnel"
-			clientFor := func(t *testing.T, endpoint string) *Client {
+			clientFor := func(t *testing.T, endpoint, address string, omitAddr bool) *Client {
 				t.Helper()
-				cfg := ClientConfig{Key: s.cfg.Key, Password: testPassword, URL: endpoint, Options: opts}
+				cfg := ClientConfig{
+					Key: s.cfg.Key, Password: testPassword, URL: endpoint,
+					Addr: address, OmitAddr: omitAddr, Options: opts,
+				}
 				if secure {
 					roots := x509.NewCertPool()
 					roots.AddCert(web.Certificate())
@@ -112,14 +115,20 @@ func TestSelectableTargetsWSWSSIntegrityAndResumeBinding(t *testing.T) {
 				return c
 			}
 			t.Run("concurrent-backends", func(t *testing.T) {
-				for _, tc := range []struct{ name, query, marker, target string }{
-					{"default", "", "A", a},
-					{"ip", "?addr=" + url.QueryEscape(a), "A", a},
-					{"hostname", "?addr=" + url.QueryEscape(b), "B", b},
+				for _, tc := range []struct {
+					name, query, addr, marker, target string
+					omitAddr                          bool
+				}{
+					{"default", "", "", "A", a, false},
+					{"legacy-ip", "?addr=" + url.QueryEscape(a), "", "A", a, false},
+					{"addr-ip", "", a, "A", a, false},
+					{"addr-hostname-override", "?addr=" + url.QueryEscape(a) + "&x=1", b, "B", b, false},
+					{"omit-independent-and-url", "?addr=" + url.QueryEscape(b) + "&x=1", b, "A", a, true},
+					{"omit-disallowed", "?addr=127.0.0.1:1", "127.0.0.1:1", "A", a, true},
 				} {
 					t.Run(tc.name, func(t *testing.T) {
 						t.Parallel()
-						client := clientFor(t, base+tc.query)
+						client := clientFor(t, base+tc.query, tc.addr, tc.omitAddr)
 						id := randomID()
 						ws, codec, _, err := client.dial(context.Background(), id, false)
 						if err != nil {
@@ -155,7 +164,7 @@ func TestSelectableTargetsWSWSSIntegrityAndResumeBinding(t *testing.T) {
 						if tc.target == a {
 							other = b
 						}
-						bad := clientFor(t, base+"?addr="+url.QueryEscape(other))
+						bad := clientFor(t, base+"?addr="+url.QueryEscape(other), "", false)
 						if conn, _, status, err := bad.dial(context.Background(), id, true); err == nil || status != 409 {
 							if conn != nil {
 								conn.Close()
@@ -195,7 +204,9 @@ func TestSelectableTargetsWSWSSIntegrityAndResumeBinding(t *testing.T) {
 				{"?addr=" + url.QueryEscape(a) + "&addr=" + url.QueryEscape(b), 400},
 				{"?addr=http://localhost:80", 400}, {"?addr=localhost:0", 400},
 			} {
-				client := clientFor(t, base+tc.query)
+				// 绕过客户端的提前校验，独立验证服务端对原始非法请求的拒绝。
+				client := clientFor(t, base, "", false)
+				client.cfg.URL = base + tc.query
 				if conn, _, status, err := client.dial(context.Background(), randomID(), false); err == nil || status != tc.status {
 					if conn != nil {
 						conn.Close()

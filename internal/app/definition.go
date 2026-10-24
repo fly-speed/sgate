@@ -76,6 +76,8 @@ func (v configValues) clientConfig(secret []byte, options tunnel.Options) (*tunn
 		Key:            secret,
 		Password:       v.text("password"),
 		URL:            v.text("server"),
+		Addr:           v.text("addr"),
+		OmitAddr:       v.text("send-addr") == "false",
 		TLSConfig:      tlsConfig,
 		ReconnectMin:   v.duration("reconnect-min"),
 		ReconnectMax:   v.duration("reconnect-max"),
