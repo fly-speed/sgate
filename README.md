@@ -20,6 +20,44 @@ Go 编写的通用 TCP 加密通道。客户端和服务端使用标准 HTTP Upg
 - 普通 `GET /` 返回 HTTP 页面；未通过鉴权的通道访问返回 404。
 - 支持 `ws://`、`wss://`、TLS 自定义 CA、HTTP 反向代理及正常退出。
 
+## Web 管理界面
+
+客户端与服务端均提供独立的管理工作台，包含实时发送/接收速率、累计流量、曲线、通道 TCP 连接数、配置编辑及账号管理。默认关闭，通过 `-admin-config` 启用；必须同时提供 `-config`，以明确要管理的代理配置文件。先将应用配置中的地址、密钥、代理密码填写正确：
+
+```sh
+./bin/sgate-client -config conf/sgate-client.conf -admin-config conf/admin-client.conf
+./bin/sgate-server -config conf/sgate-server.conf -admin-config conf/admin-server.conf
+```
+
+管理界面的 HTML、CSS、JavaScript 位于独立的 `web/admin/` 目录，不嵌入 Go 可执行文件。部署时同时复制 `bin/`、`conf/` 和 `web/`，保持此目录结构；也可在管理配置中设置 `web-dir = /opt/soft/sgate/web/admin`。默认 `web-dir = ../web/admin`，相对管理配置文件所在目录解析。客户端和服务端可共用同一份界面文件，也可分别指定目录。直接修改或替换界面文件后，刷新浏览器即可加载，无需编译或重启代理。目录中必须有 `index.html`、`app.css`、`app.js`，缺失时管理服务启动会明确报错；更新部署时建议原子替换文件。
+
+管理进程需要界面目录的遍历权限、界面文件的读取权限，以及业务配置所在目录的写入权限（用于临时校验、备份和原子替换）。启动时界面文件不可访问会报告具体路径及系统错误；运行中丢失或不可读时，相应页面请求返回 `503`，管理 API 和已有登录会话仍可使用，恢复文件或权限后刷新即可。配置目录不可写时，保存失败，文件和正在运行的代理保持原状。
+
+默认客户端管理地址为 `http://127.0.0.1:9081`，服务端为 `http://127.0.0.1:9082`。启动参数也可以写入应用配置：`admin-config = conf/admin-client.conf`。业务配置路径仍按进程工作目录解析，管理配置中的存储及证书路径则相对于管理配置文件所在目录解析。现有 SSH、VPN、Web 配置可直接作为 `-config`，无需迁移其地址或密码。
+
+首次打开界面会主动进入“创建首个管理员”，没有预设账号和密码。程序生成一次性初始化令牌，日志只提示 `setup-token-file` 路径；从该文件读取令牌，在页面输入用户名、至少 12 个字符的密码及令牌即可创建账号。创建成功后令牌文件删除，后续直接登录。管理密码与代理的 `-password` 分开保存。账号文件存用户名、随机盐及 PBKDF2-HMAC-SHA256 密码哈希（600,000 次迭代，参照 [OWASP 密码存储建议](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)），不保存明文密码。
+
+管理配置示例见 [客户端](conf/admin-client.conf)、[服务端](conf/admin-server.conf)：
+
+| 参数 | 用途 |
+| --- | --- |
+| `listen` | 独立管理监听地址；默认仅本机 |
+| `web-dir` | 外部界面目录，默认 `../web/admin`，相对管理配置文件解析 |
+| `users-file` | 独立管理员账号 JSON 文件，首次建号自动生成 |
+| `session-dir` | 持久登录会话目录，权限必须为 `0700`，不存在时自动创建 |
+| `session-timeout` | 登录固定有效期，默认 `12h`，最短 `1s`，最长 `8760h` |
+| `max-sessions` | 最大持久登录会话数，默认 `128` |
+| `setup-token-file` | 首次建号令牌文件 |
+| `tls-cert` / `tls-key` | 管理界面 HTTPS 证书/私钥，与业务 WSS 配置独立 |
+
+绑定非回环地址必须配置管理 HTTPS。账号、会话、令牌与配置备份文件按 `0600` 创建；管理配置应与业务配置分开。持久 Cookie 使用 HttpOnly、SameSite=Strict，HTTPS 下同时使用 Secure。会话有效期固定，不随访问延长；进程重启或浏览器重开后，在原有效期内仍可登录。到期立即拒绝访问，后台最多每分钟清理过期文件。退出会删除对应会话；修改管理员账号/密码需要当前密码，并使全部旧会话失效。管理监听、证书、超时及存储路径修改后，需要重启整个程序。
+
+代理配置页只管理当前 `-config` 指定的文件，保留中文注释。原代理密码以 `__SGATE_KEEP_EXISTING_PASSWORD__` 占位符隐藏；保留占位符会保留原值，也可改成新密码。保存前做语法、参数及密钥/证书校验，再备份至 `.bak` 并原子替换；旧版本编辑会被拒绝，避免覆盖其他操作。可选择“仅保存”，或“保存并重启代理”立即应用。命令行显式参数在重启后仍优先，页面显示优先项名称及实际监听地址。
+
+界面内重启只替换业务代理，管理端口、登录会话及本进程流量累计继续保留。重启会中断本端现有业务连接，远端按原会话保留机制清理；不能恢复这些已断开的业务连接。若新监听端口被占用等导致启动失败，会尝试恢复上次运行的代理配置，并在界面显示结果；“保存并重启”失败还会还原本次保存前的文件。
+
+带宽按通道 TCP 字节流统计，包含 HTTP、WebSocket、TLS、随机白噪音和隧道重发，排除 TCP/IP 包头、内核 TCP 重传包、业务侧端口及管理界面流量；不是整机网卡总流量。曲线显示最近 60 次采样，数字每秒更新。代理重启不清空累计值，整个进程重启则重新计数。
+
 ## 构建与测试
 
 需要 Go 1.23 或以上版本。
@@ -38,6 +76,16 @@ go build -o bin/sgate-server ./cmd/sgate-server
 go build -o bin/sgate-client ./cmd/sgate-client
 go test -race ./...
 ```
+
+分离界面的部署回归使用实际构建的两端程序，测试不同工作目录、HTTP/HTTPS、界面路径、文件权限恢复和配置应用。先运行 `make build`，再执行：
+
+```sh
+SGATE_ADMIN_CLIENT_BINARY="$PWD/bin/sgate-client" \
+SGATE_ADMIN_SERVER_BINARY="$PWD/bin/sgate-server" \
+go test ./internal/app -run '^TestManagementDeploymentBinaries$' -v -count=1 -timeout=4m
+```
+
+测试使用临时目录和回环端口。也可将这两个变量指向 `go build -race` 生成的程序进行对照；以 root 身份运行时会跳过无法真实模拟的 Unix 权限拒绝检查。
 
 ## 快速使用
 
@@ -140,6 +188,23 @@ SGATE_CONFIG_SERVER_BINARY="$PWD/artifacts/config-noise-reconnect/sgate-server" 
 `TestConfigBinaryNoiseWeakNetwork` 使用相同二进制环境变量和 `-parallel=6 -timeout=4m`，覆盖 WS/WSS × 文件开启（1～3 秒、1～10 KiB）/CLI 修改（100～300 毫秒、128～512 字节）/CLI 双端关闭。透明 TCP 中继原样转发 TLS、WebSocket 数据及控制帧，不代答 Ping/Pong。每例先在单向延迟 150±100 毫秒、15% 分段延迟重传（额外 200 毫秒）下运行 22 秒，超过 18 秒心跳超时；再分别阻断上行、下行 1 秒，要求均不误重连，最后逐向持续阻断直到自动重连并恢复。两条原应用连接持续发送独立的双向序号记录，校验内容、结束标记和 EOF，要求恢复后不新增后端连接。丢包模型保留 TCP 字节顺序，通过重传延迟模拟恢复，不代表真实内核丢包测试。
 
 `TestConfigNoiseWeakNetworkResources` 对匹配的有效参数状态检查私有流表、重放缓存、会话过期及传输写协程退出；额外在单向断网过期时检查 1～2 小时待触发定时器取消。该测试与 CLI 参数优先级测试、实际二进制参数及白噪音大小测试共同使用；它自身不调用配置解析器。中继的 `waitTimers` 是累计创建次数，不是活动定时器数量；释放依据是所有中继协程结束、队列清空及传输写协程退出。
+
+### 配置白噪音综合压力测试
+
+使用 `python3 -B scripts/build-config-soak.py` 构建普通诊断程序，再加 `--race` 构建竞态诊断程序。构建工具通过 Go overlay 给原命令入口注入统计，直接执行原配置解析、命令行参数和代理逻辑，不修改生产源码；生成文件使用 `.overlay` 后缀，避免被 `go test ./...` 扫描。诊断程序仅用于测试。
+
+```sh
+SGATE_CONFIG_SOAK=1 \
+SGATE_CONFIG_CLIENT_BINARY="$PWD/artifacts/config-noise-soak/sgate-client" \
+SGATE_CONFIG_SERVER_BINARY="$PWD/artifacts/config-noise-soak/sgate-server" \
+SGATE_CONFIG_SOAK_REPORT_DIR="$PWD/artifacts/config-noise-soak/plain" \
+GOMAXPROCS=4 go test ./internal/tunnel -run '^TestConfigBinaryNoiseSoak$' \
+  -parallel=6 -count=1 -timeout=8m -v
+```
+
+竞态档单独运行，将两端二进制都换成 `-race` 后缀，使用独立报告目录，并将测试命令改为 `go test -race`。六组并行覆盖 WS/WSS × 文件开启/CLI 修改/CLI 双端关闭，每组 128 条应用流，分四轮各 75 秒运行，每例累计 300 秒负载。透明 TCP 中继叠加单向 150±100 毫秒延迟、15% 分段延迟重传（额外 200 毫秒），每六秒断开长连接；保留生产默认重连退避及两分钟会话保留期。两端独立发送序号、随机内容、结束标记和 EOF，轮次之间使用不同种子。文件参数为 1～3 秒、1～10 KiB；CLI 修改为 100～300 毫秒、128～512 字节，关闭时显式清零随机间隔两端边界。
+
+每两秒采样堆、RSS、协程、流表、重放缓存、nonce 缓存和传输写协程；每轮结束排空流及缓存，再强制 GC 比较同等状态。断言包括：每端只保留一个传输写协程，GC 后堆相对第一轮增长不超过 8 MiB，协程不超过基线加 12，描述符不超过基线加 4，服务端 nonce 不超过 64。报告保留完整时间序列，仍需分析趋势，不能只以阈值未超限判断没有泄漏。macOS 描述符统计在静止采样时回退到 `lsof`。最终退出要求会话、流、缓存、nonce 和传输写协程全部归零，中继连接和排队字节归零。定时器释放以写协程结束为依据，不枚举运行时定时器。统计本身每次分配固定 4 MiB 协程栈采样缓冲并调用 `ps`，因此按相同负载及 GC 状态比较。此为五分钟负载档，丢包通过 TCP 有序重传延迟模拟；不代表通宵或内核真实丢包测试。`SGATE_CONFIG_SOAK_SMOKE=1` 仅用于四条流的短预检，结果应分开记录。
 
 ### HTTP 请求头密码验证
 

@@ -18,3 +18,9 @@
 /bin/
 /sgate.key
 /artifacts/
+
+# Web management runtime credentials, cookies, initialization tokens and backups
+/conf/admin-*-users.json
+/conf/admin-*-sessions/
+/conf/admin-*-setup.token
+/conf/*.conf.bak

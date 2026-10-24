@@ -10,11 +10,13 @@ import (
 	"syscall"
 	"time"
 
+	"sgate/internal/app"
 	"sgate/internal/cli"
 	"sgate/internal/tunnel"
 )
 
 func main() {
+	adminConfig := flag.String("admin-config", "", "separate Web management configuration (disabled when empty)")
 	listen := flag.String("listen", ":8080", "HTTP listen address")
 	target := flag.String("target", "", "fixed backend TCP host:port (required)")
 	path := flag.String("path", "/tunnel", "WebSocket endpoint")
@@ -35,6 +37,14 @@ func main() {
 	noiseMax := flag.Int("noise-max-bytes", 10*1024, "maximum random padding payload bytes (up to 16384)")
 	if err := cli.Parse(flag.CommandLine, os.Args[1:]); err != nil {
 		log.Fatal(err)
+	}
+	if *adminConfig != "" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		if err := app.Run(ctx, "server", flag.CommandLine, os.Args[1:], *adminConfig); err != nil {
+			log.Fatal(err)
+		}
+		return
 	}
 	secret, err := cli.LoadKey(*keyFile)
 	if err != nil {

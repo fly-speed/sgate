@@ -4,6 +4,37 @@ A Go TCP tunnel with two executables. `sgate-client` accepts local TCP connectio
 
 See [the Chinese documentation](README.md) for all options, protocol details, and reverse proxy configuration.
 
+## Web management
+
+Both programs support an independent, optional management listener. Enable it alongside the application file being managed:
+
+```sh
+./bin/sgate-client -config conf/sgate-client.conf -admin-config conf/admin-client.conf
+./bin/sgate-server -config conf/sgate-server.conf -admin-config conf/admin-server.conf
+```
+
+The HTML, CSS and JavaScript are external files in `web/admin/`; they are not embedded in the Go binaries. Deploy `bin/`, `conf/` and `web/` together, or set `web-dir` to an absolute UI directory. The default `../web/admin` resolves relative to the management configuration file. Both programs can share one UI directory or use separate ones. Editing/replacing these files takes effect on browser refresh without rebuilding or restarting the proxy. All three files (`index.html`, `app.css`, `app.js`) must exist at startup. Use atomic file replacement when deploying updates.
+
+The process needs search permission on UI directories, read permission on UI files, and write permission on the application configuration's parent directory for validation, backups and atomic replacement. Startup errors preserve the affected path and underlying filesystem error. Missing or unreadable assets at runtime return `503`; authenticated APIs and existing sessions remain available, and restoring the files or permissions restores the page without a restart. A non-writable configuration directory rejects saves without changing the file or running proxy.
+
+Set the application addresses, key and proxy password first. Management defaults to `http://127.0.0.1:9081` for the client and `http://127.0.0.1:9082` for the server; it remains disabled without `-admin-config`. The first visit prompts for an administrator account. Obtain the generated initialization token from the `setup-token-file` path printed in the local startup log; the token itself is never logged. Enter a username, a password of at least 12 characters, and the token in the setup form. Successful setup removes the token. No default account is shipped. The separate `users-file` stores only a salted PBKDF2-HMAC-SHA256 hash with 600,000 iterations; it does not reuse the tunnel password.
+
+The [client management example](conf/admin-client.conf) and [server example](conf/admin-server.conf) configure `listen`, `web-dir`, `users-file`, `session-dir`, `session-timeout` (default `12h`, fixed absolute expiry), `max-sessions` (default 128), `setup-token-file`, and optional `tls-cert`/`tls-key`. Paths inside management configuration resolve relative to that file's directory, unlike application paths which keep resolving against the process working directory. The session directory must be private (`0700`); generated credential, session, token and backup files use `0600`. Non-loopback management listeners require HTTPS. Cookies are persistent, HttpOnly and SameSite=Strict, with Secure on HTTPS. Login survives process restarts until the original expiry; activity does not renew it. Expiry rejects requests immediately and background cleanup runs at most one minute later. Logout revokes the stored session, and changing the administrator credentials requires the current password and revokes all sessions. Changes to management listener/TLS/storage/timeout settings require a full process restart.
+
+The configuration editor manages only the selected `-config` file and redacts its proxy password. Keep the displayed placeholder to preserve the existing password. Saves validate syntax, effective proxy settings and key/certificate files, check a content revision, back up the old file to `.bak`, and replace it atomically. **Save and restart proxy** applies changes within the process while keeping the management listener and login alive. Existing local application connections close; the peer follows the existing retention rules. Explicit CLI overrides remain in effect and their names are shown. Failed new listener startup attempts to restore the previous running proxy; a failed save-and-restart also restores the prior on-disk file. Interrupted application connections cannot be restored by this rollback.
+
+The dashboard shows numeric TX/RX rates, cumulative bytes, connection counts and a 60-sample chart. Counts cover tunnel TCP bytes including HTTP/WS/TLS, padding and tunnel replay, not TCP/IP headers, kernel TCP retransmission packets, local application sockets, management traffic or other host interfaces. Rates update each second. Counters survive an in-process proxy restart and reset on a full process restart.
+
+To run the external UI deployment matrix against built binaries:
+
+```sh
+SGATE_ADMIN_CLIENT_BINARY="$PWD/bin/sgate-client" \
+SGATE_ADMIN_SERVER_BINARY="$PWD/bin/sgate-server" \
+go test ./internal/app -run '^TestManagementDeploymentBinaries$' -v -count=1 -timeout=4m
+```
+
+The test uses temporary deployment trees and loopback listeners, with both HTTP and HTTPS, varied working directories, relative/absolute UI paths, permission failures and recovery. The variables can also point to race-instrumented binaries. Unix permission-denial checks are skipped when running as root.
+
 ## Application configuration files
 
 Both programs accept `-config FILE`. Every existing runtime flag can be set using its name without the leading dash. Precedence is **explicit command-line flags > configuration file > built-in defaults**, including explicit zero and empty values. Without `-config`, startup keeps using command-line flags only.
@@ -331,3 +362,18 @@ The opt-in `TestConfigBinaryNoiseReconnect` accepts `SGATE_CONFIG_CLIENT_BINARY`
 `TestConfigBinaryNoiseWeakNetwork` uses the same binary variables with `-parallel=6 -timeout=4m`. Six cases cover WS/WSS and file-enabled noise (1–3s, 1–10 KiB), CLI modifications (100–300ms, 128–512 bytes), or disabling both ends. A transparent TCP relay forwards TLS and all WebSocket control frames without answering Ping/Pong. Each case runs 22 seconds of 150±100ms one-way latency with 15% delayed segment retransmissions (200ms extra), exceeding the 18-second heartbeat timeout; stalls each direction for one second without reconnecting; then blocks each direction until automatic reconnect and restores it. Two original application streams verify independent bidirectional records, terminal markers and EOF without opening replacement backend connections. Loss is modeled as ordered TCP retransmission delay, rather than actual kernel packet drops.
 
 `TestConfigNoiseWeakNetworkResources` checks matching effective option states using private stream/replay ownership and transport writer completion, including cancellation of hour-long pending timers after one-way expiry. It complements parser-priority and actual binary/wire tests; it does not parse configuration files itself. The relay's `waitTimers` counts cumulative timer creations, not live timers. Cleanup relies on joining all relay goroutines, empty queues and completed transport writers.
+
+The opt-in `TestConfigBinaryNoiseSoak` uses disposable diagnostic builds of the original command entry points. Build them with `python3 -B scripts/build-config-soak.py` and repeat with `--race`. Go overlays inject private resource snapshots and runtime sampling without editing production sources; generated sources use `.overlay` extensions so `go test ./...` does not discover them as packages. Diagnostic binaries are for testing only.
+
+```sh
+SGATE_CONFIG_SOAK=1 \
+SGATE_CONFIG_CLIENT_BINARY="$PWD/artifacts/config-noise-soak/sgate-client" \
+SGATE_CONFIG_SERVER_BINARY="$PWD/artifacts/config-noise-soak/sgate-server" \
+SGATE_CONFIG_SOAK_REPORT_DIR="$PWD/artifacts/config-noise-soak/plain" \
+GOMAXPROCS=4 go test ./internal/tunnel -run '^TestConfigBinaryNoiseSoak$' \
+  -parallel=6 -count=1 -timeout=8m -v
+```
+
+Run the race comparison separately with both binary paths ending in `-race`, a distinct report directory, and `go test -race`. Six parallel WS/WSS × file/CLI override/CLI disable cases each hold 128 application streams across four 75-second load cohorts (300 seconds of load per case). A transparent TCP relay injects 150±100ms one-way latency, 15% delayed retransmissions with 200ms extra delay, and closes the tunnel every six seconds. Production reconnect backoff and two-minute retention remain configured. Each stream independently verifies records and EOF in both directions; later cohorts use different seeds. Noise is configured at 1–3s/1–10KiB, overridden to 100–300ms/128–512 bytes, or disabled by explicitly clearing both interval bounds.
+
+Every two seconds, diagnostics sample heap, RSS, goroutines, private stream/replay/nonces, and transport writer ownership. Each completed cohort must have empty stream/replay state and one writer per peer; after GC, heap growth above the first drained cohort is limited to 8MiB, goroutines to baseline+12, descriptors to baseline+4, and server nonces to 64. The report retains all samples for trend analysis rather than treating these ceilings as proof of no leak. File descriptors use a macOS `lsof` fallback during quiescent samples. Final shutdown requires zero sessions, streams, replay bytes, nonces and transport writers; the relay is joined with zero active connections and queued bytes. Writer completion is the timer cleanup oracle, not enumeration of Go runtime timers. Sampling itself allocates a fixed 4MiB stack census buffer and invokes `ps`; compare post-GC samples at equal load. This is a five-minute load profile, not an overnight or kernel packet-drop test. `SGATE_CONFIG_SOAK_SMOKE=1` selects only a short four-stream preflight and must be reported separately.

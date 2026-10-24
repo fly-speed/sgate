@@ -8,6 +8,7 @@ import (
 )
 
 type Options struct {
+	Stats            *Stats
 	BufferBytes      int
 	MaxStreams       int
 	DialTimeout      time.Duration

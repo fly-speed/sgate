@@ -78,6 +78,15 @@ func (c *Client) dial(ctx context.Context, id string, resume bool) (*websocket.C
 		return nil, nil, 0, err
 	}
 	d := websocket.Dialer{Proxy: http.ProxyFromEnvironment, HandshakeTimeout: c.cfg.Options.DialTimeout, TLSClientConfig: c.cfg.TLSConfig, ReadBufferSize: chunkSize, WriteBufferSize: chunkSize}
+	if stats := c.cfg.Options.Stats; stats != nil {
+		d.NetDialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+			conn, err := (&net.Dialer{KeepAlive: 30 * time.Second}).DialContext(ctx, network, address)
+			if err != nil {
+				return nil, err
+			}
+			return stats.Conn(conn), nil
+		}
+	}
 	ws, response, err := d.DialContext(ctx, c.cfg.URL, headers)
 	if err != nil {
 		status := 0
