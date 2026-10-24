@@ -72,6 +72,26 @@ func sameOrigin(r *http.Request) bool {
 }
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	setSecurityHeaders(w)
+	if h.view.Role == "client" {
+		// 统一尾斜杠，让页面内的相对资源和 API 地址解析到 /admin/ 下。
+		if r.URL.Path == "/admin" {
+			target := "/admin/"
+			if r.URL.RawQuery != "" {
+				target += "?" + r.URL.RawQuery
+			}
+			http.Redirect(w, r, target, http.StatusPermanentRedirect)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/admin/") {
+			// 两个入口共用认证、会话和配置处理，不重复创建管理实例。
+			http.StripPrefix("/admin", http.HandlerFunc(h.serveHTTP)).ServeHTTP(w, r)
+			return
+		}
+	}
+	h.serveHTTP(w, r)
+}
+
+func (h *Handler) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.serveAsset(w, r) {
 		return
 	}

@@ -200,6 +200,9 @@ def stress(
                     return False
                 if v["census"]["streams"] or v["census"]["pending_bytes"]:
                     return False
+                if role == "client" and args.require_client_framework:
+                    if admin[role].runtime()["tcp_connections"] != 0:
+                        return False
             return no_backend()
 
         eventually(drained, 35)
@@ -236,6 +239,10 @@ def stress(
                 v,
             )
             v["role"] = role
+            if role == "client" and args.require_client_framework:
+                v["tcp_framework"] = "go-service"
+                v["tcp_connections"] = admin[role].runtime()["tcp_connections"]
+                assert v["tcp_connections"] == 0, (phase, v)
             samples.append(v)
         eventually(lambda: no_backend())
         return found
@@ -403,6 +410,11 @@ def stress(
         persistent_login=True,
         old_streams_closed=True,
         idle_resources_bounded=True,
+        client_framework_idle_samples=[
+            {key: row[key] for key in ["phase", "pid", "tcp_framework", "tcp_connections"]}
+            for row in samples
+            if row["role"] == "client" and args.require_client_framework
+        ],
         management_load=management_results,
         mixed_seconds=args.mixed_seconds,
         idle_seconds=args.idle_seconds,
@@ -723,6 +735,8 @@ scan_subdir = 0
             )
         if role == "server":
             assert rt["http_framework"] == "gin-service" and rt["management_shared"]
+        elif args.require_client_framework:
+            assert rt["tcp_framework"] == "go-service", rt
         if args.merged:
             assert "noise-min-bytes" in rt["cli_overrides"]
         if args.mode == "managed":
@@ -998,6 +1012,7 @@ scan_subdir = 0
             tls_certificate_reload=secure,
             web_service_restart=args.web_service_restart,
             web_restart_checks=restart_checks.results if restart_checks else [],
+            client_tcp_framework="go-service" if args.require_client_framework else None,
         )
         if args.mode == "managed":
             result.update(
@@ -1106,6 +1121,11 @@ def main():
     parser.add_argument("--mode", choices=["managed", "standalone"], default="managed")
     parser.add_argument("--tls", choices=["both", "ws", "wss"], default="both")
     parser.add_argument("--stress", action="store_true")
+    parser.add_argument(
+        "--require-client-framework",
+        action="store_true",
+        help="verify go-service ownership after every restart and drained framework counters",
+    )
     parser.add_argument("--concurrency", type=int, default=128)
     parser.add_argument("--rounds", type=int, default=6)
     parser.add_argument(

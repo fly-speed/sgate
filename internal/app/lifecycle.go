@@ -94,7 +94,7 @@ func newRunController(
 		return nil, e
 	}
 	overrides.Visit(func(f *flag.Flag) {
-		if hooks.managed != nil || (hooks.httpServer && aclservice.Enabled()) {
+		if hooks.managed != nil || ((hooks.httpServer || role == "client") && aclservice.Enabled()) {
 			switch f.Name {
 			case "f", "n", "t", "s", "c", "u", "v", "alone":
 				return

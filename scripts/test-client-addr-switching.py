@@ -91,6 +91,23 @@ class Case(multi.Case):
             multi.eventually(admin.authenticated)
             if self.client_flags[role]:
                 assert "addr" in admin.runtime()["cli_overrides"], admin.runtime()
+            if self.args.require_client_framework:
+                runtime = admin.runtime()
+                assert runtime["tcp_framework"] == "go-service", runtime
+                assert runtime["listener_owner"] == (
+                    "acl_master" if self.args.mode == "managed" else "sgate"
+                )
+
+    def census(self, phase, idle=True, connected=True):
+        rows = super().census(phase, idle, connected)
+        if idle and self.args.require_client_framework:
+            multi.eventually(
+                lambda: all(
+                    self.admins[role].runtime()["tcp_connections"] == 0 for role in self.roles[1:]
+                ),
+                15,
+            )
+        return rows
 
     def expected(self, index):
         return self.choices[index % 3] or self.default
@@ -355,6 +372,7 @@ def main():
     parser.add_argument("--ctl", default="/opt/soft/acl-master/bin/master_ctl")
     parser.add_argument("--records", type=int, default=128)
     parser.add_argument("--send-addr-toggle", action="store_true")
+    parser.add_argument("--require-client-framework", action="store_true")
     args = parser.parse_args()
     args.selection = "url"
     for name in ["client", "server", "probe"]:

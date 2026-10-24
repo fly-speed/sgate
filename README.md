@@ -30,7 +30,7 @@ Go 编写的通用 TCP 加密通道。客户端和服务端使用标准 HTTP Upg
 
 进程只执行一次 gin-service `Init/Run`。服务端启用管理界面时，管理入口 `/admin/` 与 WSS 共用框架监听；Web 配置应用只替换业务代理并关闭旧会话，HTTP Worker、登录和累计统计保留。已建立的隧道始终属于原代理实例。框架扩展采用每实例可取消生命周期，替代上游全局 Wait/Stop，以支持 TLS、WebSocket 清理及代理热重启。客户端不引入 Gin。
 
-Linux 运行验证可使用 `python3 scripts/test-linux-integration.py --output artifacts/linux-integration`。需要 Linux、本机 Go/C 编译器、Python、OpenSSL、ps、lsof 及可执行的 acl_master/master_ctl（路径不同时通过 `--master`、`--ctl` 指定）。脚本分别构建普通版和竞态版，运行 16 组独立/托管、WS/WSS、相对/绝对路径部署测试，以及 8 组普通/竞态、独立/托管、WS/WSS 压力测试。压力阶段开启随机白噪音、128 并发、频繁断线、默认 6 轮连续重启，并叠加并发登录、配置保存与应用，检查配置保存、代理应用、登录持久化及退出资源。仅使用临时配置和测试端口，不加载已部署服务；输出目录必须为空。`verification.json` 记录运行平台、命令和结果，跨平台构建不计作 Linux 实测。
+Linux 运行验证可使用 `python3 scripts/test-linux-integration.py --output artifacts/linux-integration`。需要 Linux、本机 Go/C 编译器、Python、OpenSSL、ps、lsof 及可执行的 acl_master/master_ctl（路径不同时通过 `--master`、`--ctl` 指定）。脚本分别构建普通版和竞态版，运行 16 组独立/托管、WS/WSS、相对/绝对路径部署测试，以及 8 组普通/竞态、独立/托管、WS/WSS 压力测试。压力阶段开启随机白噪音、128 并发、频繁断线、默认 6 轮连续重启，并叠加并发登录、配置保存与应用，检查配置保存、代理应用、登录持久化及退出资源。仅使用临时配置和测试端口，不加载已部署服务；输出目录必须为空。压力阶段强制检查客户端 `tcp_framework=go-service`，每次重启后重新核验，并将空闲时框架连接数归零的采样写入报告；缺少采样或框架身份不符时整轮失败。`verification.json` 记录运行平台、命令和结果，跨平台构建不计作 Linux 实测。
 
 与两个模板示例一样，手工启动可显式加 `-alone`，客户端和服务端使用相同方式：
 
@@ -120,7 +120,7 @@ python3 scripts/test-merged-standalone.py --client bin/sgate-client --server bin
 
 管理进程需要界面目录的遍历权限、界面文件的读取权限，以及业务配置所在目录的写入权限（用于临时校验、备份和原子替换）。启动时界面文件不可访问会报告具体路径及系统错误；运行中丢失或不可读时，相应页面请求返回 `503`，管理 API 和已有登录会话仍可使用，恢复文件或权限后刷新即可。配置目录不可写时，保存失败，文件和正在运行的代理保持原状。
 
-默认客户端管理地址为 `http://127.0.0.1:9081`；服务端管理地址为代理入口的 `/admin/`，例如 `https://服务器:8080/admin/`，WSS 仍为 `wss://服务器:8080/tunnel`，只需一个 TCP 监听端口。管理界面仍须通过 `admin_enabled = true` 或 `-admin-enabled` 开启。服务端复用代理 `tls-cert`、`tls-key`，原 `admin_listen`、`admin_tls_cert`、`admin_tls_key` 不再创建监听或加载证书；保留 `admin_listen` 原值可维持旧登录 Cookie 的身份。客户端仍使用独立管理监听。管理参数以 `admin_` 为前缀，连字符改为下划线，例如 `admin_session_timeout = 12h`。业务相对路径仍按进程工作目录解析，管理存储、静态目录和证书路径相对 `.cf` 所在目录解析。合并示例中的 `conf/admin-*-users.json`、`conf/admin-*-sessions` 继续指向原存储位置。现有 SSH、VPN、Web 配置可直接作为 `-config`，无需迁移其地址或密码。
+默认客户端管理地址为 `http://127.0.0.1:9081/`，同时支持 `/admin`（跳转至 `/admin/`）和 `/admin/`，三个入口共用账号及登录会话；服务端管理地址为代理入口的 `/admin/`，例如 `https://服务器:8080/admin/`，WSS 仍为 `wss://服务器:8080/tunnel`，只需一个 TCP 监听端口。管理界面仍须通过 `admin_enabled = true` 或 `-admin-enabled` 开启。服务端复用代理 `tls-cert`、`tls-key`，原 `admin_listen`、`admin_tls_cert`、`admin_tls_key` 不再创建监听或加载证书；保留 `admin_listen` 原值可维持旧登录 Cookie 的身份。客户端仍使用独立管理监听。管理参数以 `admin_` 为前缀，连字符改为下划线，例如 `admin_session_timeout = 12h`。业务相对路径仍按进程工作目录解析，管理存储、静态目录和证书路径相对 `.cf` 所在目录解析。合并示例中的 `conf/admin-*-users.json`、`conf/admin-*-sessions` 继续指向原存储位置。现有 SSH、VPN、Web 配置可直接作为 `-config`，无需迁移其地址或密码。
 
 登录后点击右上角“退出登录”，服务端立即删除当前登录对应的持久化会话文件并清除浏览器 Cookie。页面停止流量刷新、清空配置草稿与密码输入，返回登录页；旧 Cookie 不能恢复该会话。其他浏览器的登录会话继续有效。
 
@@ -768,3 +768,7 @@ python3 -B scripts/diagnose-network-memory-parallel.py \
 保持十六组、每组 64 会话和 8 流的内存容量对照可将上述完整规模命令的 `--socket-buffer` 改为 `8192`，并使用独立目录 `artifacts/network-memory-parallel-16-fullscale/bounded-8k`。该值仅约束测试端点缓冲，不改变生产配置、会话队列或并发规模，也不保证消除系统 mbuf 压力；尤其未约束的传输端点仍使用系统默认缓冲。16 KiB 与 8 KiB 档必须分别报告，不能据其中一档推定另一档通过。
 
 传输退出错误同时保留写端原始错误和读端错误，避免写超时关闭套接字后只看到“连接已关闭”。未确认探测失败记录中继首个关闭原因、方向及转发字节数，默认不启用逐包日志。压力测试失败路径也在清理后采样并保存 `closed` 资源状态；退出码仍为失败，清理成功不能替代完整性通过。
+
+客户端 TCP 入口统一使用本地扩展的 `go-service` 模板：`TcpServiceInit → AcceptHandler/CloseHandler → Run`，独立启动与 acl_master 托管共用生命周期。管理 HTTP/HTTPS 端口由独立协程监听；保存应用代理配置不会重建管理监听或清除登录会话。TCP 回调在应用流关闭后才返回，使框架连接计数覆盖完整连接生命周期，并保留 TCP 半关闭能力。独立模式支持端口热修改及失败回滚，托管模式的业务端口由 acl_master 持有，修改后需通过 master_ctl 重启。运行状态提供 `tcp_framework=go-service`、当前连接数 `tcp_connections` 和累计关闭连接数 `tcp_closed_connections`。
+
+`third_party/go-service` 基于 v1.1.2 增加可取消的运行上下文、等待退出和可重启代理工作实例；通过 go.mod 的本地 replace 使用，标准 vendor 由 `scripts/sync-go-vendor.py` 同步。参考示例 `vendor/go-service/examples/go-echod` 保持原样。

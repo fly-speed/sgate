@@ -29,6 +29,7 @@ def stress_command(common, mode, output, rounds):
             "--merged",
             "--stress",
             "--management-stress",
+            "--require-client-framework",
             "--tls",
             "both",
             "--concurrency",
@@ -89,6 +90,12 @@ def collect_results(output, rounds):
                 or not load.get("idle_resources_bounded")
                 or not result.get("ports_released")
                 or not result.get("closed_process_censuses", 0)
+                or result.get("client_tcp_framework") != "go-service"
+                or len(load.get("client_framework_idle_samples", [])) < rounds + 2
+                or any(
+                    row.get("tcp_framework") != "go-service" or row.get("tcp_connections") != 0
+                    for row in load.get("client_framework_idle_samples", [])
+                )
                 or (mode == "managed" and not result.get("web_service_restart"))
             ):
                 raise RuntimeError(f"incomplete stress verification: {path}")

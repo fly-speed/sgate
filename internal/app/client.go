@@ -1,0 +1,75 @@
+package app
+
+import (
+	"context"
+	"flag"
+	"net"
+
+	"sgate/internal/admin"
+)
+
+// TCPService exposes the go-service lifecycle without coupling tunnel code to
+// framework globals. Its workers are disposable application admission queues.
+type TCPService interface {
+	Configure(string) (net.Listener, error)
+	AcceptConn(net.Conn)
+	ActiveConnections() int
+	Context() context.Context
+	Addresses() []string
+	Managed() bool
+	Err() error
+}
+
+// Client starts management separately; go-service owns the business TCP port.
+type Client struct {
+	controller *controller
+	initial    definition
+	adminPath  string
+	stopAdmin  func()
+}
+
+func NewClient(ctx context.Context, fs *flag.FlagSet, args []string, adminPath string) (*Client, error) {
+	c, err := newRunController(ctx, "client", fs, args, adminPath, runtimeHooks{})
+	if err != nil {
+		return nil, err
+	}
+	next, err := c.load("")
+	if err != nil {
+		return nil, err
+	}
+	return &Client{controller: c, initial: next, adminPath: adminPath, stopAdmin: func() {}}, nil
+}
+func (c *Client) Listen() string { return c.initial.listen }
+func (c *Client) Configure(service TCPService) error {
+	controller := c.controller
+	controller.tcp, controller.ctx = service, service.Context()
+	next := c.initial
+	next.tcp = service
+	controller.current = next
+	worker, err := next.start(controller.ctx, controller.stats)
+	if err != nil {
+		return err
+	}
+	controller.worker, controller.generation = worker, 1
+	stop, err := admin.Start(controller.ctx, c.adminPath, controller.managementView())
+	if err != nil {
+		worker.stop()
+		return err
+	}
+	c.stopAdmin = stop
+	return nil
+}
+func (c *Client) Accept(conn net.Conn) { c.controller.tcp.AcceptConn(conn) }
+
+// Closed 只更新计数，避免大量连接同时关闭时争用全局日志锁。
+func (c *Client) Closed(_ net.Conn) { c.controller.tcpClosed.Add(1) }
+func (c *Client) Close() {
+	// Stop HTTP first so a final Apply cannot race cleanup of the TCP worker.
+	c.stopAdmin()
+	c.controller.mu.Lock()
+	defer c.controller.mu.Unlock()
+	if c.controller.worker != nil {
+		_ = c.controller.worker.stop()
+	}
+}
+func (c *Client) Err() error { return c.controller.tcp.Err() }

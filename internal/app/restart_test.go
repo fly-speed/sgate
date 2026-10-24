@@ -118,3 +118,29 @@ func TestServiceRestartCapturesFrameworkFileInsteadOfApplicationOverride(t *test
 		t.Fatal("framework restart target was replaced by the application -config path")
 	}
 }
+
+// Embedded methods are deliberately unused: ownership alone controls the early
+// restart authorization check, before any executable is launched.
+type restartTCPService struct {
+	TCPService
+	managed bool
+}
+
+func (s restartTCPService) Managed() bool { return s.managed }
+func TestTCPFrameworkRestartAuthorization(t *testing.T) {
+	c := &controller{ctx: context.Background(), servicePath: "/test/client.cf", tcp: restartTCPService{managed: true}}
+	if !c.isManaged() {
+		t.Fatal("TCP framework ownership was ignored")
+	}
+	err := c.restartService("", "", os.Getpid())
+	if err == nil || strings.Contains(err.Error(), "仅 acl_master") {
+		t.Fatalf("wrong managed authorization: %v", err)
+	}
+	c.tcp = restartTCPService{managed: false}
+	if c.isManaged() {
+		t.Fatal("standalone TCP service treated as managed")
+	}
+	if err = c.restartService("", "", os.Getpid()); err == nil || !strings.Contains(err.Error(), "仅 acl_master") {
+		t.Fatalf("standalone restart allowed: %v", err)
+	}
+}

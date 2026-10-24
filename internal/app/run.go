@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"sgate/internal/aclservice"
 	"sgate/internal/admin"
@@ -38,6 +39,8 @@ type controller struct {
 	wrapHTTP       func(net.Listener, http.Handler) http.Handler
 	controls       map[string]string
 	service        HTTPService
+	tcp            TCPService
+	tcpClosed      atomic.Uint64
 	shared         *sharedServer
 	sharedMode     bool
 	servicePath    string
@@ -90,6 +93,7 @@ func (c *controller) status() any {
 		}
 	}
 	owner := "sgate"
+	tcpConnections := 0
 	var addresses []string
 	if c.service != nil {
 		addresses = c.service.Addresses()
@@ -98,6 +102,13 @@ func (c *controller) status() any {
 		}
 		if len(addresses) > 0 {
 			address = addresses[0]
+		}
+	}
+	if c.tcp != nil {
+		addresses = c.tcp.Addresses()
+		tcpConnections = c.tcp.ActiveConnections()
+		if c.tcp.Managed() {
+			owner = "acl_master"
 		}
 	}
 	if c.managed != nil {
@@ -118,6 +129,9 @@ func (c *controller) status() any {
 		"listeners":                 addresses,
 		"pid":                       os.Getpid(),
 		"http_framework":            c.httpFramework(),
+		"tcp_framework":             c.tcpFramework(),
+		"tcp_connections":           tcpConnections,
+		"tcp_closed_connections":    c.tcpClosed.Load(),
 		"management_shared":         c.sharedMode,
 		"management_path":           adminRoute,
 		"service_restart_available": owner == "acl_master" && c.servicePath != "",
@@ -138,7 +152,7 @@ func (c *controller) apply() error {
 	if e != nil {
 		return e
 	}
-	if (c.managed != nil || (c.service != nil && c.service.Managed())) && next.listen != c.current.listen {
+	if c.isManaged() && next.listen != c.current.listen {
 		return errors.New("监听端口由 acl_master 管理；请修改 .cf 的 master_service 并通过 master_ctl 重启服务")
 	}
 	controls, e := processSettings(c.path)
@@ -217,6 +231,7 @@ func (c *controller) load(candidate string) (definition, error) {
 	}
 	d, e := build(c.role, fs, c.stats)
 	d.managed = c.managed
+	d.tcp = c.tcp
 	d.wrapHTTP = c.wrapHTTP
 	d.service = c.service
 	d.shared = c.shared
@@ -251,4 +266,16 @@ func (c *controller) httpFramework() string {
 		return "gin-service"
 	}
 	return "net/http"
+}
+
+func (c *controller) tcpFramework() string {
+	if c.tcp != nil {
+		return "go-service"
+	}
+	return "net"
+}
+
+// isManaged keeps apply and whole-service restart on the same ownership rule.
+func (c *controller) isManaged() bool {
+	return c.managed != nil || (c.service != nil && c.service.Managed()) || (c.tcp != nil && c.tcp.Managed())
 }

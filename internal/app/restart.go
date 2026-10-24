@@ -14,7 +14,7 @@ import (
 func (c *controller) restartService(control, socket string, expectedPID int) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	managed := c.managed != nil || (c.service != nil && c.service.Managed())
+	managed := c.isManaged()
 	if !managed || c.servicePath == "" {
 		return errors.New("仅 acl_master 托管模式支持整服务重启")
 	}

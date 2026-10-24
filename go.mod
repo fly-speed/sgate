@@ -45,3 +45,6 @@ require (
 
 // Local lifecycle extension based on acl-dev/gin-service v1.0.2.
 replace github.com/acl-dev/gin-service => ./third_party/gin-service
+
+// Local cancellable TCP lifecycle based on go-service v1.1.2.
+replace github.com/acl-dev/go-service => ./third_party/go-service

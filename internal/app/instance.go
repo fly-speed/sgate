@@ -21,6 +21,7 @@ type definition struct {
 	managed  *aclservice.Pool
 	wrapHTTP func(net.Listener, http.Handler) http.Handler
 	service  HTTPService
+	tcp      TCPService
 	shared   *sharedServer
 }
 type instance struct {
@@ -39,7 +40,9 @@ func (d definition) start(ctx context.Context, stats *tunnel.Stats) (*instance, 
 	}
 	var l net.Listener
 	var e error
-	if d.managed != nil {
+	if d.tcp != nil {
+		l, e = d.tcp.Configure(d.listen)
+	} else if d.managed != nil {
 		l, e = d.managed.Lease()
 	} else {
 		l, e = net.Listen("tcp", d.listen)

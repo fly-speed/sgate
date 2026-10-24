@@ -322,29 +322,11 @@ for role in ["client", "server"]:
         s = edit_once(s, "import (", 'import (\n "time"\n "sgate/internal/tunnel"')
     if role == "server":
         s = edit_once(s, "import (", 'import (\n "time"\n "sgate/internal/tunnel"')
-        s = edit_once(
-            s,
-            "ctx, stop := signal.NotifyContext",
-            "stopMetrics:=configSoakMetrics()\n defer stopMetrics()\n ctx, stop := signal.NotifyContext",
-        )
-    else:
-        if a.managed:
-            s = edit_once(
-                s,
-                "if aclservice.Enabled() {",
-                "if aclservice.Enabled() {\n stopMetrics:=configSoakMetrics()\n defer stopMetrics()",
-            )
-        if a.managed:
-            s = edit_once(
-                s,
-                'if options.adminConfig != "" {',
-                'if options.adminConfig != "" {\n stopMetrics:=configSoakMetrics()\n defer stopMetrics()',
-            )
-        s = edit_once(
-            s,
-            "listener, err := net.Listen",
-            "stopMetrics:=configSoakMetrics()\n defer stopMetrics()\n listener, err := net.Listen",
-        )
+    s = edit_once(
+        s,
+        "ctx, stop := signal.NotifyContext",
+        "stopMetrics:=configSoakMetrics()\n defer stopMetrics()\n ctx, stop := signal.NotifyContext",
+    )
     overlay(f"cmd/sgate-{role}/main.go", s + "\n" + metrics)
 if a.check_registry:
     source = (repo / "internal/tunnel/session_cleanup_test.go").read_text()
@@ -392,7 +374,12 @@ manifest = {
     "binaries": {},
 }
 inputs = [repo / "go.mod", repo / "go.sum", repo / "vendor/modules.txt"]
-for pattern in ["cmd/**/*.go", "internal/**/*.go", "vendor/github.com/acl-dev/gin-service/*.go"]:
+for pattern in [
+    "cmd/**/*.go",
+    "internal/**/*.go",
+    "vendor/github.com/acl-dev/gin-service/*.go",
+    "vendor/github.com/acl-dev/go-service/*.go",
+]:
     inputs.extend(path for path in repo.glob(pattern) if not path.name.endswith("_test.go"))
 if a.watch_goroutines:
     inputs.append(repo / "scripts/soak-goroutine-watch.go.in")

@@ -26,12 +26,16 @@ class LinuxCoverageTests(unittest.TestCase):
                     ports_released=True,
                     closed_process_censuses=11,
                     web_service_restart=mode == "managed",
+                    client_tcp_framework="go-service",
                     stress=dict(
                         concurrency=128,
                         rounds=2,
                         management_load=[dict(status="passed"), dict(status="passed")],
                         persistent_login=True,
                         idle_resources_bounded=True,
+                        client_framework_idle_samples=[
+                            dict(tcp_framework="go-service", tcp_connections=0) for _ in range(4)
+                        ],
                     ),
                 )
             target = self.output / path
@@ -43,6 +47,7 @@ class LinuxCoverageTests(unittest.TestCase):
         self.assertEqual(command[command.index("--tls") + 1], "both")
         self.assertIn("--management-stress", command)
         self.assertIn("--web-service-restart", command)
+        self.assertIn("--require-client-framework", command)
         standalone = RUNNER.stress_command([], "standalone", self.output, 6)
         self.assertNotIn("--web-service-restart", standalone)
         results = RUNNER.collect_results(self.output, 2)
@@ -74,6 +79,22 @@ class LinuxCoverageTests(unittest.TestCase):
         path.write_text(json.dumps(result))
         with self.assertRaisesRegex(RuntimeError, "mismatched scenario"):
             RUNNER.collect_results(self.output, 2)
+
+    def test_framework_identity_and_drained_connections_are_required(self):
+        path = self.output / "race-managed-stress/WS/result.json"
+        original = json.loads(path.read_text())
+        for field in ["identity", "connections", "missing_samples"]:
+            with self.subTest(field=field):
+                result = json.loads(json.dumps(original))
+                if field == "identity":
+                    result["client_tcp_framework"] = "net"
+                elif field == "connections":
+                    result["stress"]["client_framework_idle_samples"][-1]["tcp_connections"] = 1
+                else:
+                    result["stress"].pop("client_framework_idle_samples")
+                path.write_text(json.dumps(result))
+                with self.assertRaisesRegex(RuntimeError, "incomplete stress verification"):
+                    RUNNER.collect_results(self.output, 2)
 
 
 if __name__ == "__main__":

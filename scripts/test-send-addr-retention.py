@@ -398,6 +398,7 @@ def main():
     p.add_argument("--ctl", default="/opt/soft/acl-master/bin/master_ctl")
     args = p.parse_args()
     args.send_addr_toggle, args.selection, args.records = True, "url", 128
+    args.require_client_framework = False
     for key in ["client", "server", "probe"]:
         setattr(args, key, str(pathlib.Path(getattr(args, key)).resolve()))
     case = Case(args)
