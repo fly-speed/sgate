@@ -21,36 +21,70 @@ class ParallelSummaryTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.out = Path(self.directory.name)
-        closed = dict.fromkeys((
-            "backend_connections", "local_connections", "http_connections", "sessions",
-            "streams", "pending_bytes", "nonces", "client_sessions", "client_streams",
-            "client_pending_bytes", "relay_connections", "relay_queued_bytes", "transport_writers",
-        ), 0)
+        closed = dict.fromkeys(
+            (
+                "backend_connections",
+                "local_connections",
+                "http_connections",
+                "sessions",
+                "streams",
+                "pending_bytes",
+                "nonces",
+                "client_sessions",
+                "client_streams",
+                "client_pending_bytes",
+                "relay_connections",
+                "relay_queued_bytes",
+                "transport_writers",
+            ),
+            0,
+        )
         closed.update(phase="closed", goroutines=2, file_descriptors=6)
         for mode in ("control", "fragmented"):
-            report = dict(tls=True, weak_network=True, independent_duplex=True,
-                          clients=64, streams_per_client=4, session_retention="2m0s",
-                          verified_upload_bytes=1024, verified_download_bytes=1024,
-                          unconfirmed_release_milliseconds=120000, unconfirmed_mode=mode,
-                          samples=[closed])
+            report = dict(
+                tls=True,
+                weak_network=True,
+                independent_duplex=True,
+                clients=64,
+                streams_per_client=4,
+                session_retention="2m0s",
+                verified_upload_bytes=1024,
+                verified_download_bytes=1024,
+                unconfirmed_release_milliseconds=120000,
+                unconfirmed_mode=mode,
+                samples=[closed],
+            )
             (self.out / f"plain-{mode}.json").write_text(json.dumps(report))
         self.args = types.SimpleNamespace(streams=4, start_offset=2)
 
     @staticmethod
     def observation(processes=None):
-        return dict(network_memory_denied=0, pool_failures={"mbuf": 0},
-                    cluster_pools_kb={"16": {"in_use": 0, "allocated": 1}},
-                    details={} if processes is None else {"processes": processes})
+        return dict(
+            network_memory_denied=0,
+            pool_failures={"mbuf": 0},
+            cluster_pools_kb={"16": {"in_use": 0, "allocated": 1}},
+            details={} if processes is None else {"processes": processes},
+        )
 
     def test_empty_warmup_and_shutdown_do_not_hide_live_measurements(self):
-        samples = [self.observation(), self.observation({
-            "101": {"tcp_descriptors": 100, "rss_bytes": 1024},
-            "102": {"tcp_descriptors": 200, "rss_bytes": 2048},
-        }), self.observation({})]
+        samples = [
+            self.observation(),
+            self.observation(
+                {
+                    "101": {"tcp_descriptors": 100, "rss_bytes": 1024},
+                    "102": {"tcp_descriptors": 200, "rss_bytes": 2048},
+                }
+            ),
+            self.observation({}),
+        ]
         with contextlib.redirect_stdout(io.StringIO()):
             result = DIAGNOSTIC.summarize_group(
-                self.args, "plain", self.out, samples,
-                {"101": "control", "102": "fragmented"}, [],
+                self.args,
+                "plain",
+                self.out,
+                samples,
+                {"101": "control", "102": "fragmented"},
+                [],
             )
         self.assertEqual(result["peak_tcp_descriptors"], 300)
         self.assertEqual(result["sampled_peak_combined_rss_bytes"], 3072)
@@ -63,13 +97,17 @@ class ParallelSummaryTests(unittest.TestCase):
                 (self.out / f"plain-{mode}.json").read_text()
             )
         self.args.processes = 4
-        processes = {str(pid): {"tcp_descriptors": 100, "rss_bytes": 1024}
-                     for pid in range(101, 105)}
+        processes = {
+            str(pid): {"tcp_descriptors": 100, "rss_bytes": 1024} for pid in range(101, 105)
+        }
         with contextlib.redirect_stdout(io.StringIO()):
             result = DIAGNOSTIC.summarize_group(
-                self.args, "plain", self.out,
+                self.args,
+                "plain",
+                self.out,
                 [self.observation(), self.observation(processes), self.observation({})],
-                dict(zip(processes, [label for label, _ in cases])), [],
+                dict(zip(processes, [label for label, _ in cases])),
+                [],
             )
         self.assertEqual(len(result["results"]), 4)
         self.assertEqual(result["peak_tcp_descriptors"], 400)
@@ -91,13 +129,17 @@ class ParallelSummaryTests(unittest.TestCase):
                 (self.out / f"plain-{mode}.json").read_text()
             )
         self.args.processes = count
-        processes = {str(pid): {"tcp_descriptors": 100, "rss_bytes": 1024}
-                     for pid in range(101, 101 + count)}
+        processes = {
+            str(pid): {"tcp_descriptors": 100, "rss_bytes": 1024} for pid in range(101, 101 + count)
+        }
         with contextlib.redirect_stdout(io.StringIO()):
             result = DIAGNOSTIC.summarize_group(
-                self.args, "plain", self.out,
+                self.args,
+                "plain",
+                self.out,
                 [self.observation(), self.observation(processes), self.observation({})],
-                dict(zip(processes, [label for label, _ in cases])), [],
+                dict(zip(processes, [label for label, _ in cases])),
+                [],
             )
         self.assertEqual(len(result["results"]), count)
         self.assertEqual(result["peak_tcp_descriptors"], count * 100)
@@ -105,8 +147,11 @@ class ParallelSummaryTests(unittest.TestCase):
 
     def test_optional_vmmap_timeout_is_saved_without_aborting(self):
         path = self.out / "vmmap.txt"
-        with mock.patch.object(DIAGNOSTIC.subprocess, "run", side_effect=
-                               DIAGNOSTIC.subprocess.TimeoutExpired("vmmap", 5)):
+        with mock.patch.object(
+            DIAGNOSTIC.subprocess,
+            "run",
+            side_effect=DIAGNOSTIC.subprocess.TimeoutExpired("vmmap", 5),
+        ):
             DIAGNOSTIC.capture_vmmap(123, path)
         self.assertIn("vmmap unavailable for test PID 123", path.read_text())
         self.assertIn("Started:", path.read_text())
@@ -114,21 +159,28 @@ class ParallelSummaryTests(unittest.TestCase):
 
     def test_socket_inventory_timeout_retains_rss_and_marks_tcp_unknown(self):
         child = types.SimpleNamespace(pid=101, poll=lambda: None)
-        with mock.patch.object(DIAGNOSTIC.serial, "command", side_effect=[
-            "101 32\n", DIAGNOSTIC.subprocess.TimeoutExpired("lsof", 10),
-        ]):
+        with mock.patch.object(
+            DIAGNOSTIC.serial,
+            "command",
+            side_effect=[
+                "101 32\n",
+                DIAGNOSTIC.subprocess.TimeoutExpired("lsof", 10),
+            ],
+        ):
             rows = DIAGNOSTIC.process_details([child])
-        self.assertEqual(rows["101"]["rss_bytes"], 32*1024)
+        self.assertEqual(rows["101"]["rss_bytes"], 32 * 1024)
         self.assertIsNone(rows["101"]["tcp_descriptors"])
         self.assertIn("timed out", rows["101"]["tcp_telemetry_error"])
 
     def test_tcp_telemetry_distinguishes_address_families_and_time_wait(self):
-        raw = "\n".join((
-            "tcp4 0 0 127.0.0.1.51000 127.0.0.1.52000 ESTABLISHED",
-            "tcp4 0 0 127.0.0.1.51001 127.0.0.1.52000 TIME_WAIT",
-            "tcp6 0 0 ::1.51000 ::1.52000 ESTABLISHED",
-            "tcp4 0 0 192.168.1.2.51002 1.2.3.4.52000 ESTABLISHED",
-        ))
+        raw = "\n".join(
+            (
+                "tcp4 0 0 127.0.0.1.51000 127.0.0.1.52000 ESTABLISHED",
+                "tcp4 0 0 127.0.0.1.51001 127.0.0.1.52000 TIME_WAIT",
+                "tcp6 0 0 ::1.51000 ::1.52000 ESTABLISHED",
+                "tcp4 0 0 192.168.1.2.51002 1.2.3.4.52000 ESTABLISHED",
+            )
+        )
         with mock.patch.object(DIAGNOSTIC.serial, "command", return_value=raw):
             result = DIAGNOSTIC.tcp_states({52000})
         self.assertEqual(result["test_listener_related"], {"ESTABLISHED": 2, "TIME_WAIT": 1})
@@ -136,12 +188,25 @@ class ParallelSummaryTests(unittest.TestCase):
         self.assertEqual(result["loopback_ephemeral_ports_by_state"]["127.0.0.1"]["TIME_WAIT"], 1)
 
     def test_resume_rejects_a_different_backend_family(self):
-        (self.out / "summary.json").write_text(json.dumps({"backend_host": "127.0.0.1", "runs": []}))
-        with mock.patch.object(DIAGNOSTIC.sys, "argv", [
-            "diagnose", "--backend-host", "::1", "--output", str(self.out),
-        ]), mock.patch.object(DIAGNOSTIC.sys, "platform", "darwin"), \
-                mock.patch.object(DIAGNOSTIC, "run_group") as run, \
-                contextlib.redirect_stderr(io.StringIO()):
+        (self.out / "summary.json").write_text(
+            json.dumps({"backend_host": "127.0.0.1", "runs": []})
+        )
+        with (
+            mock.patch.object(
+                DIAGNOSTIC.sys,
+                "argv",
+                [
+                    "diagnose",
+                    "--backend-host",
+                    "::1",
+                    "--output",
+                    str(self.out),
+                ],
+            ),
+            mock.patch.object(DIAGNOSTIC.sys, "platform", "darwin"),
+            mock.patch.object(DIAGNOSTIC, "run_group") as run,
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
             with self.assertRaises(SystemExit) as caught:
                 DIAGNOSTIC.main()
         self.assertEqual(caught.exception.code, 2)
@@ -149,23 +214,51 @@ class ParallelSummaryTests(unittest.TestCase):
 
     def test_resume_rejects_a_different_cohort_settle(self):
         (self.out / "summary.json").write_text(json.dumps({"cohort_settle": "0s", "runs": []}))
-        with mock.patch.object(DIAGNOSTIC.sys, "argv", [
-            "diagnose", "--cohort-settle", "35s", "--output", str(self.out),
-        ]), mock.patch.object(DIAGNOSTIC.sys, "platform", "darwin"), \
-                mock.patch.object(DIAGNOSTIC, "run_group") as run, \
-                contextlib.redirect_stderr(io.StringIO()):
+        with (
+            mock.patch.object(
+                DIAGNOSTIC.sys,
+                "argv",
+                [
+                    "diagnose",
+                    "--cohort-settle",
+                    "35s",
+                    "--output",
+                    str(self.out),
+                ],
+            ),
+            mock.patch.object(DIAGNOSTIC.sys, "platform", "darwin"),
+            mock.patch.object(DIAGNOSTIC, "run_group") as run,
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
             with self.assertRaises(SystemExit) as caught:
                 DIAGNOSTIC.main()
         self.assertEqual(caught.exception.code, 2)
         run.assert_not_called()
 
     def test_failed_plain_run_does_not_skip_race_comparison(self):
-        with mock.patch.object(DIAGNOSTIC.sys, "argv", [
-            "diagnose", "--processes", "4", "--output", str(self.out),
-        ]), mock.patch.object(DIAGNOSTIC.sys, "platform", "darwin"), \
-                mock.patch.object(DIAGNOSTIC, "run_group", side_effect=[
-                    RuntimeError("one child failed"), {"variant": "race"},
-                ]) as run, contextlib.redirect_stdout(io.StringIO()):
+        with (
+            mock.patch.object(
+                DIAGNOSTIC.sys,
+                "argv",
+                [
+                    "diagnose",
+                    "--processes",
+                    "4",
+                    "--output",
+                    str(self.out),
+                ],
+            ),
+            mock.patch.object(DIAGNOSTIC.sys, "platform", "darwin"),
+            mock.patch.object(
+                DIAGNOSTIC,
+                "run_group",
+                side_effect=[
+                    RuntimeError("one child failed"),
+                    {"variant": "race"},
+                ],
+            ) as run,
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
             with self.assertRaises(SystemExit) as caught:
                 DIAGNOSTIC.main()
         self.assertEqual(caught.exception.code, 1)
@@ -178,21 +271,45 @@ class ParallelSummaryTests(unittest.TestCase):
     def test_successful_retry_clears_its_previous_failure(self):
         failure_path = self.out / "failures.json"
         failure_path.write_text(json.dumps([{"variant": "plain", "error": "old failure"}]))
-        with mock.patch.object(DIAGNOSTIC.sys, "argv", [
-            "diagnose", "--processes", "4", "--variants", "plain", "--output", str(self.out),
-        ]), mock.patch.object(DIAGNOSTIC.sys, "platform", "darwin"), \
-                mock.patch.object(DIAGNOSTIC, "run_group", return_value={"variant": "plain"}), \
-                contextlib.redirect_stdout(io.StringIO()):
+        with (
+            mock.patch.object(
+                DIAGNOSTIC.sys,
+                "argv",
+                [
+                    "diagnose",
+                    "--processes",
+                    "4",
+                    "--variants",
+                    "plain",
+                    "--output",
+                    str(self.out),
+                ],
+            ),
+            mock.patch.object(DIAGNOSTIC.sys, "platform", "darwin"),
+            mock.patch.object(DIAGNOSTIC, "run_group", return_value={"variant": "plain"}),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
             DIAGNOSTIC.main()
         self.assertFalse(failure_path.exists())
 
     def test_resume_rejects_a_different_parallel_count(self):
         (self.out / "summary.json").write_text(json.dumps({"parallel_processes": 2, "runs": []}))
-        with mock.patch.object(DIAGNOSTIC.sys, "argv", [
-            "diagnose", "--processes", "4", "--output", str(self.out),
-        ]), mock.patch.object(DIAGNOSTIC.sys, "platform", "darwin"), \
-                mock.patch.object(DIAGNOSTIC, "run_group") as run, \
-                contextlib.redirect_stderr(io.StringIO()):
+        with (
+            mock.patch.object(
+                DIAGNOSTIC.sys,
+                "argv",
+                [
+                    "diagnose",
+                    "--processes",
+                    "4",
+                    "--output",
+                    str(self.out),
+                ],
+            ),
+            mock.patch.object(DIAGNOSTIC.sys, "platform", "darwin"),
+            mock.patch.object(DIAGNOSTIC, "run_group") as run,
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
             with self.assertRaises(SystemExit) as caught:
                 DIAGNOSTIC.main()
         self.assertEqual(caught.exception.code, 2)
@@ -207,9 +324,9 @@ class ParallelSummaryTests(unittest.TestCase):
 
     def test_socket_bound_covers_both_rounds_and_the_expiring_cohort(self):
         report = json.loads((self.out / "plain-control.json").read_text())
-        report.update(socket_buffer_bytes=16384, backend_sockets_bound=64*4*3)
+        report.update(socket_buffer_bytes=16384, backend_sockets_bound=64 * 4 * 3)
         DIAGNOSTIC.validate(report, 4)
-        report["backend_sockets_bound"] = 64*4*2
+        report["backend_sockets_bound"] = 64 * 4 * 2
         with self.assertRaisesRegex(AssertionError, "all three cohorts"):
             DIAGNOSTIC.validate(report, 4)
 
@@ -221,11 +338,24 @@ class ParallelSummaryTests(unittest.TestCase):
 
     def test_resume_rejects_a_different_client_count(self):
         (self.out / "summary.json").write_text(json.dumps({"clients_per_process": 64, "runs": []}))
-        with mock.patch.object(DIAGNOSTIC.sys, "argv", [
-            "diagnose", "--processes", "16", "--clients", "32", "--output", str(self.out),
-        ]), mock.patch.object(DIAGNOSTIC.sys, "platform", "darwin"), \
-                mock.patch.object(DIAGNOSTIC, "run_group") as run, \
-                contextlib.redirect_stderr(io.StringIO()):
+        with (
+            mock.patch.object(
+                DIAGNOSTIC.sys,
+                "argv",
+                [
+                    "diagnose",
+                    "--processes",
+                    "16",
+                    "--clients",
+                    "32",
+                    "--output",
+                    str(self.out),
+                ],
+            ),
+            mock.patch.object(DIAGNOSTIC.sys, "platform", "darwin"),
+            mock.patch.object(DIAGNOSTIC, "run_group") as run,
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
             with self.assertRaises(SystemExit) as caught:
                 DIAGNOSTIC.main()
         self.assertEqual(caught.exception.code, 2)
@@ -256,11 +386,15 @@ class ParallelSummaryTests(unittest.TestCase):
         for label, ready, until in (("control", 1000, 2000), ("fragmented", 1500, 2500)):
             path = self.out / f"plain-{label}.json"
             report = json.loads(path.read_text())
-            report["load_windows"] = [dict(round=1, streams=256, ready_unix_nano=ready, send_until_unix_nano=until)]
+            report["load_windows"] = [
+                dict(round=1, streams=256, ready_unix_nano=ready, send_until_unix_nano=until)
+            ]
             path.write_text(json.dumps(report))
         with contextlib.redirect_stdout(io.StringIO()):
-            row = DIAGNOSTIC.summarize_group(self.args, "plain", self.out, [self.observation()], {}, [])
-        self.assertEqual(row["full_load_overlap_seconds"], {"1": 500/1e9})
+            row = DIAGNOSTIC.summarize_group(
+                self.args, "plain", self.out, [self.observation()], {}, []
+            )
+        self.assertEqual(row["full_load_overlap_seconds"], {"1": 500 / 1e9})
         path = self.out / "plain-fragmented.json"
         report = json.loads(path.read_text())
         report["load_windows"][0].update(ready_unix_nano=2500, send_until_unix_nano=3500)
@@ -272,7 +406,12 @@ class ParallelSummaryTests(unittest.TestCase):
         samples = [self.observation(), self.observation({})]
         with self.assertRaisesRegex(RuntimeError, "missing TCP telemetry"):
             DIAGNOSTIC.summarize_group(
-                self.args, "plain", self.out, samples, {"101": "control"}, [],
+                self.args,
+                "plain",
+                self.out,
+                samples,
+                {"101": "control"},
+                [],
             )
 
 

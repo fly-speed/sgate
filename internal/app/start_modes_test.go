@@ -44,13 +44,21 @@ func TestStandaloneStartModesBinaries(t *testing.T) {
 						}
 						conns.Store(c, true)
 						peers.Add(1)
-						go func() { defer peers.Done(); defer conns.Delete(c); defer c.Close(); io.Copy(c, c) }()
+						go func() {
+							defer peers.Done()
+							defer conns.Delete(c)
+							defer c.Close()
+							io.Copy(c, c)
+						}()
 					}
 				}()
 				t.Cleanup(func() {
 					backend.Close()
 					<-acceptDone
-					conns.Range(func(k, v any) bool { k.(net.Conn).Close(); return true })
+					conns.Range(func(k, v any) bool {
+						k.(net.Conn).Close()
+						return true
+					})
 					peers.Wait()
 				})
 				cert, tlsKey := "", ""
@@ -99,7 +107,16 @@ func TestStandaloneStartModesBinaries(t *testing.T) {
 					if e != nil {
 						t.Fatal(e)
 					}
-					args := []string{"-listen", addresses[role], "-key-file", key, "-password", "standalone-test-password", "-max-streams", "64"}
+					args := []string{
+						"-listen",
+						addresses[role],
+						"-key-file",
+						key,
+						"-password",
+						"standalone-test-password",
+						"-max-streams",
+						"64",
+					}
 					if role == "server" {
 						args = append(args, "-target", backend.Addr().String())
 						if secure {
@@ -148,7 +165,11 @@ func TestStandaloneStartModesBinaries(t *testing.T) {
 						t.Fatal(e)
 					}
 					children[role] = c
-					go func() { c.err = c.cmd.Wait(); f.Close(); close(c.done) }()
+					go func() {
+						c.err = c.cmd.Wait()
+						f.Close()
+						close(c.done)
+					}()
 					t.Cleanup(func() { stop(role) })
 				}
 				exchange := func(index int) error {
@@ -181,7 +202,11 @@ func TestStandaloneStartModesBinaries(t *testing.T) {
 				start := make(chan struct{})
 				for i := 0; i < count; i++ {
 					wg.Add(1)
-					go func(i int) { defer wg.Done(); <-start; errs <- exchange(i) }(i)
+					go func(i int) {
+						defer wg.Done()
+						<-start
+						errs <- exchange(i)
+					}(i)
 				}
 				close(start)
 				wg.Wait()
@@ -200,7 +225,8 @@ func TestStandaloneStartModesBinaries(t *testing.T) {
 					}
 					l.Close()
 				}
-				t.Log("both roles: standalone startup, unique duplex bytes, SIGINT shutdown and listener release passed")
+				t.Log(("both roles: standalone startup, unique duplex bytes, SIGINT shutdown and listener " +
+					"release passed"))
 			})
 		}
 	}

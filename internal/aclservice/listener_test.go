@@ -34,14 +34,21 @@ func TestInheritedListenersLeaseRestartAndShutdown(t *testing.T) {
 			}
 			c.SetDeadline(time.Now().Add(time.Second))
 			accepted := make(chan net.Conn, 1)
-			go func() { c, _ := lease.Accept(); accepted <- c }()
+			go func() {
+				c, _ := lease.Accept()
+				accepted <- c
+			}()
 			peer := <-accepted
 			if peer == nil {
 				t.Fatal("accepted nil")
 			}
 			peer.SetDeadline(time.Now().Add(time.Second))
 			done := make(chan error, 1)
-			go func() { _, e := peer.Write([]byte{byte(round)}); peer.Close(); done <- e }()
+			go func() {
+				_, e := peer.Write([]byte{byte(round)})
+				peer.Close()
+				done <- e
+			}()
 			b := make([]byte, 1)
 			if _, e := io.ReadFull(c, b); e != nil || b[0] != byte(round) {
 				t.Fatal("wrong generation", e)
@@ -66,7 +73,10 @@ func TestInheritedListenersLeaseRestartAndShutdown(t *testing.T) {
 		t.Fatal(e)
 	}
 	done := make(chan error, 1)
-	go func() { _, e := lease.Accept(); done <- e }()
+	go func() {
+		_, e := lease.Accept()
+		done <- e
+	}()
 	p.Close()
 	select {
 	case e := <-done:

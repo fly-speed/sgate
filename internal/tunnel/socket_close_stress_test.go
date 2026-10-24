@@ -82,7 +82,11 @@ func TestStressDirectTCPShutdown(t *testing.T) {
 			defer wg.Done()
 			defer c.Close()
 			sent := make(chan struct{})
-			go func() { defer close(sent); <-gate; _, _ = io.Copy(c, bytes.NewReader(payload)) }()
+			go func() {
+				defer close(sent)
+				<-gate
+				_, _ = io.Copy(c, bytes.NewReader(payload))
+			}()
 			var b [1]byte
 			_, e := c.Read(b[:])
 			result <- e

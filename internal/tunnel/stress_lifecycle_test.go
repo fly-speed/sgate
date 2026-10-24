@@ -104,7 +104,11 @@ func (p *stressLifecycleProbe) exchange(c net.Conn, seed uint64, backend bool) {
 	}
 	<-sent
 	if p.results != nil {
-		p.results <- stressProbeResult{seed: seed, backend: backend, complete: len(got) == p.payloadBytes && err == nil && writeErr == nil}
+		p.results <- stressProbeResult{
+			seed:     seed,
+			backend:  backend,
+			complete: len(got) == p.payloadBytes && err == nil && writeErr == nil,
+		}
 	}
 }
 
@@ -129,7 +133,10 @@ func TestStressLifecycleVerifierRejectsInvalidPrefixes(t *testing.T) {
 			p.wg.Add(1)
 			p.start()
 			drained := make(chan struct{})
-			go func() { defer close(drained); _, _ = io.Copy(io.Discard, peer) }()
+			go func() {
+				defer close(drained)
+				_, _ = io.Copy(io.Discard, peer)
+			}()
 			go p.exchange(app, seed, false)
 			_, _ = peer.Write(c.data)
 			peer.Close()
@@ -186,7 +193,8 @@ func stressLifecyclePhase(t *testing.T, f stressLifecycleContext) {
 	if defaultRetention {
 		p.timeout = 160 * time.Second
 	}
-	if f.kind == "tls-timeout" || f.kind == "abandoned" || f.kind == "silent" || f.kind == "control" || f.kind == "fragmented" {
+	if f.kind == "tls-timeout" || f.kind == "abandoned" || f.kind == "silent" || f.kind == "control" ||
+		f.kind == "fragmented" {
 		retention := f.serverConfig.SessionTTL
 		if retention == 0 {
 			retention = 2 * time.Minute
@@ -284,7 +292,8 @@ func stressLifecyclePhase(t *testing.T, f stressLifecycleContext) {
 		return true
 	})
 	f.sample(f.kind+"-buffered", f.round, true)
-	if f.kind == "tls-timeout" || f.kind == "abandoned" || f.kind == "silent" || f.kind == "control" || f.kind == "fragmented" {
+	if f.kind == "tls-timeout" || f.kind == "abandoned" || f.kind == "silent" || f.kind == "control" ||
+		f.kind == "fragmented" {
 		stressUnconfirmedRecovery(t, f, p, outageStart, clients, remotes)
 		return
 	}
@@ -334,7 +343,10 @@ func stressLifecyclePhase(t *testing.T, f stressLifecycleContext) {
 					}
 				}
 				if time.Now().After(logAt) {
-					t.Logf("default retention offline %s: old padding writers stopped; waiting for expiry", time.Since(outageStart).Round(time.Second))
+					t.Logf(
+						"default retention offline %s: old padding writers stopped; waiting for expiry",
+						time.Since(outageStart).Round(time.Second),
+					)
 					logAt = time.Now().Add(30 * time.Second)
 				}
 			}
@@ -349,7 +361,10 @@ func stressLifecyclePhase(t *testing.T, f stressLifecycleContext) {
 			return empty
 		})
 		if defaultRetention {
-			stressWaitForBudget(t, "default client offline retention released", max(125*time.Second-time.Since(outageStart), time.Second), func() bool {
+			stressWaitForBudget(t, "default client offline retention released", max(
+				125*time.Second-time.Since(outageStart),
+				time.Second,
+			), func() bool {
 				for _, s := range clients {
 					if !sessionReleased(s) {
 						return false
@@ -357,9 +372,17 @@ func stressLifecyclePhase(t *testing.T, f stressLifecycleContext) {
 				}
 				return true
 			})
-			stressWaitFor(t, "old application sockets released before network recovery", func() bool { return f.backendCount.active.Load() == 0 && f.localCount.active.Load() == 0 })
+			stressWaitFor(
+				t,
+				"old application sockets released before network recovery",
+				func() bool { return f.backendCount.active.Load() == 0 && f.localCount.active.Load() == 0 },
+			)
 			f.sample("expiry-offline-expired", f.round, true)
-			t.Logf("default retention released all old sessions and sockets after %s, while network was still blocked", time.Since(outageStart).Round(time.Millisecond))
+			t.Logf(
+				("default retention released all old sessions and sockets after %s, while network was " +
+					"still blocked"),
+				time.Since(outageStart).Round(time.Millisecond),
+			)
 		} else {
 			for _, s := range clients {
 				s.mu.Lock()
@@ -389,7 +412,10 @@ func stressLifecyclePhase(t *testing.T, f stressLifecycleContext) {
 		return true
 	})
 	done := make(chan struct{})
-	go func() { p.wg.Wait(); close(done) }()
+	go func() {
+		p.wg.Wait()
+		close(done)
+	}()
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):
@@ -404,8 +430,17 @@ func stressLifecyclePhase(t *testing.T, f stressLifecycleContext) {
 		f.applicationConns.Delete(c)
 	}
 	stressWaitFor(t, "fresh lifecycle transports", f.attached)
-	stressWaitFor(t, "lifecycle application connections released", func() bool { return f.backendCount.active.Load() == 0 && f.localCount.active.Load() == 0 })
+	stressWaitFor(
+		t,
+		"lifecycle application connections released",
+		func() bool { return f.backendCount.active.Load() == 0 && f.localCount.active.Load() == 0 },
+	)
 	f.peer.Store(nil)
 	f.sample(f.kind+"-recovered", f.round, true)
-	t.Logf("%s phase: %d interrupted streams released; old sessions, replay queues and transport timers released; fresh transports connected", f.kind, n)
+	t.Logf(
+		("%s phase: %d interrupted streams released; old sessions, replay queues and transport " +
+			"timers released; fresh transports connected"),
+		f.kind,
+		n,
+	)
 }

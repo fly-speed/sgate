@@ -111,11 +111,19 @@ func TestPingDoesNotBlockAcknowledgementBehindDataWrite(t *testing.T) {
 		c := ws.UnderlyingConn().(*resumeBlockedConn)
 		c.release = make(chan struct{})
 		c.blocked.Store(true)
-		done <- s.transportConfirmed(ws, newCodec(key, "id", "client", "server", false), time.Now().Add(5*time.Second), func() { close(confirmed) })
+		done <- s.transportConfirmed(
+			ws,
+			newCodec(key, "id", "client", "server", false),
+			time.Now().Add(5*time.Second),
+			func() { close(confirmed) },
+		)
 	}))
 	h.Listener = resumeBlockedListener{h.Listener, accepted}
 	h.Start()
-	t.Cleanup(func() { s.close(); h.Close() })
+	t.Cleanup(func() {
+		s.close()
+		h.Close()
+	})
 	ws, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(h.URL, "http"), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -137,7 +145,8 @@ func TestPingDoesNotBlockAcknowledgementBehindDataWrite(t *testing.T) {
 	select {
 	case <-confirmed:
 	case <-time.After(time.Second):
-		t.Fatal("Ping reply blocked the reader from processing a valid ACK while data write was stalled")
+		t.Fatal(("Ping reply blocked the reader from processing a valid ACK while data write was " +
+			"stalled"))
 	}
 	s.mu.Lock()
 	pending := s.pendingBytes
@@ -146,7 +155,10 @@ func TestPingDoesNotBlockAcknowledgementBehindDataWrite(t *testing.T) {
 		t.Fatal("ACK did not release pending data")
 	}
 	pong := make(chan string, 1)
-	ws.SetPongHandler(func(data string) error { pong <- data; return nil })
+	ws.SetPongHandler(func(data string) error {
+		pong <- data
+		return nil
+	})
 	c.blocked.Store(false)
 	close(c.release)
 	readDone := make(chan struct{})
@@ -158,7 +170,10 @@ func TestPingDoesNotBlockAcknowledgementBehindDataWrite(t *testing.T) {
 			}
 		}
 	}()
-	defer func() { ws.Close(); <-readDone }()
+	defer func() {
+		ws.Close()
+		<-readDone
+	}()
 	select {
 	case data := <-pong:
 		if data != "echo" {

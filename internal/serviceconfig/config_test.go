@@ -25,7 +25,21 @@ func file(t *testing.T, text string) string {
 	return path
 }
 func TestMergedTemplateConfigAndPrecedence(t *testing.T) {
-	path := file(t, "service test {\n master_service = 127.0.0.1|9000\n master_args =\n listen = file\n password = \" a # secret=ok \\\" \\\\ \" # comment\n noise-interval-min = 1s\n noise-interval-max = 3s\n admin_enabled = true\n admin_listen = 127.0.0.1:9082\n admin_web_dir = web/admin\n admin_session_timeout = 2h\n}\n")
+	path := file(
+		t,
+		("service test {\n" +
+			" master_service = 127.0.0.1|9000\n" +
+			" master_args =\n" +
+			" listen = file\n" +
+			" password = \" a # secret=ok \\\" \\\\ \" # comment\n" +
+			" noise-interval-min = 1s\n" +
+			" noise-interval-max = 3s\n" +
+			" admin_enabled = true\n" +
+			" admin_listen = 127.0.0.1:9082\n" +
+			" admin_web_dir = web/admin\n" +
+			" admin_session_timeout = 2h\n" +
+			"}\n"),
+	)
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.String("f", "", "")
@@ -37,14 +51,16 @@ func TestMergedTemplateConfigAndPrecedence(t *testing.T) {
 	if e := cli.Parse(fs, []string{"-f", path, "-listen", "override", "-noise-interval-min=0", "-noise-interval-max=0"}); e != nil {
 		t.Fatal(e)
 	}
-	if *listen != "override" || *password != " a # secret=ok \" \\ " || *min != 0 || *max != 0 || !*enabled || fs.Lookup("config").Value.String() != path {
+	if *listen != "override" || *password != " a # secret=ok \" \\ " || *min != 0 || *max != 0 || !*enabled ||
+		fs.Lookup("config").Value.String() != path {
 		t.Fatal("merged precedence or quoted secret changed")
 	}
 	cfg, e := admin.LoadConfig(path)
 	if e != nil {
 		t.Fatal(e)
 	}
-	if cfg.Listen != "127.0.0.1:9082" || cfg.SessionTimeout != 2*time.Hour || cfg.WebDir != filepath.Join(filepath.Dir(path), "web/admin") {
+	if cfg.Listen != "127.0.0.1:9082" || cfg.SessionTimeout != 2*time.Hour ||
+		cfg.WebDir != filepath.Join(filepath.Dir(path), "web/admin") {
 		t.Fatal("management namespace or relative paths changed")
 	}
 }
@@ -123,7 +139,9 @@ func TestShippedMigrationPreservesValues(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		if cfg.UsersFile != filepath.Join(root, "conf/admin-"+role+"-users.json") || cfg.SessionDir != filepath.Join(root, "conf/admin-"+role+"-sessions") || cfg.WebDir != filepath.Join(root, "web/admin") {
+		if cfg.UsersFile != filepath.Join(root, "conf/admin-"+role+"-users.json") ||
+			cfg.SessionDir != filepath.Join(root, "conf/admin-"+role+"-sessions") ||
+			cfg.WebDir != filepath.Join(root, "web/admin") {
 			t.Fatal("management storage/UI path changed")
 		}
 		for _, line := range strings.Split(old["admin-"+role+".conf"], "\n") {

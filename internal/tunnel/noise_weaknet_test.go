@@ -103,9 +103,19 @@ func TestNoiseWeakNetworkIndependentDuplex(t *testing.T) {
 				client, remote := f.clientSession(), f.remoteSession()
 				checkNoise := weakNoiseProgress(t, f)
 				accepted := relay.accepted.Load()
-				relay.profile.Store(&weakProfile{delay: 150 * time.Millisecond, jitter: 100 * time.Millisecond, lossPercent: 15, retransmit: 200 * time.Millisecond})
+				relay.profile.Store(&weakProfile{
+					delay:       150 * time.Millisecond,
+					jitter:      100 * time.Millisecond,
+					lossPercent: 15,
+					retransmit:  200 * time.Millisecond,
+				})
 				if direction >= 0 {
-					relay.profile.Store(&weakProfile{delay: 20 * time.Millisecond, jitter: 10 * time.Millisecond, lossPercent: 10, retransmit: 50 * time.Millisecond})
+					relay.profile.Store(&weakProfile{
+						delay:       20 * time.Millisecond,
+						jitter:      10 * time.Millisecond,
+						lossPercent: 10,
+						retransmit:  50 * time.Millisecond,
+					})
 				}
 				app := f.dial()
 				defer app.Close()
@@ -114,7 +124,11 @@ func TestNoiseWeakNetworkIndependentDuplex(t *testing.T) {
 					clientDone <- stressDuplex(app, 42, end, 4096, false, &upSent, &downReceived, 100*time.Millisecond)
 				}()
 				if direction >= 0 {
-					waitFor(t, "both independent streams started", func() bool { return upReceived.Load() > 0 && downReceived.Load() > 0 })
+					waitFor(
+						t,
+						"both independent streams started",
+						func() bool { return upReceived.Load() > 0 && downReceived.Load() > 0 },
+					)
 					relay.blackhole[direction].Store(true)
 					waitFor(t, "noisy duplex heartbeat reconnect", func() bool { return relay.accepted.Load() > accepted })
 					relay.blackhole[direction].Store(false)
@@ -129,8 +143,15 @@ func TestNoiseWeakNetworkIndependentDuplex(t *testing.T) {
 						t.Fatal("independent duplex stalled")
 					}
 				}
-				if upSent.Load() == 0 || downSent.Load() == 0 || upSent.Load() != upReceived.Load() || downSent.Load() != downReceived.Load() {
-					t.Fatalf("duplex totals: up %d/%d down %d/%d", upSent.Load(), upReceived.Load(), downSent.Load(), downReceived.Load())
+				if upSent.Load() == 0 || downSent.Load() == 0 || upSent.Load() != upReceived.Load() ||
+					downSent.Load() != downReceived.Load() {
+					t.Fatalf(
+						"duplex totals: up %d/%d down %d/%d",
+						upSent.Load(),
+						upReceived.Load(),
+						downSent.Load(),
+						downReceived.Load(),
+					)
 				}
 				if f.clientSession() != client || f.remoteSession() != remote || f.backendCount.accepted.Load() != 1 {
 					t.Fatal("weak network replaced original session or application connection")
@@ -156,7 +177,13 @@ func TestNoiseWeakNetworkIndependentDuplex(t *testing.T) {
 					}
 					return true
 				})
-				t.Logf("independent duplex verified: up=%d down=%d bytes; retransmissions=%d reconnects=%d", upSent.Load(), downSent.Load(), relay.losses.Load(), relay.accepted.Load()-accepted)
+				t.Logf(
+					"independent duplex verified: up=%d down=%d bytes; retransmissions=%d reconnects=%d",
+					upSent.Load(),
+					downSent.Load(),
+					relay.losses.Load(),
+					relay.accepted.Load()-accepted,
+				)
 			})
 		}
 	}

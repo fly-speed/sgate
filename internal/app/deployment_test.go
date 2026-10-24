@@ -39,7 +39,10 @@ func TestManagementDeploymentBinaries(t *testing.T) {
 	}
 	for _, secure := range []bool{false, true} {
 		for _, mode := range []string{"default", "relative", "absolute"} {
-			t.Run(fmt.Sprintf("https=%t/web=%s", secure, mode), func(t *testing.T) { runManagementDeployment(t, cb, sb, secure, mode) })
+			t.Run(
+				fmt.Sprintf("https=%t/web=%s", secure, mode),
+				func(t *testing.T) { runManagementDeployment(t, cb, sb, secure, mode) },
+			)
 		}
 	}
 }
@@ -99,7 +102,11 @@ func (d *deployedAdmin) spawn(cwd string, relative bool) {
 		d.t.Fatal(e)
 	}
 	d.done = make(chan struct{})
-	go func() { d.exit = d.cmd.Wait(); f.Close(); close(d.done) }()
+	go func() {
+		d.exit = d.cmd.Wait()
+		f.Close()
+		close(d.done)
+	}()
 }
 func (d *deployedAdmin) start(cwd string, relative bool) {
 	d.t.Helper()
@@ -159,7 +166,8 @@ func (d *deployedAdmin) failStart(cwd string, want string) {
 	}
 	b, _ := os.ReadFile(d.logPath)
 	d.cmd = nil
-	if d.exit == nil || !strings.Contains(string(b), want) || strings.Contains(string(b), "WARNING: DATA RACE") {
+	if d.exit == nil || !strings.Contains(string(b), want) ||
+		strings.Contains(string(b), "WARNING: DATA RACE") {
 		d.t.Fatalf("%s bad deployment: exit=%v expected %q: %s", d.role, d.exit, want, b)
 	}
 	d.assertPortsReleased()
@@ -224,7 +232,16 @@ func (d *deployedAdmin) asset(path string, want []byte, status int) {
 func (d *deployedAdmin) save(want int) {
 	d.t.Helper()
 	v := d.api("GET", "config", nil, 200)
-	d.api("PUT", "config", map[string]any{"content": v["content"].(string) + "\n# deployment save/restart\n", "revision": v["revision"], "apply": true}, want)
+	d.api(
+		"PUT",
+		"config",
+		map[string]any{
+			"content":  v["content"].(string) + "\n# deployment save/restart\n",
+			"revision": v["revision"],
+			"apply":    true,
+		},
+		want,
+	)
 }
 
 func runManagementDeployment(t *testing.T, cb, sb string, secure bool, mode string) {
@@ -232,7 +249,11 @@ func runManagementDeployment(t *testing.T, cb, sb string, secure bool, mode stri
 	release := filepath.Join(root, "release with spaces")
 	conf := filepath.Join(release, "conf")
 	work := filepath.Join(root, "unrelated working directories")
-	cwds := []string{filepath.Join(work, "client cwd"), filepath.Join(work, "server cwd"), filepath.Join(root, "restart cwd")}
+	cwds := []string{
+		filepath.Join(work, "client cwd"),
+		filepath.Join(work, "server cwd"),
+		filepath.Join(root, "restart cwd"),
+	}
 	for _, cwd := range cwds {
 		if e := os.MkdirAll(cwd, 0700); e != nil {
 			t.Fatal(e)
@@ -260,13 +281,21 @@ func runManagementDeployment(t *testing.T, cb, sb string, secure bool, mode stri
 			}
 			conns.Store(c, true)
 			peers.Add(1)
-			go func() { defer peers.Done(); defer conns.Delete(c); defer c.Close(); io.Copy(c, c) }()
+			go func() {
+				defer peers.Done()
+				defer conns.Delete(c)
+				defer c.Close()
+				io.Copy(c, c)
+			}()
 		}
 	}()
 	t.Cleanup(func() {
 		backend.Close()
 		<-acceptDone
-		conns.Range(func(k, v any) bool { k.(net.Conn).Close(); return true })
+		conns.Range(func(k, v any) bool {
+			k.(net.Conn).Close()
+			return true
+		})
 		peers.Wait()
 	})
 	key := filepath.Join(release, "keys", "sgate.key")
@@ -313,9 +342,24 @@ func runManagementDeployment(t *testing.T, cb, sb string, secure bool, mode stri
 			}
 			deploymentWrite(t, filepath.Join(webDir, name), source)
 		}
-		d := &deployedAdmin{t: t, role: role, binary: binary, business: business, management: temporaryAddress(t), appPath: filepath.Join(roleConf, "app.conf"), adminPath: filepath.Join(roleConf, "admin.conf"), webDir: webDir, usersPath: filepath.Join(roleConf, "users.json"), sessionDir: filepath.Join(roleConf, "sessions"), cwds: cwds}
+		d := &deployedAdmin{
+			t:          t,
+			role:       role,
+			binary:     binary,
+			business:   business,
+			management: temporaryAddress(t),
+			appPath:    filepath.Join(roleConf, "app.conf"),
+			adminPath:  filepath.Join(roleConf, "admin.conf"),
+			webDir:     webDir,
+			usersPath:  filepath.Join(roleConf, "users.json"),
+			sessionDir: filepath.Join(roleConf, "sessions"),
+			cwds:       cwds,
+		}
 		jar, _ := cookiejar.New(nil)
-		transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}, IdleConnTimeout: time.Second}
+		transport := &http.Transport{
+			TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12},
+			IdleConnTimeout: time.Second,
+		}
 		d.client = &http.Client{Jar: jar, Transport: transport, Timeout: 10 * time.Second}
 		t.Cleanup(transport.CloseIdleConnections)
 		t.Cleanup(d.stop)
@@ -327,7 +371,15 @@ func runManagementDeployment(t *testing.T, cb, sb string, secure bool, mode stri
 			}
 		})
 		d.base = scheme + "://" + d.management
-		common := "listen = " + business + "\nkey-file = " + strconv.Quote(key) + "\npassword = deployment-test-password\nnoise-interval-min = 20ms\nnoise-interval-max = 40ms\nnoise-min-bytes = 128\nnoise-max-bytes = 512\n"
+		if role == "server" {
+			d.base = scheme + "://" + business + "/admin"
+		}
+		common := "listen = " + business + "\nkey-file = " + strconv.Quote(key) + ("\n" +
+			"password = deployment-test-password\n" +
+			"noise-interval-min = 20ms\n" +
+			"noise-interval-max = 40ms\n" +
+			"noise-min-bytes = 128\n" +
+			"noise-max-bytes = 512\n")
 		if role == "server" {
 			common += "target = " + backend.Addr().String() + "\nsession-ttl = 300ms\n"
 			if secure {
@@ -340,7 +392,11 @@ func runManagementDeployment(t *testing.T, cb, sb string, secure bool, mode stri
 			}
 		}
 		deploymentWrite(t, d.appPath, []byte(common))
-		adminText := webSetting + "listen = " + d.management + "\nusers-file = users.json\nsession-dir = sessions\nsetup-token-file = setup.token\nsession-timeout = 1h\n"
+		adminText := webSetting + "listen = " + d.management + ("\n" +
+			"users-file = users.json\n" +
+			"session-dir = sessions\n" +
+			"setup-token-file = setup.token\n" +
+			"session-timeout = 1h\n")
 		if secure {
 			relativeCert, e := filepath.Rel(roleConf, cert)
 			if e != nil {
@@ -354,13 +410,31 @@ func runManagementDeployment(t *testing.T, cb, sb string, secure bool, mode stri
 		}
 		deploymentWrite(t, d.adminPath, []byte(adminText))
 		d.start(cwd, true)
+		if role == "server" {
+			probe, err := net.Listen("tcp", d.management)
+			if err != nil {
+				t.Fatalf("legacy management port still bound: %v", err)
+			}
+			probe.Close()
+			d.api("GET", "config", nil, 401)
+		}
 		token, e := os.ReadFile(filepath.Join(roleConf, "setup.token"))
 		if e != nil {
 			t.Fatal(e)
 		}
-		v := d.api("POST", "setup", map[string]string{"username": "deploy-admin", "password": "deployment-management-password", "setup_token": strings.TrimSpace(string(token))}, 200)
+		v := d.api(
+			"POST",
+			"setup",
+			map[string]string{
+				"username":    "deploy-admin",
+				"password":    "deployment-management-password",
+				"setup_token": strings.TrimSpace(string(token)),
+			},
+			200,
+		)
 		d.csrf = v["csrf"].(string)
-		if len(d.lastCookies) != 1 || d.lastCookies[0].Secure != secure || !d.lastCookies[0].HttpOnly || d.lastCookies[0].SameSite != http.SameSiteStrictMode {
+		if len(d.lastCookies) != 1 || d.lastCookies[0].Secure != secure || !d.lastCookies[0].HttpOnly ||
+			d.lastCookies[0].SameSite != http.SameSiteStrictMode {
 			t.Fatal("invalid deployed session cookie", role)
 		}
 		d.auth()
@@ -410,7 +484,11 @@ func runManagementDeployment(t *testing.T, cb, sb string, secure bool, mode stri
 	permissionChecks := os.Geteuid() != 0
 	for _, d := range nodes {
 		// Atomic live replacement of each asset, without touching either process.
-		for route, name := range map[string]string{"/": "index.html", "/assets/app.css": "app.css", "/assets/app.js": "app.js"} {
+		for route, name := range map[string]string{
+			"/":               "index.html",
+			"/assets/app.css": "app.css",
+			"/assets/app.js":  "app.js",
+		} {
 			path := filepath.Join(d.webDir, name)
 			original, e := os.ReadFile(path)
 			if e != nil {
@@ -475,7 +553,8 @@ func runManagementDeployment(t *testing.T, cb, sb string, secure bool, mode stri
 			d.save(500)
 			os.Chmod(parent, 0700)
 			afterFile, _ := os.ReadFile(d.appPath)
-			if !bytes.Equal(beforeFile, afterFile) || generation != d.api("GET", "config", nil, 200)["runtime"].(map[string]any)["generation"] {
+			if !bytes.Equal(beforeFile, afterFile) ||
+				generation != d.api("GET", "config", nil, 200)["runtime"].(map[string]any)["generation"] {
 				t.Fatal("failed save changed disk or runtime")
 			}
 			d.auth()
@@ -510,7 +589,12 @@ func runManagementDeployment(t *testing.T, cb, sb string, secure bool, mode stri
 		if e != nil || len(entries) != 1 {
 			t.Fatalf("unexpected persisted sessions %d %v", len(entries), e)
 		}
-		t.Logf("%s: cwd changed; %s web-dir; live HTML/CSS/JS; missing/permissions restored; login/save/restart recovered", d.role, mode)
+		t.Logf(
+			("%s: cwd changed; %s web-dir; live HTML/CSS/JS; missing/permissions restored; " +
+				"login/save/restart recovered"),
+			d.role,
+			mode,
+		)
 	}
 	exchange()
 	for _, d := range nodes {

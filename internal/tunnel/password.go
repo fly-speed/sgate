@@ -50,14 +50,27 @@ func encryptPassword(key []byte, password, id, nonce, ts, resume, uri string) (s
 
 func verifyPassword(key []byte, password, token, id, nonce, ts, resume, uri string) bool {
 	aead := passwordCipher(key)
-	if !strings.HasPrefix(token, "v1.") || len(token) > 3+base64.RawURLEncoding.EncodedLen(aead.NonceSize()+maxPasswordBytes+aead.Overhead()) {
+	if !strings.HasPrefix(token, "v1.") ||
+		len(token) > 3+base64.RawURLEncoding.EncodedLen(aead.NonceSize()+maxPasswordBytes+aead.Overhead()) {
 		return false
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(token[3:])
 	if err != nil || len(raw) < aead.NonceSize()+aead.Overhead()+1 {
 		return false
 	}
-	plain, err := aead.Open(nil, raw[:aead.NonceSize()], raw[aead.NonceSize():], passwordAAD(key, id, nonce, ts, resume, uri))
+	plain, err := aead.Open(
+		nil,
+		raw[:aead.NonceSize()],
+		raw[aead.NonceSize():],
+		passwordAAD(
+			key,
+			id,
+			nonce,
+			ts,
+			resume,
+			uri,
+		),
+	)
 	if err != nil || len(plain) > maxPasswordBytes {
 		return false
 	}

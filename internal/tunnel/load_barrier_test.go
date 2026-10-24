@@ -49,7 +49,14 @@ func TestStressLoadBarrierWaitsAndCancels(t *testing.T) {
 			defer cancel()
 			done := make(chan error, 1)
 			go func() { done <- waitStressLoadBarrier(ctx, filepath.Join(dir, "case"), 1, 512, time.Second) }()
-			waitFor(t, "ready marker", func() bool { _, err := os.Stat(filepath.Join(dir, "case-round-1.ready")); return err == nil })
+			waitFor(
+				t,
+				"ready marker",
+				func() bool {
+					_, err := os.Stat(filepath.Join(dir, "case-round-1.ready"))
+					return err == nil
+				},
+			)
 			select {
 			case <-done:
 				t.Fatal("started before release")

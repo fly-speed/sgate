@@ -94,11 +94,23 @@ func TestConfigBinaryNoiseSoak(t *testing.T) {
 		if fd := descriptorCount(); baseFD >= 0 && fd > baseFD+2 {
 			t.Errorf("soak descriptors %d -> %d", baseFD, fd)
 		}
-		t.Logf("soak cleanup goroutines=%d/%d descriptors=%d/%d", runtime.NumGoroutine(), baseG, descriptorCount(), baseFD)
+		t.Logf(
+			"soak cleanup goroutines=%d/%d descriptors=%d/%d",
+			runtime.NumGoroutine(),
+			baseG,
+			descriptorCount(),
+			baseFD,
+		)
 	})
 	for _, tlsMode := range []bool{false, true} {
 		for _, mode := range []string{"file", "override", "disable"} {
-			t.Run(fmt.Sprintf("tls=%t/%s", tlsMode, mode), func(t *testing.T) { t.Parallel(); runConfigBinarySoak(t, cb, sb, tlsMode, mode) })
+			t.Run(
+				fmt.Sprintf("tls=%t/%s", tlsMode, mode),
+				func(t *testing.T) {
+					t.Parallel()
+					runConfigBinarySoak(t, cb, sb, tlsMode, mode)
+				},
+			)
 		}
 	}
 }
@@ -120,7 +132,10 @@ func runConfigBinarySoak(t *testing.T, cb, sb string, tlsMode bool, mode string)
 		t.Fatal(err)
 	}
 	certPath, tlsKeyPath := filepath.Join(root, "cert.pem"), filepath.Join(root, "tls.key")
-	for path, block := range map[string]*pem.Block{certPath: {Type: "CERTIFICATE", Bytes: certificate.Certificate[0]}, tlsKeyPath: {Type: "PRIVATE KEY", Bytes: private}} {
+	for path, block := range map[string]*pem.Block{
+		certPath:   {Type: "CERTIFICATE", Bytes: certificate.Certificate[0]},
+		tlsKeyPath: {Type: "PRIVATE KEY", Bytes: private},
+	} {
 		if err := os.WriteFile(path, pem.EncodeToMemory(block), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -159,13 +174,25 @@ func runConfigBinarySoak(t *testing.T, cb, sb string, tlsMode bool, mode string)
 				}
 				end := time.Unix(0, int64(binary.BigEndian.Uint64(header[8:])))
 				c.SetDeadline(end.Add(45 * time.Second))
-				results <- stressDuplex(c, binary.BigEndian.Uint64(header[:8]), end, 256, true, &downSent, &upReceived, time.Second)
+				results <- stressDuplex(
+					c,
+					binary.BigEndian.Uint64(header[:8]),
+					end,
+					256,
+					true,
+					&downSent,
+					&upReceived,
+					time.Second,
+				)
 			}()
 		}
 	}()
 	t.Cleanup(func() {
 		backend.Close()
-		conns.Range(func(k, v any) bool { k.(net.Conn).Close(); return true })
+		conns.Range(func(k, v any) bool {
+			k.(net.Conn).Close()
+			return true
+		})
 		wg.Wait()
 	})
 	serverAddr, clientAddr := configBinaryPort(t), configBinaryPort(t)
@@ -173,7 +200,18 @@ func runConfigBinarySoak(t *testing.T, cb, sb string, tlsMode bool, mode string)
 	// Install impairments after startup so failures cannot be confused with a
 	// startup port race. Retain actual production dial/write timeout defaults.
 	common := func() map[string]string {
-		return map[string]string{"key-file": keyPath, "password": testPassword, "heartbeat": "1s", "heartbeat-timeout": "18s", "buffer-bytes": "262144", "max-streams": "160", "noise-interval-min": "1s", "noise-interval-max": "3s", "noise-min-bytes": "1024", "noise-max-bytes": "10240"}
+		return map[string]string{
+			"key-file":           keyPath,
+			"password":           testPassword,
+			"heartbeat":          "1s",
+			"heartbeat-timeout":  "18s",
+			"buffer-bytes":       "262144",
+			"max-streams":        "160",
+			"noise-interval-min": "1s",
+			"noise-interval-max": "3s",
+			"noise-min-bytes":    "1024",
+			"noise-max-bytes":    "10240",
+		}
 	}
 	sv, cv := common(), common()
 	scheme := "ws"
@@ -183,11 +221,27 @@ func runConfigBinarySoak(t *testing.T, cb, sb string, tlsMode bool, mode string)
 	}
 	sv["listen"], sv["target"], sv["session-ttl"] = serverAddr, backend.Addr().String(), "2m"
 	cv["listen"], cv["server"], cv["offline-timeout"] = clientAddr, scheme+"://"+relay.listener.Addr().String()+"/tunnel", "2m"
-	sa, ca := []string{"-config", configBinaryFile(t, "server.conf", sv)}, []string{"-config", configBinaryFile(t, "client.conf", cv)}
+	sa, ca := []string{"-config", configBinaryFile(t, "server.conf", sv)}, []string{
+		"-config",
+		configBinaryFile(
+			t,
+			"client.conf",
+			cv,
+		),
+	}
 	var flags []string
 	switch mode {
 	case "override":
-		flags = []string{"-noise-interval-min", "100ms", "-noise-interval-max", "300ms", "-noise-min-bytes", "128", "-noise-max-bytes", "512"}
+		flags = []string{
+			"-noise-interval-min",
+			"100ms",
+			"-noise-interval-max",
+			"300ms",
+			"-noise-min-bytes",
+			"128",
+			"-noise-max-bytes",
+			"512",
+		}
 	case "disable":
 		flags = []string{"-noise-interval-min", "0", "-noise-interval-max", "0"}
 	}
@@ -221,7 +275,12 @@ func runConfigBinarySoak(t *testing.T, cb, sb string, tlsMode bool, mode string)
 			t.Fatalf("baseline not attached: %+v", baseline[i])
 		}
 	}
-	relay.profile.Store(&weakProfile{delay: 150 * time.Millisecond, jitter: 100 * time.Millisecond, lossPercent: 15, retransmit: 200 * time.Millisecond})
+	relay.profile.Store(&weakProfile{
+		delay:       150 * time.Millisecond,
+		jitter:      100 * time.Millisecond,
+		lossPercent: 15,
+		retransmit:  200 * time.Millisecond,
+	})
 	var drops atomic.Int64
 	var firstDrained [2]configSoakSample
 	for round := 1; round <= rounds; round++ {
@@ -251,7 +310,12 @@ func runConfigBinarySoak(t *testing.T, cb, sb string, tlsMode bool, mode string)
 				results <- stressDuplex(c, seed, end, 256, false, &upSent, &downReceived, time.Second)
 			}(c, seed)
 		}
-		stressWaitForBudget(t, "full concurrent backend cohort", 15*time.Second, func() bool { return active.Load() == int64(streams) })
+		stressWaitForBudget(
+			t,
+			"full concurrent backend cohort",
+			15*time.Second,
+			func() bool { return active.Load() == int64(streams) },
+		)
 		done, joined := make(chan struct{}), make(chan struct{})
 		go func() {
 			defer close(joined)
@@ -272,7 +336,12 @@ func runConfigBinarySoak(t *testing.T, cb, sb string, tlsMode bool, mode string)
 			}
 		}()
 		var once sync.Once
-		stopChurn := func() { once.Do(func() { close(done); <-joined }) }
+		stopChurn := func() {
+			once.Do(func() {
+				close(done)
+				<-joined
+			})
+		}
 		t.Cleanup(stopChurn)
 		timer := time.NewTimer(time.Until(end))
 		<-timer.C
@@ -307,7 +376,8 @@ func runConfigBinarySoak(t *testing.T, cb, sb string, tlsMode bool, mode string)
 		})
 		for i, path := range paths {
 			v := configSoakCollect(t, path, fmt.Sprintf("drained-%d", round))
-			if v.Census["streams"] != 0 || v.Census["pending_bytes"] != 0 || v.Census["sessions"] != 1 || v.Writers != 1 {
+			if v.Census["streams"] != 0 || v.Census["pending_bytes"] != 0 || v.Census["sessions"] != 1 ||
+				v.Writers != 1 {
 				t.Fatalf("native drained resource leak: %+v", v)
 			}
 			if v.Goroutines > baseline[i].Goroutines+12 || v.FDs < 0 || v.FDs > baseline[i].FDs+4 {
@@ -328,7 +398,8 @@ func runConfigBinarySoak(t *testing.T, cb, sb string, tlsMode bool, mode string)
 			case "disable":
 				expectedMin, expectedMax = "0s", "0s"
 			}
-			if v.NoiseMin != expectedMin || v.NoiseMax != expectedMax || v.NoiseMinBytes != minBytes || v.NoiseMaxBytes != maxBytes {
+			if v.NoiseMin != expectedMin || v.NoiseMax != expectedMax || v.NoiseMinBytes != minBytes ||
+				v.NoiseMaxBytes != maxBytes {
 				t.Fatalf("native flag priority mismatch: %+v", v)
 			}
 			if mode == "disable" && v.Census["noise_sent"] != 0 {
@@ -337,11 +408,28 @@ func runConfigBinarySoak(t *testing.T, cb, sb string, tlsMode bool, mode string)
 			if mode != "disable" && (v.Census["noise_sent"] == 0 || v.Census["noise_received"] == 0) {
 				t.Fatalf("enabled peer did not exchange noise: %+v", v)
 			}
-			t.Logf("round=%d role=%d heap=%d rss=%d g=%d fd=%d writers=%d census=%v", round, i, v.HeapBytes, v.RSSBytes, v.Goroutines, v.FDs, v.Writers, v.Census)
+			t.Logf(
+				"round=%d role=%d heap=%d rss=%d g=%d fd=%d writers=%d census=%v",
+				round,
+				i,
+				v.HeapBytes,
+				v.RSSBytes,
+				v.Goroutines,
+				v.FDs,
+				v.Writers,
+				v.Census,
+			)
 		}
 	}
-	if upSent.Load() == 0 || downSent.Load() == 0 || upSent.Load() != upReceived.Load() || downSent.Load() != downReceived.Load() {
-		t.Fatalf("duplex counts mismatch up=%d/%d down=%d/%d", upSent.Load(), upReceived.Load(), downSent.Load(), downReceived.Load())
+	if upSent.Load() == 0 || downSent.Load() == 0 || upSent.Load() != upReceived.Load() ||
+		downSent.Load() != downReceived.Load() {
+		t.Fatalf(
+			"duplex counts mismatch up=%d/%d down=%d/%d",
+			upSent.Load(),
+			upReceived.Load(),
+			downSent.Load(),
+			downReceived.Load(),
+		)
 	}
 	if drops.Load() < int64(rounds) || relay.losses.Load() == 0 {
 		t.Fatal("missing churn or retransmission")
@@ -352,12 +440,24 @@ func runConfigBinarySoak(t *testing.T, cb, sb string, tlsMode bool, mode string)
 	for _, path := range paths {
 		samples := configSoakSamples(t, path)
 		v := samples[len(samples)-1]
-		if v.Phase != "closed" || v.Writers != 0 || v.Census["sessions"] != 0 || v.Census["streams"] != 0 || v.Census["pending_bytes"] != 0 || v.Census["nonces"] != 0 {
+		if v.Phase != "closed" || v.Writers != 0 || v.Census["sessions"] != 0 || v.Census["streams"] != 0 ||
+			v.Census["pending_bytes"] != 0 ||
+			v.Census["nonces"] != 0 {
 			t.Fatalf("native shutdown leak: %+v", v)
 		}
 	}
 	if relay.active.Load() != 0 || relay.queued.Load() != 0 {
 		t.Fatal("soak relay resources leaked")
 	}
-	t.Logf("soak verified rounds=%d streams=%d upload=%d download=%d drops=%d relay_accepted=%d retransmissions=%d", rounds, streams, upSent.Load(), downSent.Load(), drops.Load(), relay.accepted.Load(), relay.losses.Load())
+	t.Logf(
+		("soak verified rounds=%d streams=%d upload=%d download=%d drops=%d relay_accepted=%d " +
+			"retransmissions=%d"),
+		rounds,
+		streams,
+		upSent.Load(),
+		downSent.Load(),
+		drops.Load(),
+		relay.accepted.Load(),
+		relay.losses.Load(),
+	)
 }

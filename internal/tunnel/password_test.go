@@ -116,14 +116,35 @@ func TestPasswordAuthenticationBeforeUpgrade(t *testing.T) {
 				d.TLSClientConfig = &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
 			}
 			fresh := func(password string) http.Header {
-				h, e := requestHeaders(key, password, randomID(), randomID(), strconv.FormatInt(time.Now().Unix(), 10), "0", "/tunnel")
+				h, e := requestHeaders(
+					key,
+					password,
+					randomID(),
+					randomID(),
+					strconv.FormatInt(time.Now().Unix(), 10),
+					"0",
+					"/tunnel",
+				)
 				if e != nil {
 					t.Fatal(e)
 				}
 				return h
 			}
 			resign := func(h http.Header) {
-				h.Set("X-Sgate-Auth", mac(key, protocol, "client", h.Get("X-Sgate-Session"), h.Get("X-Sgate-Nonce"), h.Get("X-Sgate-Time"), h.Get("X-Sgate-Resume"), "/tunnel", h.Get(passwordHeader)))
+				h.Set(
+					"X-Sgate-Auth",
+					mac(
+						key,
+						protocol,
+						"client",
+						h.Get("X-Sgate-Session"),
+						h.Get("X-Sgate-Nonce"),
+						h.Get("X-Sgate-Time"),
+						h.Get("X-Sgate-Resume"),
+						"/tunnel",
+						h.Get(passwordHeader),
+					),
+				)
 			}
 			cases := []struct {
 				name   string
@@ -138,8 +159,14 @@ func TestPasswordAuthenticationBeforeUpgrade(t *testing.T) {
 						h[k] = v
 					}
 				}},
-				{"missing header", func(h http.Header) { h.Del(passwordHeader); resign(h) }},
-				{"plaintext header", func(h http.Header) { h.Set(passwordHeader, testPassword); resign(h) }},
+				{"missing header", func(h http.Header) {
+					h.Del(passwordHeader)
+					resign(h)
+				}},
+				{"plaintext header", func(h http.Header) {
+					h.Set(passwordHeader, testPassword)
+					resign(h)
+				}},
 				{"damaged GCM tag", func(h http.Header) {
 					token := h.Get(passwordHeader)
 					raw, _ := base64.RawURLEncoding.DecodeString(token[3:])
@@ -148,7 +175,13 @@ func TestPasswordAuthenticationBeforeUpgrade(t *testing.T) {
 					resign(h)
 				}},
 				{"duplicated header", func(h http.Header) { h.Add(passwordHeader, h.Get(passwordHeader)) }},
-				{"rebound nonce with valid MAC", func(h http.Header) { h.Set("X-Sgate-Nonce", randomID()); resign(h) }},
+				{
+					"rebound nonce with valid MAC",
+					func(h http.Header) {
+						h.Set("X-Sgate-Nonce", randomID())
+						resign(h)
+					},
+				},
 			}
 			for _, tc := range cases {
 				t.Run(tc.name, func(t *testing.T) {
@@ -174,7 +207,13 @@ func TestPasswordAuthenticationBeforeUpgrade(t *testing.T) {
 					}
 				})
 			}
-			client, e := NewClient(ClientConfig{Key: key, Password: testPassword, URL: endpoint, TLSConfig: d.TLSClientConfig, Options: testOptions()})
+			client, e := NewClient(ClientConfig{
+				Key:       key,
+				Password:  testPassword,
+				URL:       endpoint,
+				TLSConfig: d.TLSClientConfig,
+				Options:   testOptions(),
+			})
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -208,7 +247,13 @@ func TestPasswordAuthenticationBeforeUpgrade(t *testing.T) {
 			if r.StatusCode != 404 {
 				t.Fatalf("replay status=%d", r.StatusCode)
 			}
-			badClient, e := NewClient(ClientConfig{Key: key, Password: "wrong-password", URL: endpoint, TLSConfig: d.TLSClientConfig, Options: testOptions()})
+			badClient, e := NewClient(ClientConfig{
+				Key:       key,
+				Password:  "wrong-password",
+				URL:       endpoint,
+				TLSConfig: d.TLSClientConfig,
+				Options:   testOptions(),
+			})
 			if e != nil {
 				t.Fatal(e)
 			}

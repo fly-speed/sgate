@@ -37,7 +37,8 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		return nil, err
 	}
 	u, err := url.Parse(cfg.URL)
-	if err != nil || u.Host == "" || (u.Scheme != "ws" && u.Scheme != "wss") || u.User != nil || u.Fragment != "" {
+	if err != nil || u.Host == "" || (u.Scheme != "ws" && u.Scheme != "wss") || u.User != nil ||
+		u.Fragment != "" {
 		return nil, errors.New("server URL must be ws://host/path or wss://host/path")
 	}
 	if cfg.ReconnectMin == 0 {
@@ -77,7 +78,13 @@ func (c *Client) dial(ctx context.Context, id string, resume bool) (*websocket.C
 	if err != nil {
 		return nil, nil, 0, err
 	}
-	d := websocket.Dialer{Proxy: http.ProxyFromEnvironment, HandshakeTimeout: c.cfg.Options.DialTimeout, TLSClientConfig: c.cfg.TLSConfig, ReadBufferSize: chunkSize, WriteBufferSize: chunkSize}
+	d := websocket.Dialer{
+		Proxy:            http.ProxyFromEnvironment,
+		HandshakeTimeout: c.cfg.Options.DialTimeout,
+		TLSClientConfig:  c.cfg.TLSConfig,
+		ReadBufferSize:   chunkSize,
+		WriteBufferSize:  chunkSize,
+	}
 	if stats := c.cfg.Options.Stats; stats != nil {
 		d.NetDialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
 			conn, err := (&net.Dialer{KeepAlive: 30 * time.Second}).DialContext(ctx, network, address)
@@ -131,6 +138,30 @@ func (c *Client) run(ctx context.Context, listener net.Listener, state *clientSe
 	mu.Lock()
 	state.current = newSession(ctx, "", c.cfg.Options)
 	mu.Unlock()
+	acceptErr, stopLocal := c.startLocalListener(ctx, cancel, listener, state)
+	defer stopLocal()
+	c.reconnect(ctx, state)
+	select {
+	case err := <-acceptErr:
+		if !errors.Is(err, net.ErrClosed) {
+			return fmt.Errorf("TCP listener: %w", err)
+		}
+	default:
+	}
+	return nil
+}
+
+// 本地监听、关闭通知与会话替换共用 state.mu；stop 必须等待两个协程都退出。
+func (c *Client) startLocalListener(
+	ctx context.Context,
+	cancel context.CancelFunc,
+	listener net.Listener,
+	state *clientSessions,
+) (
+	<-chan error,
+	func(),
+) {
+	mu := &state.mu
 	acceptErr := make(chan error, 1)
 	acceptDone := make(chan struct{})
 	go func() {
@@ -159,7 +190,7 @@ func (c *Client) run(ctx context.Context, listener net.Listener, state *clientSe
 		mu.Unlock()
 		close(shutdownDone)
 	}()
-	defer func() {
+	stop := func() {
 		cancel()
 		<-shutdownDone
 		// No more replacements are possible once the run loop has returned.
@@ -167,7 +198,13 @@ func (c *Client) run(ctx context.Context, listener net.Listener, state *clientSe
 		state.current.close()
 		mu.Unlock()
 		<-acceptDone
-	}()
+	}
+	return acceptErr, stop
+}
+
+// reconnect 只替换传输；离线窗口耗尽或收到可信 410 时才销毁业务会话。
+func (c *Client) reconnect(ctx context.Context, state *clientSessions) {
+	mu := &state.mu
 	id := randomID()
 	resume := false
 	backoff := c.cfg.ReconnectMin
@@ -236,12 +273,4 @@ func (c *Client) run(ctx context.Context, listener net.Listener, state *clientSe
 			backoff = c.cfg.ReconnectMax
 		}
 	}
-	select {
-	case err := <-acceptErr:
-		if !errors.Is(err, net.ErrClosed) {
-			return fmt.Errorf("TCP listener: %w", err)
-		}
-	default:
-	}
-	return nil
 }

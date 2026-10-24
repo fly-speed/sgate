@@ -22,9 +22,15 @@ Go 编写的通用 TCP 加密通道。客户端和服务端使用标准 HTTP Upg
 
 ## acl_master 托管
 
-客户端接入 [go-service](https://github.com/acl-dev/go-service) 的 TCP 服务模板描述符接口；服务端接入 [gin-service](https://github.com/acl-dev/gin-service) 的 Gin 服务路由。两端识别 acl_master 注入的 `-f`、`-n`、`-t`、`-s` 等参数，继承状态通道 FD 5 和从 FD 6 起的监听套接字，支持多个监听地址共享一个代理实例。服务端在继承的监听上执行 TLS/WSS，证书仍由应用配置的 `tls-cert`、`tls-key` 指定。未提供框架参数时保持直接运行方式，也可显式使用 `-alone`。
+客户端接入 [go-service](https://github.com/acl-dev/go-service) 的 TCP 描述符接口；服务端按 [gin-service](https://github.com/acl-dev/gin-service) 示例统一使用 `Init → 注册路由 → Run`，独立启动和 acl_master 托管均经过这一生命周期。服务端不再有直接调用 `net/http.ListenAndServe` 的独立分支。两端识别框架的 `-f`、`-n`、`-t`、`-s` 等参数，继承 FD 5 状态通道及 FD 6 起的监听套接字；服务端支持多个监听、HTTPS/WSS，证书继续由 `tls-cert`、`tls-key` 指定。
 
-这里使用模板的配置/监听继承接口和 Gin 服务结构，由 sgate 管理可取消的停止通知及 HTTP/TLS 生命周期。这样可以在停止时关闭已升级的 WebSocket、释放 TCP 流和重放缓存，并在 Web 界面应用新配置时复用框架持有的端口；不依赖模板的全局 `Run/Wait/Stop` 循环。客户端构建只依赖 TCP 模板，Gin 依赖仅由服务端引入。
+服务端入口 `cmd/sgate-server/main.go` 直接执行 `gin-service.Init → setRoute → Run`，不再经过工厂回调。`routes.go` 集中列出 WebSocket、管理页面、登录、配置、统计与服务重启入口；`options.go` 仅定义启动参数，`service.go` 仅适配共用的生命周期接口。`internal/app/server.go` 管理业务配置和资源，`sharedServer` 只负责切换当前代理及证书。隧道路径热更新通过兜底路由交给当前代理校验，避免运行中修改 Gin 路由树。
+
+服务端使用本地扩展 [third_party/gin-service](third_party/gin-service/README.md)，以你提供的 `vendor/gin-service` 源码为基础；原参考仓库保持不变。根 `go.mod` 的 replace 选择本地扩展，标准 vendor 中的对应包由 `python3 scripts/sync-go-vendor.py` 同步生成，普通 Go 构建可直接使用。框架自身拥有监听、TLS/HTTP Serve、停止通知、连接计数、Accept/Close 回调和停止等待。WebSocket 升级后仍计为活动连接，实际关闭时才递减；关闭时先断开物理连接，再清理协议会话，避免 TLS 或阻塞写卡住退出。
+
+进程只执行一次 gin-service `Init/Run`。服务端启用管理界面时，管理入口 `/admin/` 与 WSS 共用框架监听；Web 配置应用只替换业务代理并关闭旧会话，HTTP Worker、登录和累计统计保留。已建立的隧道始终属于原代理实例。框架扩展采用每实例可取消生命周期，替代上游全局 Wait/Stop，以支持 TLS、WebSocket 清理及代理热重启。客户端不引入 Gin。
+
+Linux 运行验证可使用 `python3 scripts/test-linux-integration.py --output artifacts/linux-integration`。需要 Linux、本机 Go/C 编译器、Python、OpenSSL、ps、lsof 及可执行的 acl_master/master_ctl（路径不同时通过 `--master`、`--ctl` 指定）。脚本分别构建普通版和竞态版，运行 16 组独立/托管、WS/WSS、相对/绝对路径部署测试，以及 8 组普通/竞态、独立/托管、WS/WSS 压力测试。压力阶段开启随机白噪音、128 并发、频繁断线、默认 6 轮连续重启，并叠加并发登录、配置保存与应用，检查配置保存、代理应用、登录持久化及退出资源。仅使用临时配置和测试端口，不加载已部署服务；输出目录必须为空。`verification.json` 记录运行平台、命令和结果，跨平台构建不计作 Linux 实测。
 
 与两个模板示例一样，手工启动可显式加 `-alone`，客户端和服务端使用相同方式：
 
@@ -84,6 +90,8 @@ python3 scripts/test-acl-master.py --merged --stress --concurrency 128 --rounds 
 
 带竞态检测时在构建命令添加 `--race`，测试指向生成的 `sgate-client-race`、`sgate-server-race`。压力测试使用默认重连退避，双端开启 10～30ms 随机间隔、128～512 字节随机白噪音，每轮在 128 路流传输中切断隧道，并交替重启客户端、服务端框架进程。隧道断线检查原业务连接续传完整性；进程重启检查旧连接结束、已有登录会话可继续使用、新连接传输正常。旧服务端会话按测试配置的 20 秒窗口保留，到期后检查释放。输出含空闲阶段内存、协程、描述符及会话/缓存采样，退出时要求会话、流、缓存和传输写协程归零，并检查子进程退出和端口可重新绑定。
 
+单端口管理综合压力可在上述测试命令添加 `--management-stress --login-concurrency 8 --apply-rounds 6`，独立模式另加 `--mode standalone`；默认同时覆盖 WS/WSS，可用 `--tls wss` 只运行 HTTPS/WSS。每轮在 128 个业务流及管理状态采样运行期间，并发登录、交替修改白噪音大小上限、连续执行保存并应用及“仅保存＋单独应用”，再重启服务进程；托管模式使用真实 `master_ctl`。接受登录的旧 Cookie 必须跨多轮代理应用及进程替换保持有效，登录 `429` 按现有限流规则单独统计。`management-load-*.json` 保存管理请求耗时、登录/限流次数、配置应用次数、数据记录校验及计划内停机时间，不保存密码或 Cookie。主动代理/进程重启会关闭旧业务连接；该阶段核验已收到的记录前缀、完整记录及新连接，另有仅切断隧道的整包传输阶段严格要求双向无丢失、无重复。
+
 退出诊断最多等待 5 秒让异步关闭的协程收尾，并保存 `.metrics.closed-<pid>.stack`；避免将关闭套接字瞬间尚未调度退出的读协程误判为持续泄漏。采样未能按时收敛或旧进程未退出，测试仍会失败。
 
 独立启动回归测试同时覆盖两端的纯命令行、显式 `-alone`、配置文件及命令行覆盖，以及 WS/WSS 双向传输和退出后端口释放：
@@ -112,7 +120,9 @@ python3 scripts/test-merged-standalone.py --client bin/sgate-client --server bin
 
 管理进程需要界面目录的遍历权限、界面文件的读取权限，以及业务配置所在目录的写入权限（用于临时校验、备份和原子替换）。启动时界面文件不可访问会报告具体路径及系统错误；运行中丢失或不可读时，相应页面请求返回 `503`，管理 API 和已有登录会话仍可使用，恢复文件或权限后刷新即可。配置目录不可写时，保存失败，文件和正在运行的代理保持原状。
 
-默认客户端管理地址为 `http://127.0.0.1:9081`，服务端为 `http://127.0.0.1:9082`。管理参数以 `admin_` 为前缀，连字符改为下划线，例如 `admin_session_timeout = 12h`。业务相对路径仍按进程工作目录解析，管理存储、静态目录和证书路径相对 `.cf` 所在目录解析。合并示例中的 `conf/admin-*-users.json`、`conf/admin-*-sessions` 继续指向原存储位置。现有 SSH、VPN、Web 配置可直接作为 `-config`，无需迁移其地址或密码。
+默认客户端管理地址为 `http://127.0.0.1:9081`；服务端管理地址为代理入口的 `/admin/`，例如 `https://服务器:8080/admin/`，WSS 仍为 `wss://服务器:8080/tunnel`，只需一个 TCP 监听端口。管理界面仍须通过 `admin_enabled = true` 或 `-admin-enabled` 开启。服务端复用代理 `tls-cert`、`tls-key`，原 `admin_listen`、`admin_tls_cert`、`admin_tls_key` 不再创建监听或加载证书；保留 `admin_listen` 原值可维持旧登录 Cookie 的身份。客户端仍使用独立管理监听。管理参数以 `admin_` 为前缀，连字符改为下划线，例如 `admin_session_timeout = 12h`。业务相对路径仍按进程工作目录解析，管理存储、静态目录和证书路径相对 `.cf` 所在目录解析。合并示例中的 `conf/admin-*-users.json`、`conf/admin-*-sessions` 继续指向原存储位置。现有 SSH、VPN、Web 配置可直接作为 `-config`，无需迁移其地址或密码。
+
+登录后点击右上角“退出登录”，服务端立即删除当前登录对应的持久化会话文件并清除浏览器 Cookie。页面停止流量刷新、清空配置草稿与密码输入，返回登录页；旧 Cookie 不能恢复该会话。其他浏览器的登录会话继续有效。
 
 首次打开界面会主动进入“创建首个管理员”，没有预设账号和密码。程序生成一次性初始化令牌，日志只提示 `setup-token-file` 路径；从该文件读取令牌，在页面输入用户名、至少 12 个字符的密码及令牌即可创建账号。创建成功后令牌文件删除，后续直接登录。管理密码与代理的 `-password` 分开保存。账号文件存用户名、随机盐及 PBKDF2-HMAC-SHA256 密码哈希（600,000 次迭代，参照 [OWASP 密码存储建议](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)），不保存明文密码。
 
@@ -120,24 +130,41 @@ python3 scripts/test-merged-standalone.py --client bin/sgate-client --server bin
 
 | 参数 | 用途 |
 | --- | --- |
-| `listen` | 独立管理监听地址；默认仅本机 |
+| `listen` | 客户端独立管理监听；服务端仅保留旧 Cookie 身份，不绑定 |
 | `web-dir` | 外部界面目录，默认 `../web/admin`，相对管理配置文件解析 |
 | `users-file` | 独立管理员账号 JSON 文件，首次建号自动生成 |
 | `session-dir` | 持久登录会话目录，权限必须为 `0700`，不存在时自动创建 |
 | `session-timeout` | 登录固定有效期，默认 `12h`，最短 `1s`，最长 `8760h` |
 | `max-sessions` | 最大持久登录会话数，默认 `128` |
 | `setup-token-file` | 首次建号令牌文件 |
-| `tls-cert` / `tls-key` | 管理界面 HTTPS 证书/私钥，与业务 WSS 配置独立 |
+| `tls-cert` / `tls-key` | 客户端独立管理 HTTPS 证书/私钥；服务端使用代理 TLS 配置 |
 
-绑定非回环地址必须配置管理 HTTPS。账号、会话、令牌与配置备份文件按 `0600` 创建；管理员账号和登录会话继续与代理配置分开存储。持久 Cookie 使用 HttpOnly、SameSite=Strict，HTTPS 下同时使用 Secure。会话有效期固定，不随访问延长；进程重启或浏览器重开后，在原有效期内仍可登录。到期立即拒绝访问，后台最多每分钟清理过期文件。退出会删除对应会话；修改管理员账号/密码需要当前密码，并使全部旧会话失效。管理监听、证书、超时及存储路径修改后，需要重启整个程序。合并 `.cf` 中的框架参数及 `admin_` 参数变更可“仅保存”，但“保存并重启代理”会拒绝并回滚这些变更，避免误报已经生效；随后使用 `master_ctl` 或手工重启整个程序。
+管理入口绑定非回环地址必须启用 HTTPS：客户端配置管理证书，服务端配置代理证书。账号、会话、令牌与配置备份文件按 `0600` 创建；管理员账号和登录会话继续与代理配置分开存储。持久 Cookie 使用 HttpOnly、SameSite=Strict，HTTPS 下同时使用 Secure。会话有效期固定，不随访问延长；进程重启或浏览器重开后，在原有效期内仍可登录。到期立即拒绝访问，后台最多每分钟清理过期文件。退出会删除对应会话；修改管理员账号/密码需要当前密码，并使全部旧会话失效。管理超时及存储路径修改后，需要重启整个程序；客户端管理监听和证书也需整进程重启。服务端代理证书可通过“保存并重启代理”更新，新 TLS 连接使用新证书；共享监听地址或 HTTP/HTTPS 模式变更需仅保存后重启整个进程，应用操作会拒绝并回滚此类变更。合并 `.cf` 中的框架参数及 `admin_` 参数变更可“仅保存”，但“保存并重启代理”会拒绝并回滚这些变更，避免误报已经生效；随后使用 `master_ctl` 或手工重启整个程序。
 
-代理配置页只管理当前 `-config` 指定的文件，保留中文注释。代理密码及可能含密码或密钥的 `master_args`、`master_env` 以 `__SGATE_KEEP_EXISTING_PASSWORD__` 占位符分别隐藏；保留占位符会保留原值，也可改成新密码。保存前做语法、参数及密钥/证书校验，再备份至 `.bak` 并原子替换；旧版本编辑会被拒绝，避免覆盖其他操作。可选择“仅保存”，或“保存并重启代理”立即应用。命令行显式参数在重启后仍优先，页面显示优先项名称及实际监听地址。
+配置页以表单管理当前 `-config` 指定文件中的配置项，每项单独一行，按服务框架、代理与通道、Web 管理分组，显示文件中的中文说明及命令行优先标记。每行右侧的保存图标默认灰色不可点，值发生修改后启用，改回原值或保存成功后重新禁用；点击仅保存该项，不重启代理，也不覆盖其他行的未保存编辑；整页保存和应用按钮继续保留。保存时只替换修改的值，保留原有注释和未编辑的内容。代理密码及可能含密码或密钥的 `master_args`、`master_env` 使用密码输入框隐藏；不编辑则保留原值，输入新值则替换。页面不提供原始文件编辑器。保存前做语法、参数及密钥/证书校验，再备份至 `.bak` 并原子替换；旧版本编辑会被拒绝，避免覆盖其他操作。可选择“仅保存”，或“保存并重启代理”立即应用。命令行显式参数在重启后仍优先，页面显示优先项名称及实际监听地址。
 
-界面内重启只替换业务代理，管理端口、登录会话及本进程流量累计继续保留。重启会中断本端现有业务连接，远端按原会话保留机制清理；不能恢复这些已断开的业务连接。若新监听端口被占用等导致启动失败，会尝试恢复上次运行的代理配置，并在界面显示结果；“保存并重启”失败还会还原本次保存前的文件。
+“保存并重启代理”只替换业务代理，管理 HTTP 服务、登录会话及本进程流量累计继续保留，应用请求可正常返回。重启会中断本端现有业务连接，远端按原会话保留机制清理；不能恢复这些已断开的业务连接。若新监听端口被占用等导致启动失败，会尝试恢复上次运行的代理配置，并在界面显示结果；“保存并重启”失败还会还原本次保存前的文件。
 
-带宽按通道 TCP 字节流统计，包含 HTTP、WebSocket、TLS、随机白噪音和隧道重发，排除 TCP/IP 包头、内核 TCP 重传包、业务侧端口及管理界面流量；不是整机网卡总流量。曲线显示最近 60 次采样，数字每秒更新。代理重启不清空累计值，整个进程重启则重新计数。
+在 acl_master 托管模式下，配置页另有“通过 acl_master 重启服务”按钮，对启动时 `-f` 指定的服务配置执行 `/opt/soft/acl-master/bin/master_ctl -f <服务配置路径> -a restart`。例如服务端以 `-f /opt/soft/sgate/conf/sgate-server.cf` 启动时，即执行该文件的 restart。按钮使用已保存的文件，不会自动保存编辑框；可先“仅保存”框架或管理配置，再重启整个服务。整服务重启会替换进程、中断业务和管理连接，页面等待新 PID 恢复后才报告完成；原持久登录会话仍按原有效期使用。若改了管理地址、协议或证书，应手工打开新地址。独立启动时隐藏此按钮，仍可使用进程内的代理重启。
+
+控制程序路径可在同一 `.cf` 中以 `admin_master_ctl = /opt/soft/acl-master/bin/master_ctl` 指定；使用自定义 acl_master 管理套接字时增加 `admin_master_socket = /path/to/master.sock`，未设置则使用 master_ctl 默认地址。旧独立管理配置中的对应键为 `master-ctl`、`master-socket`。相对路径按管理配置文件所在目录解析，修改这些设置需重启进程。控制命令直接执行固定参数，不经过 shell，不接受 HTTP 请求指定命令或服务文件；运行账号须拥有控制套接字权限。命令启动失败会直接返回错误，异步执行失败会记录在服务日志及运行状态中。重启请求必须携带页面读取的当前 PID，旧页面的延迟请求不能再次重启新进程；同一进程只允许一个重启任务。命令附带 `-t 30`，独立执行期限为 45 秒，不随旧代理上下文取消；退出码为 0 但旧进程仍未退出时，最多再等待 30 秒即报告未完成并允许重试。页面最多等待 90 秒，只有新 PID 已运行才提示成功。
+
+带宽按通道 TCP 字节流统计，包含 HTTP、WebSocket、TLS、随机白噪音和隧道重发，排除 TCP/IP 包头、内核 TCP 重传包和业务侧端口；客户端独立管理流量不计入，服务端共享监听的管理 HTTP/TLS 流量计入该端口总流量；不是整机网卡总流量。曲线显示最近 60 次采样，数字每秒更新。代理重启不清空累计值，整个进程重启则重新计数。
 
 ## 构建与测试
+
+代码按职责组织：`internal/app/definition.go` 构建有效配置，`instance.go` 管理单次运行资源，`lifecycle.go` 负责客户端启动与退出，`server.go` 管理服务端业务资源，`run.go` 处理状态与应用回滚。隧道的可靠会话与业务流在 `session.go`，单次 WebSocket 的读写、心跳和重连确认在 `transport.go`。阅读并发代码时先查看类型上的锁归属说明，再查看关闭和等待顺序。
+
+Go 使用 `gofmt`，复杂初始化按字段换行，较长函数按生命周期阶段或独立操作拆分；场景测试保留阶段顺序与资源断言。Python 使用 Black 25.1.0，前端使用 Prettier 3.6.2，宽度设置保存在 `pyproject.toml` 和 `.prettierrc.json`。只格式化项目维护的目录，不批量改动上游 `vendor/`：
+
+```sh
+gofmt -w cmd internal third_party/gin-service
+python3 -m black scripts
+prettier --write web/admin
+make vendor-sync
+```
+
+通过 Web 调用 master_ctl 的故障回归可在具备本机 acl_master 的环境运行 `scripts/test-acl-master.py`，在诊断二进制参数后加入 `--mode managed --merged --stress --management-stress --web-service-restart --restart-failure-checks --tls both --concurrency 128 --rounds 3 --output artifacts/web-restart-failures`。测试仅操作隔离实例，分别检查两端控制命令缺失、没有执行权限、私有管理套接字不可用、命令阻塞至真实 45 秒期限，以及每次 32 路并发点击和跨进程延迟请求；故障阶段保持 128 条业务流和管理探测，之后叠加传输断线、配置应用与连续重启。页面异步流程可使用 `node --test scripts/test-admin-restart.cjs` 验证。
 
 需要 Go 1.23 或以上版本。
 

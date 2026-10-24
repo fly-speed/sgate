@@ -13,7 +13,10 @@ import (
 
 func TestInheritedSocketCleanupSubprocess(t *testing.T) {
 	var files []*os.File
-	add := func(fd int) { unix.CloseOnExec(fd); files = append(files, os.NewFile(uintptr(fd), "inherited-test")) }
+	add := func(fd int) {
+		unix.CloseOnExec(fd)
+		files = append(files, os.NewFile(uintptr(fd), "inherited-test"))
+	}
 	regular, e := os.CreateTemp(t.TempDir(), "regular")
 	if e != nil {
 		t.Fatal(e)
@@ -98,7 +101,10 @@ func TestInheritedSocketCleanupChild(t *testing.T) {
 			}
 		}
 	}()
-	defer func() { close(done); <-stopped }()
+	defer func() {
+		close(done)
+		<-stopped
+	}()
 	for i := 0; i < 100; i++ {
 		count, e = closeInheritedSockets(1)
 		if e != nil || count != 0 {

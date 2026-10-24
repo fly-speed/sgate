@@ -111,7 +111,10 @@ func newWeakRelayDialTimeout(t *testing.T, target string, dialTimeout time.Durat
 						src, dst = b, a
 					}
 					pumps.Add(1)
-					go func(direction int, src, dst net.Conn) { defer pumps.Done(); r.pump(pairCtx, p, direction, src, dst) }(direction, src, dst)
+					go func(direction int, src, dst net.Conn) {
+						defer pumps.Done()
+						r.pump(pairCtx, p, direction, src, dst)
+					}(direction, src, dst)
 				}
 				pumps.Wait()
 				p.close()
@@ -180,7 +183,15 @@ func (r *weakRelay) pump(ctx context.Context, p *weakPair, direction int, src, d
 			}
 			if e != nil {
 				if p.trace.Load() {
-					r.logf("probe relay %s dir=%d read %s -> %s n=%d err=%v", time.Now().Format(time.RFC3339Nano), direction, src.RemoteAddr(), src.LocalAddr(), n, e)
+					r.logf(
+						"probe relay %s dir=%d read %s -> %s n=%d err=%v",
+						time.Now().Format(time.RFC3339Nano),
+						direction,
+						src.RemoteAddr(),
+						src.LocalAddr(),
+						n,
+						e,
+					)
 				}
 				p.closeWithReason(fmt.Sprintf("read direction=%d: %v", direction, e))
 				return
@@ -285,7 +296,14 @@ func (r *weakRelay) pump(ctx context.Context, p *weakPair, direction int, src, d
 		if e != nil {
 			p.closeWithReason(fmt.Sprintf("write direction=%d: %v", direction, e))
 			if p.trace.Load() {
-				r.logf("probe relay %s dir=%d write %s -> %s err=%v", time.Now().Format(time.RFC3339Nano), direction, dst.LocalAddr(), dst.RemoteAddr(), e)
+				r.logf(
+					"probe relay %s dir=%d write %s -> %s err=%v",
+					time.Now().Format(time.RFC3339Nano),
+					direction,
+					dst.LocalAddr(),
+					dst.RemoteAddr(),
+					e,
+				)
 			}
 			return
 		}
@@ -302,16 +320,26 @@ func weakFixture(t *testing.T, options Options, ttl, offline time.Duration) (*re
 	return weakFixtureMode(t, options, ttl, offline, "")
 }
 
-func weakFixtureMode(t *testing.T, options Options, ttl, offline time.Duration, mode string) (*recoveryFixture, *weakRelay) {
+func weakFixtureMode(t *testing.T, options Options, ttl, offline time.Duration, mode string) (
+	*recoveryFixture,
+	*weakRelay,
+) {
 	t.Helper()
 	return weakFixtureBackend(t, options, ttl, offline, mode, nil)
 }
 
-func weakFixtureBackend(t *testing.T, options Options, ttl, offline time.Duration, mode string, backend func(net.Conn)) (*recoveryFixture, *weakRelay) {
+func weakFixtureBackend(t *testing.T, options Options, ttl, offline time.Duration, mode string, backend func(net.Conn)) (
+	*recoveryFixture,
+	*weakRelay,
+) {
 	t.Helper()
 	base := runtime.NumGoroutine()
 	t.Cleanup(func() {
-		waitFor(t, "weak relay and tunnel goroutines released", func() bool { return runtime.NumGoroutine() <= base+4 })
+		waitFor(
+			t,
+			"weak relay and tunnel goroutines released",
+			func() bool { return runtime.NumGoroutine() <= base+4 },
+		)
 	})
 	var relay *weakRelay
 	f := newRecoveryFixtureBackend(t, ttl, offline, mode, options, backend, func(c *ClientConfig) {
@@ -348,7 +376,13 @@ func TestWeakNetworkSlowFrameProgressDoesNotReconnect(t *testing.T) {
 }
 
 func testWeakNetworkSlowFrameProgressDoesNotReconnect(t *testing.T, configure func(*Options), mode string) {
-	opts := Options{Heartbeat: 100 * time.Millisecond, DialTimeout: 200 * time.Millisecond, WriteTimeout: 200 * time.Millisecond, BufferBytes: 64 * 1024, Logf: func(string, ...any) {}}
+	opts := Options{
+		Heartbeat:    100 * time.Millisecond,
+		DialTimeout:  200 * time.Millisecond,
+		WriteTimeout: 200 * time.Millisecond,
+		BufferBytes:  64 * 1024,
+		Logf:         func(string, ...any) {},
+	}
 	if configure != nil {
 		configure(&opts)
 	}
@@ -421,7 +455,14 @@ func TestWeakNetworkLatencyJitterAndRetransmission(t *testing.T) {
 }
 
 func testWeakNetworkLatencyJitterAndRetransmission(t *testing.T, configure func(*Options), mode string) {
-	opts := Options{Heartbeat: 100 * time.Millisecond, HeartbeatTimeout: 2 * time.Second, DialTimeout: time.Second, WriteTimeout: time.Second, BufferBytes: 128 * 1024, Logf: func(string, ...any) {}}
+	opts := Options{
+		Heartbeat:        100 * time.Millisecond,
+		HeartbeatTimeout: 2 * time.Second,
+		DialTimeout:      time.Second,
+		WriteTimeout:     time.Second,
+		BufferBytes:      128 * 1024,
+		Logf:             func(string, ...any) {},
+	}
 	if configure != nil {
 		configure(&opts)
 	}
@@ -433,7 +474,12 @@ func testWeakNetworkLatencyJitterAndRetransmission(t *testing.T, configure func(
 		t.Fatal(e)
 	}
 	accepted := relay.accepted.Load()
-	relay.profile.Store(&weakProfile{delay: 150 * time.Millisecond, jitter: 100 * time.Millisecond, lossPercent: 15, retransmit: 200 * time.Millisecond})
+	relay.profile.Store(&weakProfile{
+		delay:       150 * time.Millisecond,
+		jitter:      100 * time.Millisecond,
+		lossPercent: 15,
+		retransmit:  200 * time.Millisecond,
+	})
 	// Remain idle for longer than the receive timeout, so Ping/Pong must sustain the connection.
 	time.Sleep(2200 * time.Millisecond)
 	if relay.accepted.Load() != accepted {
@@ -480,7 +526,11 @@ func testWeakNetworkLatencyJitterAndRetransmission(t *testing.T, configure func(
 	checkNoise()
 	relay.profile.Store(&weakProfile{})
 	finishWeakStream(t, f, anchor)
-	t.Logf("150ms +/-100ms one-way delay, 15%% segment retransmission at 200ms: %d delayed segments; no reconnect", relay.losses.Load())
+	t.Logf(
+		("150ms +/-100ms one-way delay, 15%% segment retransmission at 200ms: %d delayed " +
+			"segments; no reconnect"),
+		relay.losses.Load(),
+	)
 }
 
 func TestWeakNetworkShortDirectionalBlackholes(t *testing.T) {
@@ -490,7 +540,14 @@ func TestWeakNetworkShortDirectionalBlackholes(t *testing.T) {
 func testWeakNetworkShortDirectionalBlackholes(t *testing.T, configure func(*Options), mode string) {
 	for _, direction := range []int{0, 1} {
 		t.Run([]string{"uplink", "downlink"}[direction], func(t *testing.T) {
-			opts := Options{Heartbeat: 100 * time.Millisecond, HeartbeatTimeout: 800 * time.Millisecond, DialTimeout: 400 * time.Millisecond, WriteTimeout: 400 * time.Millisecond, BufferBytes: 128 * 1024, Logf: func(string, ...any) {}}
+			opts := Options{
+				Heartbeat:        100 * time.Millisecond,
+				HeartbeatTimeout: 800 * time.Millisecond,
+				DialTimeout:      400 * time.Millisecond,
+				WriteTimeout:     400 * time.Millisecond,
+				BufferBytes:      128 * 1024,
+				Logf:             func(string, ...any) {},
+			}
 			if configure != nil {
 				configure(&opts)
 			}
@@ -500,7 +557,12 @@ func testWeakNetworkShortDirectionalBlackholes(t *testing.T, configure func(*Opt
 			if e := exchange(app, []byte("baseline")); e != nil {
 				t.Fatal(e)
 			}
-			relay.profile.Store(&weakProfile{delay: 30 * time.Millisecond, jitter: 15 * time.Millisecond, lossPercent: 10, retransmit: 60 * time.Millisecond})
+			relay.profile.Store(&weakProfile{
+				delay:       30 * time.Millisecond,
+				jitter:      15 * time.Millisecond,
+				lossPercent: 10,
+				retransmit:  60 * time.Millisecond,
+			})
 			accepted := relay.accepted.Load()
 			beforeUp, beforeDown := relay.upBytes.Load(), relay.downBytes.Load()
 			relay.blackhole[direction].Store(true)
@@ -540,7 +602,14 @@ func TestWeakNetworkDirectionalOutagesResumeWithoutDuplicates(t *testing.T) {
 func testWeakNetworkDirectionalOutagesResumeWithoutDuplicates(t *testing.T, configure func(*Options), mode string) {
 	for _, direction := range []int{0, 1} {
 		t.Run([]string{"uplink", "downlink"}[direction], func(t *testing.T) {
-			opts := Options{Heartbeat: 80 * time.Millisecond, HeartbeatTimeout: 500 * time.Millisecond, DialTimeout: 300 * time.Millisecond, WriteTimeout: 300 * time.Millisecond, BufferBytes: 128 * 1024, Logf: func(string, ...any) {}}
+			opts := Options{
+				Heartbeat:        80 * time.Millisecond,
+				HeartbeatTimeout: 500 * time.Millisecond,
+				DialTimeout:      300 * time.Millisecond,
+				WriteTimeout:     300 * time.Millisecond,
+				BufferBytes:      128 * 1024,
+				Logf:             func(string, ...any) {},
+			}
 			if configure != nil {
 				configure(&opts)
 			}
@@ -553,13 +622,22 @@ func testWeakNetworkDirectionalOutagesResumeWithoutDuplicates(t *testing.T, conf
 			}
 			client, remote := f.clientSession(), f.remoteSession()
 			accepted := relay.accepted.Load()
-			relay.profile.Store(&weakProfile{delay: 20 * time.Millisecond, jitter: 10 * time.Millisecond, lossPercent: 10, retransmit: 50 * time.Millisecond})
+			relay.profile.Store(&weakProfile{
+				delay:       20 * time.Millisecond,
+				jitter:      10 * time.Millisecond,
+				lossPercent: 10,
+				retransmit:  50 * time.Millisecond,
+			})
 			relay.blackhole[direction].Store(true)
 			payload := make([]byte, 256*1024)
 			_, _ = cryptorand.Read(payload)
 			done := make(chan error, 1)
 			go func() { done <- exchange(app, payload) }()
-			waitFor(t, "heartbeat reconnect under one-way outage", func() bool { return relay.accepted.Load() > accepted })
+			waitFor(
+				t,
+				"heartbeat reconnect under one-way outage",
+				func() bool { return relay.accepted.Load() > accepted },
+			)
 			relay.blackhole[direction].Store(false)
 			select {
 			case e := <-done:
@@ -588,7 +666,14 @@ func TestWeakNetworkDirectionalExpiryReleasesBothSides(t *testing.T) {
 func testWeakNetworkDirectionalExpiryReleasesBothSides(t *testing.T, configure func(*Options), mode string) {
 	for _, direction := range []int{0, 1} {
 		t.Run([]string{"uplink", "downlink"}[direction], func(t *testing.T) {
-			opts := Options{Heartbeat: 80 * time.Millisecond, HeartbeatTimeout: 400 * time.Millisecond, DialTimeout: 200 * time.Millisecond, WriteTimeout: 200 * time.Millisecond, BufferBytes: 64 * 1024, Logf: func(string, ...any) {}}
+			opts := Options{
+				Heartbeat:        80 * time.Millisecond,
+				HeartbeatTimeout: 400 * time.Millisecond,
+				DialTimeout:      200 * time.Millisecond,
+				WriteTimeout:     200 * time.Millisecond,
+				BufferBytes:      64 * 1024,
+				Logf:             func(string, ...any) {},
+			}
 			if configure != nil {
 				configure(&opts)
 			}
@@ -617,7 +702,11 @@ func testWeakNetworkDirectionalExpiryReleasesBothSides(t *testing.T, configure f
 			if !bytes.Equal(delivered, bytes.Repeat([]byte{0xdb}, len(delivered))) {
 				t.Fatal("corrupted delivered downstream prefix")
 			}
-			waitFor(t, "one-way expired application sockets", func() bool { return f.backendCount.active.Load() == 0 && f.localCount.active.Load() == 0 })
+			waitFor(
+				t,
+				"one-way expired application sockets",
+				func() bool { return f.backendCount.active.Load() == 0 && f.localCount.active.Load() == 0 },
+			)
 			relay.blackhole[direction].Store(false)
 			f.assertFreshConnection()
 		})
@@ -647,7 +736,10 @@ func testHeartbeatNotStarvedByBusyWriter(t *testing.T, configure func(*Options))
 			return
 		}
 		defer ws.Close()
-		ws.SetPingHandler(func(string) error { pings.Add(1); return nil })
+		ws.SetPingHandler(func(string) error {
+			pings.Add(1)
+			return nil
+		})
 		for {
 			if _, p, e := ws.ReadMessage(); e != nil {
 				return
@@ -671,7 +763,14 @@ func testHeartbeatNotStarvedByBusyWriter(t *testing.T, configure func(*Options))
 	}
 	defer ws.Close()
 	slow.Store(true)
-	opts := Options{Heartbeat: 10 * time.Millisecond, HeartbeatTimeout: time.Second, DialTimeout: 200 * time.Millisecond, WriteTimeout: 200 * time.Millisecond, BufferBytes: 2 * 1024 * 1024, Logf: func(string, ...any) {}}
+	opts := Options{
+		Heartbeat:        10 * time.Millisecond,
+		HeartbeatTimeout: time.Second,
+		DialTimeout:      200 * time.Millisecond,
+		WriteTimeout:     200 * time.Millisecond,
+		BufferBytes:      2 * 1024 * 1024,
+		Logf:             func(string, ...any) {},
+	}
 	if configure != nil {
 		configure(&opts)
 	}
@@ -710,14 +809,26 @@ func testHeartbeatNotStarvedByBusyWriter(t *testing.T, configure func(*Options))
 }
 
 func TestWeakNetworkTLSLatencyJitterAndRetransmission(t *testing.T) {
-	opts := Options{Heartbeat: 100 * time.Millisecond, HeartbeatTimeout: 2 * time.Second, DialTimeout: time.Second, WriteTimeout: time.Second, BufferBytes: 128 * 1024, Logf: func(string, ...any) {}}
+	opts := Options{
+		Heartbeat:        100 * time.Millisecond,
+		HeartbeatTimeout: 2 * time.Second,
+		DialTimeout:      time.Second,
+		WriteTimeout:     time.Second,
+		BufferBytes:      128 * 1024,
+		Logf:             func(string, ...any) {},
+	}
 	f, relay := weakFixtureMode(t, opts, 8*time.Second, 8*time.Second, "tls")
 	app := f.dial()
 	if e := exchange(app, []byte("baseline TLS")); e != nil {
 		t.Fatal(e)
 	}
 	accepted := relay.accepted.Load()
-	relay.profile.Store(&weakProfile{delay: 150 * time.Millisecond, jitter: 100 * time.Millisecond, lossPercent: 15, retransmit: 200 * time.Millisecond})
+	relay.profile.Store(&weakProfile{
+		delay:       150 * time.Millisecond,
+		jitter:      100 * time.Millisecond,
+		lossPercent: 15,
+		retransmit:  200 * time.Millisecond,
+	})
 	time.Sleep(2200 * time.Millisecond)
 	p := make([]byte, 64*1024)
 	_, _ = cryptorand.Read(p)
@@ -742,7 +853,14 @@ func (r *weakRelay) traceProbe(c net.Conn) *weakPair {
 			p.tracked.Store(true)
 			if os.Getenv("SGATE_STRESS_PROBE_TRACE") == "1" {
 				p.trace.Store(true)
-				r.logf("probe relay %s registered client=%s frontend=%s backend=%s server=%s", time.Now().Format(time.RFC3339Nano), p.a.RemoteAddr(), p.a.LocalAddr(), p.b.LocalAddr(), p.b.RemoteAddr())
+				r.logf(
+					"probe relay %s registered client=%s frontend=%s backend=%s server=%s",
+					time.Now().Format(time.RFC3339Nano),
+					p.a.RemoteAddr(),
+					p.a.LocalAddr(),
+					p.b.LocalAddr(),
+					p.b.RemoteAddr(),
+				)
 			}
 			return p
 		}
@@ -755,7 +873,19 @@ func (r *weakRelay) traceStatus() {
 	defer r.mu.Unlock()
 	for p := range r.pairs {
 		if p.trace.Load() {
-			r.logf("probe counters client=%s backend=%s relayConn=%p read=%d/%d written=%d/%d blackhole=%t/%t", p.a.RemoteAddr(), p.b.LocalAddr(), p.b, p.read[0].Load(), p.read[1].Load(), p.written[0].Load(), p.written[1].Load(), r.blackhole[0].Load(), r.blackhole[1].Load())
+			r.logf(
+				("probe counters client=%s backend=%s relayConn=%p read=%d/%d written=%d/%d " +
+					"blackhole=%t/%t"),
+				p.a.RemoteAddr(),
+				p.b.LocalAddr(),
+				p.b,
+				p.read[0].Load(),
+				p.read[1].Load(),
+				p.written[0].Load(),
+				p.written[1].Load(),
+				r.blackhole[0].Load(),
+				r.blackhole[1].Load(),
+			)
 		}
 	}
 }

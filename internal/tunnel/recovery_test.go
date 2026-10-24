@@ -68,12 +68,25 @@ func newRecoveryFixture(t *testing.T, ttl, offline time.Duration, initialMode st
 	return newRecoveryFixtureOptions(t, ttl, offline, initialMode, testOptions(), configure...)
 }
 
-func newRecoveryFixtureOptions(t *testing.T, ttl, offline time.Duration, initialMode string, options Options, configure ...func(*ClientConfig)) *recoveryFixture {
+func newRecoveryFixtureOptions(
+	t *testing.T,
+	ttl, offline time.Duration,
+	initialMode string,
+	options Options,
+	configure ...func(*ClientConfig),
+) *recoveryFixture {
 	t.Helper()
 	return newRecoveryFixtureBackend(t, ttl, offline, initialMode, options, nil, configure...)
 }
 
-func newRecoveryFixtureBackend(t *testing.T, ttl, offline time.Duration, initialMode string, options Options, backend func(net.Conn), configure ...func(*ClientConfig)) *recoveryFixture {
+func newRecoveryFixtureBackend(
+	t *testing.T,
+	ttl, offline time.Duration,
+	initialMode string,
+	options Options,
+	backend func(net.Conn),
+	configure ...func(*ClientConfig),
+) *recoveryFixture {
 	t.Helper()
 	f := &recoveryFixture{t: t, done: make(chan error, 1)}
 	listener, e := net.Listen("tcp", "127.0.0.1:0")
@@ -103,7 +116,13 @@ func newRecoveryFixtureBackend(t *testing.T, ttl, offline time.Duration, initial
 			}()
 		}
 	}()
-	f.cfg = ServerConfig{Password: testPassword, Key: bytes.Repeat([]byte{27}, 32), Target: f.backend.Addr().String(), SessionTTL: ttl, Options: options}
+	f.cfg = ServerConfig{
+		Password:   testPassword,
+		Key:        bytes.Repeat([]byte{27}, 32),
+		Target:     f.backend.Addr().String(),
+		SessionTTL: ttl,
+		Options:    options,
+	}
 	f.blocked.Store(initialMode == "offline")
 	f.stalled.Store(initialMode == "stall")
 	f.tls = initialMode == "tls"
@@ -113,7 +132,15 @@ func newRecoveryFixtureBackend(t *testing.T, ttl, offline time.Duration, initial
 		t.Fatal(e)
 	}
 	f.local = countedListener{local, &f.localCount}
-	clientConfig := ClientConfig{Password: testPassword, Key: f.cfg.Key, URL: strings.Replace(f.http.URL, "http", "ws", 1) + "/tunnel", OfflineTimeout: offline, ReconnectMin: 10 * time.Millisecond, ReconnectMax: 30 * time.Millisecond, Options: options}
+	clientConfig := ClientConfig{
+		Password:       testPassword,
+		Key:            f.cfg.Key,
+		URL:            strings.Replace(f.http.URL, "http", "ws", 1) + "/tunnel",
+		OfflineTimeout: offline,
+		ReconnectMin:   10 * time.Millisecond,
+		ReconnectMax:   30 * time.Millisecond,
+		Options:        options,
+	}
 	if f.tls {
 		roots := x509.NewCertPool()
 		roots.AddCert(f.http.Certificate())
@@ -141,7 +168,10 @@ func newRecoveryFixtureBackend(t *testing.T, ttl, offline time.Duration, initial
 		}
 		f.stopServer()
 		f.backend.Close()
-		f.backendConns.Range(func(k, v any) bool { k.(net.Conn).Close(); return true })
+		f.backendConns.Range(func(k, v any) bool {
+			k.(net.Conn).Close()
+			return true
+		})
 		f.backendWG.Wait()
 	})
 	waitFor(t, "initial client session", func() bool { return f.clientSession() != nil })
@@ -272,7 +302,10 @@ func assertSocketClosed(t *testing.T, c net.Conn) {
 func (f *recoveryFixture) fillQueues(app net.Conn, client, remote *session) {
 	f.t.Helper()
 	var backend net.Conn
-	f.backendConns.Range(func(k, v any) bool { backend = k.(net.Conn); return false })
+	f.backendConns.Range(func(k, v any) bool {
+		backend = k.(net.Conn)
+		return false
+	})
 	if backend == nil {
 		f.t.Fatal("missing backend")
 	}
@@ -352,7 +385,11 @@ func testLongOutageReleasesStateBeforeNetworkReturns(t *testing.T, options Optio
 	if !f.blocked.Load() {
 		t.Fatal("cleanup required network recovery")
 	}
-	waitFor(t, "old sockets released offline", func() bool { return f.backendCount.active.Load() == 0 && f.localCount.active.Load() == 0 })
+	waitFor(
+		t,
+		"old sockets released offline",
+		func() bool { return f.backendCount.active.Load() == 0 && f.localCount.active.Load() == 0 },
+	)
 	f.blocked.Store(false)
 	f.assertFreshConnection()
 }
@@ -492,7 +529,10 @@ func testLongRecoveryDefaultOfflineWindow(t *testing.T, options Options, mode st
 			t.Fatal("padding continued on detached transport")
 		}
 		if time.Now().After(logAt) {
-			t.Logf("offline %s: old padding writers stopped; waiting for retention expiry", time.Since(start).Round(time.Second))
+			t.Logf(
+				"offline %s: old padding writers stopped; waiting for retention expiry",
+				time.Since(start).Round(time.Second),
+			)
 			logAt = time.Now().Add(30 * time.Second)
 		}
 		if time.Now().After(deadline) {
@@ -506,7 +546,11 @@ func testLongRecoveryDefaultOfflineWindow(t *testing.T, options Options, mode st
 	assertSocketClosed(t, app)
 	f.blocked.Store(false)
 	f.assertFreshConnection()
-	t.Logf("real outage %s: both sessions, sockets and replay buffers released; fresh TCP exchange passed", time.Since(start).Round(time.Millisecond))
+	t.Logf(
+		("real outage %s: both sessions, sockets and replay buffers released; fresh TCP " +
+			"exchange passed"),
+		time.Since(start).Round(time.Millisecond),
+	)
 }
 
 func TestOutageWithinRetentionPreservesBidirectionalData(t *testing.T) {
@@ -518,13 +562,22 @@ func TestOutageWithinRetentionPreservesBidirectionalData(t *testing.T) {
 	client, remote := f.clientSession(), f.remoteSession()
 	f.disconnect()
 	var backend net.Conn
-	f.backendConns.Range(func(k, v any) bool { backend = k.(net.Conn); return false })
+	f.backendConns.Range(func(k, v any) bool {
+		backend = k.(net.Conn)
+		return false
+	})
 	up, down := make([]byte, 256*1024), make([]byte, 256*1024)
 	_, _ = rand.Read(up)
 	_, _ = rand.Read(down)
 	writes := make(chan error, 2)
-	go func() { _, e := io.Copy(app, bytes.NewReader(up)); writes <- e }()
-	go func() { _, e := io.Copy(backend, bytes.NewReader(down)); writes <- e }()
+	go func() {
+		_, e := io.Copy(app, bytes.NewReader(up))
+		writes <- e
+	}()
+	go func() {
+		_, e := io.Copy(backend, bytes.NewReader(down))
+		writes <- e
+	}()
 	waitFor(t, "retained queues", func() bool {
 		client.mu.Lock()
 		a := client.pendingBytes > 32*1024
@@ -575,7 +628,15 @@ func TestBlackholedTransportTimesOutAndReleasesState(t *testing.T) {
 	if _, e := app.Write(bytes.Repeat([]byte{17}, 16*1024)); e != nil {
 		t.Fatal(e)
 	}
-	waitFor(t, "unacknowledged data on blackholed transport", func() bool { client.mu.Lock(); defer client.mu.Unlock(); return client.pendingBytes > 0 })
+	waitFor(
+		t,
+		"unacknowledged data on blackholed transport",
+		func() bool {
+			client.mu.Lock()
+			defer client.mu.Unlock()
+			return client.pendingBytes > 0
+		},
+	)
 	assertReleased(t, "blackholed client state", client)
 	assertReleased(t, "blackholed server state", remote)
 	assertSocketClosed(t, app)
@@ -601,7 +662,16 @@ func TestOnlineSessionOutlivesOfflineTimeout(t *testing.T) {
 }
 
 func TestOfflineRetentionClampsReconnectBackoff(t *testing.T) {
-	f := newRecoveryFixture(t, time.Minute, 200*time.Millisecond, "offline", func(c *ClientConfig) { c.ReconnectMin = 5 * time.Second; c.ReconnectMax = 5 * time.Second })
+	f := newRecoveryFixture(
+		t,
+		time.Minute,
+		200*time.Millisecond,
+		"offline",
+		func(c *ClientConfig) {
+			c.ReconnectMin = 5 * time.Second
+			c.ReconnectMax = 5 * time.Second
+		},
+	)
 	client := f.clientSession()
 	app := f.dial()
 	start := time.Now()

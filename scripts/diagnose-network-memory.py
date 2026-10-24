@@ -27,9 +27,7 @@ def snapshot(phase, pid=None):
     denied = re.search(r"(\d+) requests for memory denied", raw)
     pools = {
         size: {"in_use": int(used), "allocated": int(total)}
-        for used, total, size in re.findall(
-            r"(\d+)/(\d+) mbuf (\d+)KB clusters in use", raw
-        )
+        for used, total, size in re.findall(r"(\d+)/(\d+) mbuf (\d+)KB clusters in use", raw)
     }
     failures = {}
     in_failures = False
@@ -64,9 +62,19 @@ def assert_report(report):
     closed = report["samples"][-1]
     assert closed["phase"] == "closed"
     for key in (
-        "backend_connections", "local_connections", "http_connections", "sessions",
-        "streams", "pending_bytes", "nonces", "client_sessions", "client_streams",
-        "client_pending_bytes", "relay_connections", "relay_queued_bytes", "transport_writers",
+        "backend_connections",
+        "local_connections",
+        "http_connections",
+        "sessions",
+        "streams",
+        "pending_bytes",
+        "nonces",
+        "client_sessions",
+        "client_streams",
+        "client_pending_bytes",
+        "relay_connections",
+        "relay_queued_bytes",
+        "transport_writers",
     ):
         assert closed[key] == 0, (key, closed[key])
     assert closed["goroutines"] <= 6 and closed["file_descriptors"] <= 10
@@ -84,19 +92,36 @@ def main():
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=True)
     env = {k: v for k, v in os.environ.items() if not k.startswith("SGATE_STRESS")}
-    env.update({
-        "GOMAXPROCS": "4", "SGATE_STRESS": "1", "SGATE_STRESS_DUPLEX": "1",
-        "SGATE_STRESS_TLS": "1", "SGATE_STRESS_WEAKNET": "1",
-        "SGATE_STRESS_LIFECYCLE": "1", "SGATE_STRESS_DEFAULT_RETENTION": "1",
-        "SGATE_STRESS_CLIENTS": "64", "SGATE_STRESS_STREAMS": "4",
-        "SGATE_STRESS_ROUNDS": "2", "SGATE_STRESS_BYTES": "1024",
-        "SGATE_STRESS_DURATION": "24s", "SGATE_STRESS_CHURN_INTERVAL": "1m",
-        "SGATE_STRESS_WEAK_DELAY": "75ms", "SGATE_STRESS_WEAK_JITTER": "50ms",
-        "SGATE_STRESS_WEAK_LOSS_PERCENT": "15", "SGATE_STRESS_WEAK_RETRANSMIT": "100ms",
-        "SGATE_STRESS_NOISE_INTERVAL_MIN": "1s", "SGATE_STRESS_NOISE_INTERVAL_MAX": "3s",
-    })
-    summary = {"serial": True, "environment": {k: v for k, v in env.items()
-                                              if k.startswith("SGATE_STRESS") or k == "GOMAXPROCS"}, "runs": []}
+    env.update(
+        {
+            "GOMAXPROCS": "4",
+            "SGATE_STRESS": "1",
+            "SGATE_STRESS_DUPLEX": "1",
+            "SGATE_STRESS_TLS": "1",
+            "SGATE_STRESS_WEAKNET": "1",
+            "SGATE_STRESS_LIFECYCLE": "1",
+            "SGATE_STRESS_DEFAULT_RETENTION": "1",
+            "SGATE_STRESS_CLIENTS": "64",
+            "SGATE_STRESS_STREAMS": "4",
+            "SGATE_STRESS_ROUNDS": "2",
+            "SGATE_STRESS_BYTES": "1024",
+            "SGATE_STRESS_DURATION": "24s",
+            "SGATE_STRESS_CHURN_INTERVAL": "1m",
+            "SGATE_STRESS_WEAK_DELAY": "75ms",
+            "SGATE_STRESS_WEAK_JITTER": "50ms",
+            "SGATE_STRESS_WEAK_LOSS_PERCENT": "15",
+            "SGATE_STRESS_WEAK_RETRANSMIT": "100ms",
+            "SGATE_STRESS_NOISE_INTERVAL_MIN": "1s",
+            "SGATE_STRESS_NOISE_INTERVAL_MAX": "3s",
+        }
+    )
+    summary = {
+        "serial": True,
+        "environment": {
+            k: v for k, v in env.items() if k.startswith("SGATE_STRESS") or k == "GOMAXPROCS"
+        },
+        "runs": [],
+    }
     for mode in ("control", "fragmented"):
         for variant in ("plain", "race"):
             name = f"{mode}-{variant}"
@@ -107,6 +132,7 @@ def main():
             env.update(SGATE_STRESS_UNCONFIRMED=mode, SGATE_STRESS_REPORT=str(report_path))
             samples = []
             with (out / f"{name}-system.jsonl").open("w") as observations:
+
                 def record(phase, pid=None):
                     item = snapshot(phase, pid)
                     samples.append(item)
@@ -119,9 +145,17 @@ def main():
                 print(f"Starting {name}; denied={samples[-1]['network_memory_denied']}", flush=True)
                 with (out / f"{name}.log").open("w") as log:
                     child = subprocess.Popen(
-                        [str(binary), "-test.run=^TestStressReconnectResources$", "-test.v",
-                         "-test.count=1", "-test.timeout=6m"],
-                        cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT,
+                        [
+                            str(binary),
+                            "-test.run=^TestStressReconnectResources$",
+                            "-test.v",
+                            "-test.count=1",
+                            "-test.timeout=6m",
+                        ],
+                        cwd=ROOT,
+                        env=env,
+                        stdout=log,
+                        stderr=subprocess.STDOUT,
                     )
                     try:
                         while child.poll() is None:
@@ -145,17 +179,26 @@ def main():
             first, last = samples[0], samples[-1]
             row = {
                 "name": name,
-                "network_memory_denied_delta": last["network_memory_denied"] - first["network_memory_denied"],
-                "pool_failure_deltas": {k: last["pool_failures"][k] - v for k, v in first["pool_failures"].items()},
+                "network_memory_denied_delta": last["network_memory_denied"]
+                - first["network_memory_denied"],
+                "pool_failure_deltas": {
+                    k: last["pool_failures"][k] - v for k, v in first["pool_failures"].items()
+                },
                 "peak_rss_bytes": max(s["rss_bytes"] or 0 for s in samples),
-                "before_system": first, "after_system": last,
+                "before_system": first,
+                "after_system": last,
                 "cluster_pool_peaks": {
-                    size: {key: max(s["cluster_pools_kb"][size][key] for s in samples)
-                           for key in ("in_use", "allocated")}
+                    size: {
+                        key: max(s["cluster_pools_kb"][size][key] for s in samples)
+                        for key in ("in_use", "allocated")
+                    }
                     for size in first["cluster_pools_kb"]
                 },
-                "counter_changes": [s for a, s in zip(samples, samples[1:])
-                                    if s["network_memory_denied"] != a["network_memory_denied"]],
+                "counter_changes": [
+                    s
+                    for a, s in zip(samples, samples[1:])
+                    if s["network_memory_denied"] != a["network_memory_denied"]
+                ],
                 "closed_resources": report["samples"][-1],
                 "release_milliseconds": report["unconfirmed_release_milliseconds"],
                 "verified_upload_bytes": report["verified_upload_bytes"],
@@ -163,8 +206,11 @@ def main():
             }
             summary["runs"].append(row)
             (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
-            print(f"Passed {name}; denied delta={row['network_memory_denied_delta']}; "
-                  f"peak RSS={row['peak_rss_bytes'] / 1048576:.1f} MiB", flush=True)
+            print(
+                f"Passed {name}; denied delta={row['network_memory_denied_delta']}; "
+                f"peak RSS={row['peak_rss_bytes'] / 1048576:.1f} MiB",
+                flush=True,
+            )
 
 
 if __name__ == "__main__":

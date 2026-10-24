@@ -30,7 +30,10 @@ func TestStressRawDuplexBaseline(t *testing.T) {
 	var connections sync.Map
 	t.Cleanup(func() {
 		l.Close()
-		connections.Range(func(c, _ any) bool { c.(net.Conn).Close(); return true })
+		connections.Range(func(c, _ any) bool {
+			c.(net.Conn).Close()
+			return true
+		})
 		wg.Wait()
 	})
 	wg.Add(1)
@@ -54,7 +57,16 @@ func TestStressRawDuplexBaseline(t *testing.T) {
 					results <- err
 					return
 				}
-				results <- stressDuplex(c, binary.BigEndian.Uint64(seed[:]), end, size, true, &downSent, &upReceived, 250*time.Millisecond)
+				results <- stressDuplex(
+					c,
+					binary.BigEndian.Uint64(seed[:]),
+					end,
+					size,
+					true,
+					&downSent,
+					&upReceived,
+					250*time.Millisecond,
+				)
 			}()
 		}
 	}()

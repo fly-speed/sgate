@@ -28,11 +28,18 @@ def main():
     ceiling = 70000 if hard == resource.RLIM_INFINITY else hard
     # Raise this process's soft descriptor budget only, never a host limit.
     resource.setrlimit(resource.RLIMIT_NOFILE, (max(soft, min(70000, ceiling)), hard))
-    result = dict(started=datetime.datetime.now().astimezone().isoformat(),
-                  fd_limits_before=[soft, hard],
-                  host=command("sysctl", "hw.memsize", "net.inet.ip.portrange.first",
-                               "net.inet.ip.portrange.last", "kern.ipc.somaxconn"),
-                  before_mbuf=command("netstat", "-mmm"))
+    result = dict(
+        started=datetime.datetime.now().astimezone().isoformat(),
+        fd_limits_before=[soft, hard],
+        host=command(
+            "sysctl",
+            "hw.memsize",
+            "net.inet.ip.portrange.first",
+            "net.inet.ip.portrange.last",
+            "kern.ipc.somaxconn",
+        ),
+        before_mbuf=command("netstat", "-mmm"),
+    )
     held, listeners = [], []
 
     def listener(family, host):
@@ -45,7 +52,7 @@ def main():
 
     def pair(server):
         client = socket.socket(server.family, socket.SOCK_STREAM)
-        client.settimeout(.5)
+        client.settimeout(0.5)
         try:
             client.connect(server.getsockname())
             peer, _ = server.accept()
@@ -62,8 +69,12 @@ def main():
             try:
                 client = pair(targets[i % len(targets)])
             except OSError as exc:
-                result["ipv4_error"] = dict(errno=exc.errno, message=str(exc),
-                                            connections=count, unique_source_ports=len(ports))
+                result["ipv4_error"] = dict(
+                    errno=exc.errno,
+                    message=str(exc),
+                    connections=count,
+                    unique_source_ports=len(ports),
+                )
                 break
             ports.add(client.getsockname()[1])
             count += 1
@@ -82,17 +93,33 @@ def main():
                 successes += 1
                 newports.add(client.getsockname()[1])
             else:
-                result[label] = dict(successes=successes, ports_also_held_by_ipv4=len(newports & ports))
-        result.update(peak_mbuf=command("netstat", "-mmm"),
-                      peak_tcp=command("netstat", "-an", "-p", "tcp"),
-                      peak_vm=command("vm_stat"), peak_rss_bytes=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+                result[label] = dict(
+                    successes=successes, ports_also_held_by_ipv4=len(newports & ports)
+                )
+        result.update(
+            peak_mbuf=command("netstat", "-mmm"),
+            peak_tcp=command("netstat", "-an", "-p", "tcp"),
+            peak_vm=command("vm_stat"),
+            peak_rss_bytes=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+        )
     finally:
         for sock in held + listeners:
             sock.close()
-    result.update(after_close_mbuf=command("netstat", "-mmm"),
-                  closed_at=datetime.datetime.now().astimezone().isoformat())
+    result.update(
+        after_close_mbuf=command("netstat", "-mmm"),
+        closed_at=datetime.datetime.now().astimezone().isoformat(),
+    )
     args.output.write_text(json.dumps(result, indent=2) + "\n")
-    print(json.dumps({k: result[k] for k in ("ipv4_connections", "ipv4_error", "another_ipv4_target", "ipv6_target") if k in result}, indent=2))
+    print(
+        json.dumps(
+            {
+                k: result[k]
+                for k in ("ipv4_connections", "ipv4_error", "another_ipv4_target", "ipv6_target")
+                if k in result
+            },
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

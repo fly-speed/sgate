@@ -8,7 +8,9 @@ import (
 )
 
 // Stats counts actual tunnel TCP bytes, including HTTP, WS, TLS and padding.
-// Application sockets and the separate management listener are not counted.
+// Application sockets and a separate management listener are not counted.
+// With shared server management, bytes and connections on that HTTP/TLS
+// listener also include management traffic.
 type Stats struct {
 	tx, rx  atomic.Uint64
 	active  atomic.Int64
@@ -24,9 +26,18 @@ type TrafficSnapshot struct {
 
 func NewStats() *Stats { return &Stats{started: time.Now()} }
 func (s *Stats) Snapshot() TrafficSnapshot {
-	return TrafficSnapshot{TX: s.tx.Load(), RX: s.rx.Load(), Connections: s.active.Load(), Time: time.Now().UnixMilli(), Uptime: int64(time.Since(s.started).Seconds())}
+	return TrafficSnapshot{
+		TX:          s.tx.Load(),
+		RX:          s.rx.Load(),
+		Connections: s.active.Load(),
+		Time:        time.Now().UnixMilli(),
+		Uptime:      int64(time.Since(s.started).Seconds()),
+	}
 }
-func (s *Stats) Conn(c net.Conn) net.Conn             { s.active.Add(1); return &trafficConn{Conn: c, stats: s} }
+func (s *Stats) Conn(c net.Conn) net.Conn {
+	s.active.Add(1)
+	return &trafficConn{Conn: c, stats: s}
+}
 func (s *Stats) Listener(l net.Listener) net.Listener { return &trafficListener{Listener: l, stats: s} }
 
 type trafficConn struct {

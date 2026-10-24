@@ -33,7 +33,10 @@ func randomID() string {
 	return hex.EncodeToString(b[:])
 }
 
-func validID(s string) bool { b, e := hex.DecodeString(s); return e == nil && len(b) == 32 }
+func validID(s string) bool {
+	b, e := hex.DecodeString(s)
+	return e == nil && len(b) == 32
+}
 
 func mac(key []byte, parts ...string) string {
 	h := hmac.New(sha256.New, key)

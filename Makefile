@@ -1,4 +1,4 @@
-.PHONY: build test stress weaknet vet clean
+.PHONY: build test framework-test vendor-sync stress weaknet vet clean
 
 SGATE_STRESS_REPORT ?= $(CURDIR)/artifacts/stress.json
 
@@ -7,7 +7,13 @@ build:
 	go build -trimpath -o bin/sgate-server ./cmd/sgate-server
 	go build -trimpath -o bin/sgate-client ./cmd/sgate-client
 
-test:
+framework-test:
+	go test -mod=mod -race github.com/acl-dev/gin-service
+
+vendor-sync:
+	python3 scripts/sync-go-vendor.py
+
+test: framework-test
 	go test -race ./...
 
 stress:

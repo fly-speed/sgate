@@ -33,17 +33,33 @@ func TestConfigBinaryNoiseLifecycle(t *testing.T) {
 	}
 	baseG, baseFD := runtime.NumGoroutine(), descriptorCount()
 	t.Cleanup(func() {
-		waitFor(t, "all lifecycle harness goroutines stopped", func() bool { return runtime.NumGoroutine() <= baseG+3 })
+		waitFor(
+			t,
+			"all lifecycle harness goroutines stopped",
+			func() bool { return runtime.NumGoroutine() <= baseG+3 },
+		)
 		fd := descriptorCount()
 		if baseFD >= 0 && fd > baseFD+2 {
 			t.Errorf("lifecycle harness descriptors %d -> %d", baseFD, fd)
 		}
-		t.Logf("lifecycle cleanup: goroutines=%d baseline=%d descriptors=%d baseline=%d", runtime.NumGoroutine(), baseG, fd, baseFD)
+		t.Logf(
+			"lifecycle cleanup: goroutines=%d baseline=%d descriptors=%d baseline=%d",
+			runtime.NumGoroutine(),
+			baseG,
+			fd,
+			baseFD,
+		)
 	})
 	for _, scenario := range []string{"long-outage", "restart", "expiry"} {
 		for _, tlsMode := range []bool{false, true} {
 			for _, mode := range []string{"file", "override", "disable"} {
-				t.Run(fmt.Sprintf("%s/tls=%t/%s", scenario, tlsMode, mode), func(t *testing.T) { t.Parallel(); runConfigBinaryLifecycle(t, cb, sb, scenario, tlsMode, mode) })
+				t.Run(
+					fmt.Sprintf("%s/tls=%t/%s", scenario, tlsMode, mode),
+					func(t *testing.T) {
+						t.Parallel()
+						runConfigBinaryLifecycle(t, cb, sb, scenario, tlsMode, mode)
+					},
+				)
 			}
 		}
 	}
@@ -66,7 +82,10 @@ func runConfigBinaryLifecycle(t *testing.T, cb, sb, scenario string, tlsMode boo
 	if e != nil {
 		t.Fatal(e)
 	}
-	for path, block := range map[string]*pem.Block{certPath: {Type: "CERTIFICATE", Bytes: certificate.Certificate[0]}, tlsKeyPath: {Type: "PRIVATE KEY", Bytes: private}} {
+	for path, block := range map[string]*pem.Block{
+		certPath:   {Type: "CERTIFICATE", Bytes: certificate.Certificate[0]},
+		tlsKeyPath: {Type: "PRIVATE KEY", Bytes: private},
+	} {
 		if e := os.WriteFile(path, pem.EncodeToMemory(block), 0600); e != nil {
 			t.Fatal(e)
 		}
@@ -89,7 +108,11 @@ func runConfigBinaryLifecycle(t *testing.T, cb, sb, scenario string, tlsMode boo
 	checkOld := func(c net.Conn, closed *atomic.Int64, releaseMS *atomic.Int64) {
 		<-gate
 		done := make(chan struct{})
-		go func() { defer close(done); writers.Add(1); _, _ = c.Write(bytes.Repeat([]byte{0xdb}, 2*1024*1024)) }()
+		go func() {
+			defer close(done)
+			writers.Add(1)
+			_, _ = c.Write(bytes.Repeat([]byte{0xdb}, 2*1024*1024))
+		}()
 		n, err := io.Copy(io.Discard, c)
 		// Observe the peer close before closing our endpoint to join its writer.
 		elapsed := time.Since(time.Unix(0, outageAt.Load())).Milliseconds()
@@ -140,7 +163,16 @@ func runConfigBinaryLifecycle(t *testing.T, cb, sb, scenario string, tlsMode boo
 					checkOld(c, &oldBackendClosed, &oldBackendReleaseMS)
 				} else {
 					c.SetDeadline(time.Now().Add(15 * time.Second))
-					fresh <- stressDuplex(c, binary.BigEndian.Uint64(header[1:]), time.Now().Add(time.Second), 1024, true, &downSent, &upReceived, 10*time.Millisecond)
+					fresh <- stressDuplex(
+						c,
+						binary.BigEndian.Uint64(header[1:]),
+						time.Now().Add(time.Second),
+						1024,
+						true,
+						&downSent,
+						&upReceived,
+						10*time.Millisecond,
+					)
 				}
 			}(c)
 		}
@@ -148,7 +180,10 @@ func runConfigBinaryLifecycle(t *testing.T, cb, sb, scenario string, tlsMode boo
 	closeBackend := func() {
 		release()
 		backend.Close()
-		backendConns.Range(func(k, v any) bool { k.(net.Conn).Close(); return true })
+		backendConns.Range(func(k, v any) bool {
+			k.(net.Conn).Close()
+			return true
+		})
 		backendWG.Wait()
 	}
 	t.Cleanup(closeBackend)
@@ -157,8 +192,21 @@ func runConfigBinaryLifecycle(t *testing.T, cb, sb, scenario string, tlsMode boo
 	if tlsMode {
 		scheme = "wss"
 	}
-	expected := Options{NoiseIntervalMin: time.Second, NoiseIntervalMax: 3 * time.Second, NoiseMinBytes: 1024, NoiseMaxBytes: 10240}
-	o := &configNoiseObserver{pairs: make(map[*websocket.Conn]*websocket.Conn), key: key, target: scheme + "://" + serverAddr + "/tunnel", tlsConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}, expected: [2]Options{expected, expected}, sessions: make(map[string]bool), byGeneration: make(map[int][2]int)}
+	expected := Options{
+		NoiseIntervalMin: time.Second,
+		NoiseIntervalMax: 3 * time.Second,
+		NoiseMinBytes:    1024,
+		NoiseMaxBytes:    10240,
+	}
+	o := &configNoiseObserver{
+		pairs:        make(map[*websocket.Conn]*websocket.Conn),
+		key:          key,
+		target:       scheme + "://" + serverAddr + "/tunnel",
+		tlsConfig:    &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12},
+		expected:     [2]Options{expected, expected},
+		sessions:     make(map[string]bool),
+		byGeneration: make(map[int][2]int),
+	}
 	for i := range o.sizes {
 		o.sizes[i] = make(map[int]bool)
 	}
@@ -177,7 +225,18 @@ func runConfigBinaryLifecycle(t *testing.T, cb, sb, scenario string, tlsMode boo
 	}
 	t.Cleanup(closeRelay)
 	common := func() map[string]string {
-		return map[string]string{"key-file": keyPath, "password": testPassword, "heartbeat": "1s", "heartbeat-timeout": "30s", "buffer-bytes": "65536", "noise-interval": "0", "noise-interval-min": "1s", "noise-interval-max": "3s", "noise-min-bytes": "1024", "noise-max-bytes": "10240"}
+		return map[string]string{
+			"key-file":           keyPath,
+			"password":           testPassword,
+			"heartbeat":          "1s",
+			"heartbeat-timeout":  "30s",
+			"buffer-bytes":       "65536",
+			"noise-interval":     "0",
+			"noise-interval-min": "1s",
+			"noise-interval-max": "3s",
+			"noise-min-bytes":    "1024",
+			"noise-max-bytes":    "10240",
+		}
 	}
 	sv, cv := common(), common()
 	sv["listen"], sv["target"], sv["session-ttl"] = serverAddr, backend.Addr().String(), "2m"
@@ -193,11 +252,25 @@ func runConfigBinaryLifecycle(t *testing.T, cb, sb, scenario string, tlsMode boo
 	sa, ca := []string{"-config", sp}, []string{"-config", cp}
 	switch mode {
 	case "override":
-		flags := []string{"-noise-interval-min", "10ms", "-noise-interval-max", "30ms", "-noise-min-bytes", "128", "-noise-max-bytes", "512"}
+		flags := []string{
+			"-noise-interval-min",
+			"10ms",
+			"-noise-interval-max",
+			"30ms",
+			"-noise-min-bytes",
+			"128",
+			"-noise-max-bytes",
+			"512",
+		}
 		sa = append(sa, flags...)
 		ca = append(ca, flags...)
 		for i := range o.expected {
-			o.expected[i] = Options{NoiseIntervalMin: 10 * time.Millisecond, NoiseIntervalMax: 30 * time.Millisecond, NoiseMinBytes: 128, NoiseMaxBytes: 512}
+			o.expected[i] = Options{
+				NoiseIntervalMin: 10 * time.Millisecond,
+				NoiseIntervalMax: 30 * time.Millisecond,
+				NoiseMinBytes:    128,
+				NoiseMaxBytes:    512,
+			}
 		}
 	case "disable":
 		flags := []string{"-noise-interval-min", "0", "-noise-interval-max", "0"}
@@ -255,7 +328,10 @@ func runConfigBinaryLifecycle(t *testing.T, cb, sb, scenario string, tlsMode boo
 			t.Fatalf("old stream not ready: %v", e)
 		}
 		appWG.Add(1)
-		go func(c net.Conn) { defer appWG.Done(); checkOld(c, &oldAppClosed, &oldAppReleaseMS) }(c)
+		go func(c net.Conn) {
+			defer appWG.Done()
+			checkOld(c, &oldAppClosed, &oldAppReleaseMS)
+		}(c)
 	}
 	start := time.Now()
 	outageAt.Store(start.UnixNano())
@@ -265,7 +341,12 @@ func runConfigBinaryLifecycle(t *testing.T, cb, sb, scenario string, tlsMode boo
 	waitFor(t, "both directions offered unread old data", func() bool { return writers.Load() == 4 })
 	switch scenario {
 	case "long-outage":
-		stressWaitForBudget(t, "old applications and backends released before restoration", 125*time.Second, func() bool { return oldAppClosed.Load() == 2 && oldBackendClosed.Load() == 2 && active.Load() == 0 })
+		stressWaitForBudget(
+			t,
+			"old applications and backends released before restoration",
+			125*time.Second,
+			func() bool { return oldAppClosed.Load() == 2 && oldBackendClosed.Load() == 2 && active.Load() == 0 },
+		)
 		for _, elapsed := range []int64{oldAppReleaseMS.Load(), oldBackendReleaseMS.Load()} {
 			if elapsed < 119000 || elapsed > 125000 {
 				t.Fatalf("two-minute retention released outside 119..125 seconds: %dms", elapsed)
@@ -276,13 +357,21 @@ func runConfigBinaryLifecycle(t *testing.T, cb, sb, scenario string, tlsMode boo
 		}
 	case "restart":
 		stopServer()
-		waitFor(t, "stopped server backends closed", func() bool { return oldBackendClosed.Load() == 2 && active.Load() == 0 })
+		waitFor(
+			t,
+			"stopped server backends closed",
+			func() bool { return oldBackendClosed.Load() == 2 && active.Load() == 0 },
+		)
 		stopServer = configBinaryStart(t, sb, sa...)
 		if oldAppClosed.Load() != 0 {
 			t.Fatal("client abandoned retained applications before restart response")
 		}
 	case "expiry":
-		waitFor(t, "server TTL expired while client still retained state", func() bool { return oldBackendClosed.Load() == 2 && active.Load() == 0 })
+		waitFor(
+			t,
+			"server TTL expired while client still retained state",
+			func() bool { return oldBackendClosed.Load() == 2 && active.Load() == 0 },
+		)
 		if oldAppClosed.Load() != 0 {
 			t.Fatal("client abandoned retained applications before authenticated expiry")
 		}
@@ -295,7 +384,16 @@ func runConfigBinaryLifecycle(t *testing.T, cb, sb, scenario string, tlsMode boo
 	}
 	blockedMS := time.Since(start).Milliseconds()
 	o.blocked.Store(false)
-	stressWaitForBudget(t, "fresh lifecycle session established", 20*time.Second, func() bool { o.mu.Lock(); defer o.mu.Unlock(); return len(o.sessions) == 2 && len(o.pairs) == 1 })
+	stressWaitForBudget(
+		t,
+		"fresh lifecycle session established",
+		20*time.Second,
+		func() bool {
+			o.mu.Lock()
+			defer o.mu.Unlock()
+			return len(o.sessions) == 2 && len(o.pairs) == 1
+		},
+	)
 	waitFor(t, "old applications closed after fresh session", func() bool { return oldAppClosed.Load() == 2 })
 	if scenario != "long-outage" {
 		o.mu.Lock()
@@ -334,7 +432,16 @@ func runConfigBinaryLifecycle(t *testing.T, cb, sb, scenario string, tlsMode boo
 		}
 		go func(c net.Conn, seed uint64) {
 			defer c.Close()
-			fresh <- stressDuplex(c, seed, time.Now().Add(time.Second), 1024, false, &upSent, &downReceived, 10*time.Millisecond)
+			fresh <- stressDuplex(
+				c,
+				seed,
+				time.Now().Add(time.Second),
+				1024,
+				false,
+				&upSent,
+				&downReceived,
+				10*time.Millisecond,
+			)
 		}(c, seed)
 	}
 	for i := 0; i < 4; i++ {
@@ -355,7 +462,8 @@ func runConfigBinaryLifecycle(t *testing.T, cb, sb, scenario string, tlsMode boo
 		o.mu.Lock()
 		defer o.mu.Unlock()
 		p := o.wire[freshSessionID]
-		return freshSessionID != "" && p != nil && p.sent[0] > 0 && p.sent[1] > 0 && p.ack[0] >= p.sent[0] && p.ack[1] >= p.sent[1]
+		return freshSessionID != "" && p != nil && p.sent[0] > 0 && p.sent[1] > 0 && p.ack[0] >= p.sent[0] &&
+			p.ack[1] >= p.sent[1]
 	})
 	if accepted.Load() != 4 {
 		t.Fatalf("unexpected backend stream count %d", accepted.Load())
@@ -375,7 +483,23 @@ func runConfigBinaryLifecycle(t *testing.T, cb, sb, scenario string, tlsMode boo
 	for _, e := range o.errors {
 		t.Error(e)
 	}
-	t.Logf("lifecycle scenario=%s old_app_ms=%d old_backend_ms=%d blocked_ms=%d recovery_complete_ms=%d sessions=%d upgrades=%d noise=%v generations=%v upload=%d download=%d gone=%d", scenario, oldAppReleaseMS.Load(), oldBackendReleaseMS.Load(), blockedMS, time.Since(start).Milliseconds(), len(o.sessions), o.upgrades, o.counts, o.byGeneration, upReceived.Load(), downReceived.Load(), o.statuses[http.StatusGone])
+	t.Logf(
+		("lifecycle scenario=%s old_app_ms=%d old_backend_ms=%d blocked_ms=%d " +
+			"recovery_complete_ms=%d sessions=%d upgrades=%d noise=%v generations=%v upload=%d " +
+			"download=%d gone=%d"),
+		scenario,
+		oldAppReleaseMS.Load(),
+		oldBackendReleaseMS.Load(),
+		blockedMS,
+		time.Since(start).Milliseconds(),
+		len(o.sessions),
+		o.upgrades,
+		o.counts,
+		o.byGeneration,
+		upReceived.Load(),
+		downReceived.Load(),
+		o.statuses[http.StatusGone],
+	)
 	o.mu.Unlock()
 	for len(errors) > 0 {
 		t.Error(<-errors)
@@ -393,7 +517,11 @@ func TestConfigNoiseLifecycleResources(t *testing.T) {
 			for _, scenario := range []struct {
 				name string
 				run  func(*testing.T, Options, string)
-			}{{"long-outage", testLongOutageReleasesStateBeforeNetworkReturns}, {"restart", testServerRestartDropsOldQueuesAndAcceptsFreshConnections}, {"expiry", testSessionExpiryWithFullBuffersReleasesOldConnections}} {
+			}{
+				{"long-outage", testLongOutageReleasesStateBeforeNetworkReturns},
+				{"restart", testServerRestartDropsOldQueuesAndAcceptsFreshConnections},
+				{"expiry", testSessionExpiryWithFullBuffersReleasesOldConnections},
+			} {
 				t.Run(tlsMode+"/"+mode+"/"+scenario.name, func(t *testing.T) {
 					noiseRecoveryResourceCheck(t)
 					opts := testOptions()
@@ -433,7 +561,8 @@ func TestConfigObserverPreservesExpiryResponse(t *testing.T) {
 		t.Fatal("expected failed upgrade with original expiry response")
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusGone || response.Header.Get("X-Sgate-Nonce") != "expiry-nonce" || response.Header.Get("X-Sgate-Auth") != "expiry-auth" {
+	if response.StatusCode != http.StatusGone || response.Header.Get("X-Sgate-Nonce") != "expiry-nonce" ||
+		response.Header.Get("X-Sgate-Auth") != "expiry-auth" {
 		t.Fatal("observer hid the authenticated expiry response")
 	}
 	body, e := io.ReadAll(response.Body)

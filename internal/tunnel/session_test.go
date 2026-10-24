@@ -73,7 +73,10 @@ func TestResetReleasesBlockedStreamReader(t *testing.T) {
 	s.streams[1] = st
 	s.mu.Unlock()
 	done := make(chan struct{})
-	go func() { s.readStream(1, st); close(done) }()
+	go func() {
+		s.readStream(1, st)
+		close(done)
+	}()
 	// Write returns once readStream has read the bytes and is trying to enqueue them.
 	if _, err := peer.Write([]byte("blocked data")); err != nil {
 		t.Fatal(err)
@@ -101,7 +104,15 @@ func TestResetReleasesBlockedOpen(t *testing.T) {
 	defer peer.Close()
 	done := make(chan error, 1)
 	go func() { done <- s.addLocal(c) }()
-	waitFor(t, "registered stream", func() bool { s.mu.Lock(); defer s.mu.Unlock(); return s.streams[1] != nil })
+	waitFor(
+		t,
+		"registered stream",
+		func() bool {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			return s.streams[1] != nil
+		},
+	)
 	s.drop(1)
 	select {
 	case err := <-done:
@@ -128,7 +139,12 @@ func TestAcknowledgementReleasesEmptyQueue(t *testing.T) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.pending != nil || s.pendingBytes != 0 {
-		t.Fatalf("empty retransmission queue retained storage: len=%d cap=%d bytes=%d", len(s.pending), cap(s.pending), s.pendingBytes)
+		t.Fatalf(
+			"empty retransmission queue retained storage: len=%d cap=%d bytes=%d",
+			len(s.pending),
+			cap(s.pending),
+			s.pendingBytes,
+		)
 	}
 }
 
@@ -207,7 +223,10 @@ func TestConcurrentResetDoesNotTerminateHealthyStreams(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < 32; i++ {
 		wg.Add(1)
-		go func() { defer wg.Done(); s.reset(1) }()
+		go func() {
+			defer wg.Done()
+			s.reset(1)
+		}()
 	}
 	wg.Wait()
 	s.mu.Lock()
@@ -219,7 +238,15 @@ func TestConcurrentResetDoesNotTerminateHealthyStreams(t *testing.T) {
 	if err := s.acknowledge(1); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "one queued reset", func() bool { s.mu.Lock(); defer s.mu.Unlock(); return len(s.pending) == 1 })
+	waitFor(
+		t,
+		"one queued reset",
+		func() bool {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			return len(s.pending) == 1
+		},
+	)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.next != 2 || s.pending[0].op != opReset || s.pending[0].stream != 1 {

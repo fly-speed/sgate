@@ -60,7 +60,13 @@ func noiseRecoveryResourceCheck(t *testing.T) {
 		if fd >= 0 && after > fd+2 {
 			t.Errorf("descriptors grew: %d -> %d", fd, after)
 		}
-		t.Logf("cleanup: goroutines=%d (baseline=%d), descriptors=%d (baseline=%d)", runtime.NumGoroutine(), g, after, fd)
+		t.Logf(
+			"cleanup: goroutines=%d (baseline=%d), descriptors=%d (baseline=%d)",
+			runtime.NumGoroutine(),
+			g,
+			after,
+			fd,
+		)
 	})
 }
 

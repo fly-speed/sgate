@@ -38,7 +38,13 @@ func TestStressWebSocketDuplexBaseline(t *testing.T) {
 	key := bytes.Repeat([]byte{8}, 32)
 	results := make(chan error, 16)
 	for i := 0; i < 4; i++ {
-		client, _, err := (&websocket.Dialer{ReadBufferSize: chunkSize, WriteBufferSize: chunkSize}).Dial("ws"+strings.TrimPrefix(h.URL, "http"), nil)
+		client, _, err := (&websocket.Dialer{ReadBufferSize: chunkSize, WriteBufferSize: chunkSize}).Dial(
+			"ws"+strings.TrimPrefix(
+				h.URL,
+				"http",
+			),
+			nil,
+		)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -47,7 +53,13 @@ func TestStressWebSocketDuplexBaseline(t *testing.T) {
 		for j, c := range []*websocket.Conn{client, server} {
 			crypt := newCodec(key, "session", "client", "server", j == 0)
 			if os.Getenv("SGATE_STRESS_SESSION") == "1" {
-				opts, err := (Options{BufferBytes: 256 * 1024, Heartbeat: 5 * time.Second, WriteTimeout: 10 * time.Second, NoiseIntervalMin: time.Second, NoiseIntervalMax: 3 * time.Second}).defaults()
+				opts, err := (Options{
+					BufferBytes:      256 * 1024,
+					Heartbeat:        5 * time.Second,
+					WriteTimeout:     10 * time.Second,
+					NoiseIntervalMin: time.Second,
+					NoiseIntervalMax: 3 * time.Second,
+				}).defaults()
 				if err != nil {
 					t.Fatal(err)
 				}

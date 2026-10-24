@@ -84,7 +84,15 @@ func TestManagementRealProcessRestartAndExpiry(t *testing.T) {
 					t.Fatal(e)
 				}
 			}
-			os.WriteFile(adminPath, []byte("web-dir = "+webDir+"\nlisten = "+management+"\nusers-file = users.json\nsession-dir = sessions\nsetup-token-file = setup.token\nsession-timeout = 8s\n"), 0600)
+			os.WriteFile(
+				adminPath,
+				[]byte("web-dir = "+webDir+"\nlisten = "+management+("\n"+
+					"users-file = users.json\n"+
+					"session-dir = sessions\n"+
+					"setup-token-file = setup.token\n"+
+					"session-timeout = 8s\n")),
+				0600,
+			)
 			binary, e := os.Executable()
 			if e != nil {
 				t.Fatal(e)
@@ -152,12 +160,24 @@ func TestManagementRealProcessRestartAndExpiry(t *testing.T) {
 					t.Fatal(e)
 				}
 				child = exec.Command(binary, "-test.run=^TestManagementChildProcess$")
-				child.Env = append(os.Environ(), "SGATE_MANAGEMENT_TEST_CHILD=1", "SGATE_MANAGEMENT_TEST_ROLE="+role, "SGATE_MANAGEMENT_TEST_ARGS="+string(args))
+				child.Env = append(
+					os.Environ(),
+					"SGATE_MANAGEMENT_TEST_CHILD=1",
+					"SGATE_MANAGEMENT_TEST_ROLE="+role,
+					"SGATE_MANAGEMENT_TEST_ARGS="+string(args),
+				)
 				child.Stdout, child.Stderr = log, log
 				if e := child.Start(); e != nil {
 					t.Fatal(e)
 				}
-				waitManaged(t, "management startup", func() bool { code, _, e := call("GET", "/api/status", ""); return e == nil && code == 200 })
+				waitManaged(
+					t,
+					"management startup",
+					func() bool {
+						code, _, e := call("GET", "/api/status", "")
+						return e == nil && code == 200
+					},
+				)
 			}
 			start()
 			indexPath := filepath.Join(webDir, "index.html")
@@ -186,7 +206,11 @@ func TestManagementRealProcessRestartAndExpiry(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			payload, _ := json.Marshal(map[string]string{"username": "process-admin", "password": "process-management-password", "setup_token": strings.TrimSpace(string(token))})
+			payload, _ := json.Marshal(map[string]string{
+				"username":    "process-admin",
+				"password":    "process-management-password",
+				"setup_token": strings.TrimSpace(string(token)),
+			})
 			code, v, e := call("POST", "/api/setup", string(payload))
 			if e != nil || code != 200 {
 				t.Fatalf("setup %d %v %v", code, e, v)

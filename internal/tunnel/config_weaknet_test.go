@@ -34,11 +34,23 @@ func TestConfigBinaryNoiseWeakNetwork(t *testing.T) {
 		if baseFD >= 0 && fd > baseFD+2 {
 			t.Errorf("descriptors %d -> %d", baseFD, fd)
 		}
-		t.Logf("weak config cleanup: goroutines=%d baseline=%d descriptors=%d baseline=%d", runtime.NumGoroutine(), baseG, fd, baseFD)
+		t.Logf(
+			"weak config cleanup: goroutines=%d baseline=%d descriptors=%d baseline=%d",
+			runtime.NumGoroutine(),
+			baseG,
+			fd,
+			baseFD,
+		)
 	})
 	for _, tlsMode := range []bool{false, true} {
 		for _, mode := range []string{"file", "override", "disable"} {
-			t.Run(fmt.Sprintf("tls=%t/%s", tlsMode, mode), func(t *testing.T) { t.Parallel(); runConfigBinaryWeakNetwork(t, cb, sb, tlsMode, mode) })
+			t.Run(
+				fmt.Sprintf("tls=%t/%s", tlsMode, mode),
+				func(t *testing.T) {
+					t.Parallel()
+					runConfigBinaryWeakNetwork(t, cb, sb, tlsMode, mode)
+				},
+			)
 		}
 	}
 }
@@ -57,7 +69,10 @@ func runConfigBinaryWeakNetwork(t *testing.T, cb, sb string, tlsMode bool, mode 
 		t.Fatal(err)
 	}
 	certPath, tlsKeyPath := filepath.Join(root, "cert.pem"), filepath.Join(root, "tls.key")
-	for path, block := range map[string]*pem.Block{certPath: {Type: "CERTIFICATE", Bytes: certificate.Certificate[0]}, tlsKeyPath: {Type: "PRIVATE KEY", Bytes: private}} {
+	for path, block := range map[string]*pem.Block{
+		certPath:   {Type: "CERTIFICATE", Bytes: certificate.Certificate[0]},
+		tlsKeyPath: {Type: "PRIVATE KEY", Bytes: private},
+	} {
 		if err := os.WriteFile(path, pem.EncodeToMemory(block), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -95,13 +110,25 @@ func runConfigBinaryWeakNetwork(t *testing.T, cb, sb string, tlsMode bool, mode 
 					results <- e
 					return
 				}
-				results <- stressDuplex(c, binary.BigEndian.Uint64(header[:]), end, 512, true, &downSent, &upReceived, 100*time.Millisecond)
+				results <- stressDuplex(
+					c,
+					binary.BigEndian.Uint64(header[:]),
+					end,
+					512,
+					true,
+					&downSent,
+					&upReceived,
+					100*time.Millisecond,
+				)
 			}()
 		}
 	}()
 	t.Cleanup(func() {
 		backend.Close()
-		conns.Range(func(k, v any) bool { k.(net.Conn).Close(); return true })
+		conns.Range(func(k, v any) bool {
+			k.(net.Conn).Close()
+			return true
+		})
 		wg.Wait()
 	})
 	serverAddr, clientAddr := configBinaryPort(t), configBinaryPort(t)
@@ -109,7 +136,17 @@ func runConfigBinaryWeakNetwork(t *testing.T, cb, sb string, tlsMode bool, mode 
 	// Install impairments after startup so failures cannot be confused with a
 	// startup port race. Retain actual production dial/write timeout defaults.
 	common := func() map[string]string {
-		return map[string]string{"key-file": keyPath, "password": testPassword, "heartbeat": "1s", "heartbeat-timeout": "18s", "buffer-bytes": "65536", "noise-interval-min": "1s", "noise-interval-max": "3s", "noise-min-bytes": "1024", "noise-max-bytes": "10240"}
+		return map[string]string{
+			"key-file":           keyPath,
+			"password":           testPassword,
+			"heartbeat":          "1s",
+			"heartbeat-timeout":  "18s",
+			"buffer-bytes":       "65536",
+			"noise-interval-min": "1s",
+			"noise-interval-max": "3s",
+			"noise-min-bytes":    "1024",
+			"noise-max-bytes":    "10240",
+		}
 	}
 	sv, cv := common(), common()
 	scheme := "ws"
@@ -119,11 +156,27 @@ func runConfigBinaryWeakNetwork(t *testing.T, cb, sb string, tlsMode bool, mode 
 	}
 	sv["listen"], sv["target"], sv["session-ttl"] = serverAddr, backend.Addr().String(), "2m"
 	cv["listen"], cv["server"], cv["offline-timeout"] = clientAddr, scheme+"://"+relay.listener.Addr().String()+"/tunnel", "2m"
-	sa, ca := []string{"-config", configBinaryFile(t, "server.conf", sv)}, []string{"-config", configBinaryFile(t, "client.conf", cv)}
+	sa, ca := []string{"-config", configBinaryFile(t, "server.conf", sv)}, []string{
+		"-config",
+		configBinaryFile(
+			t,
+			"client.conf",
+			cv,
+		),
+	}
 	var flags []string
 	switch mode {
 	case "override":
-		flags = []string{"-noise-interval-min", "100ms", "-noise-interval-max", "300ms", "-noise-min-bytes", "128", "-noise-max-bytes", "512"}
+		flags = []string{
+			"-noise-interval-min",
+			"100ms",
+			"-noise-interval-max",
+			"300ms",
+			"-noise-min-bytes",
+			"128",
+			"-noise-max-bytes",
+			"512",
+		}
 	case "disable":
 		flags = []string{"-noise-interval-min", "0", "-noise-interval-max", "0"}
 	}
@@ -155,7 +208,12 @@ func runConfigBinaryWeakNetwork(t *testing.T, cb, sb string, tlsMode bool, mode 
 	}
 	waitFor(t, "independent traffic", func() bool { return upReceived.Load() > 0 && downReceived.Load() > 0 })
 	initial := relay.accepted.Load()
-	relay.profile.Store(&weakProfile{delay: 150 * time.Millisecond, jitter: 100 * time.Millisecond, lossPercent: 15, retransmit: 200 * time.Millisecond})
+	relay.profile.Store(&weakProfile{
+		delay:       150 * time.Millisecond,
+		jitter:      100 * time.Millisecond,
+		lossPercent: 15,
+		retransmit:  200 * time.Millisecond,
+	})
 	timer := time.NewTimer(22 * time.Second)
 	defer timer.Stop()
 	<-timer.C
@@ -177,12 +235,27 @@ func runConfigBinaryWeakNetwork(t *testing.T, cb, sb string, tlsMode bool, mode 
 		before := relay.accepted.Load()
 		started := time.Now()
 		relay.blackhole[direction].Store(true)
-		stressWaitForBudget(t, "automatic one-way heartbeat reconnect", 28*time.Second, func() bool { return relay.accepted.Load() > before })
+		stressWaitForBudget(
+			t,
+			"automatic one-way heartbeat reconnect",
+			28*time.Second,
+			func() bool { return relay.accepted.Load() > before },
+		)
 		relay.blackhole[direction].Store(false)
 		// Restored data, not just a newly accepted socket, confirms resume.
 		up, down := upReceived.Load(), downReceived.Load()
-		stressWaitForBudget(t, "both directions resume", 12*time.Second, func() bool { return upReceived.Load() > up && downReceived.Load() > down })
-		t.Logf("direction=%d automatic_reconnect_ms=%d transports=%d", direction, time.Since(started).Milliseconds(), relay.accepted.Load())
+		stressWaitForBudget(
+			t,
+			"both directions resume",
+			12*time.Second,
+			func() bool { return upReceived.Load() > up && downReceived.Load() > down },
+		)
+		t.Logf(
+			"direction=%d automatic_reconnect_ms=%d transports=%d",
+			direction,
+			time.Since(started).Milliseconds(),
+			relay.accepted.Load(),
+		)
 	}
 	for i := 0; i < 4; i++ {
 		select {
@@ -194,8 +267,15 @@ func runConfigBinaryWeakNetwork(t *testing.T, cb, sb string, tlsMode bool, mode 
 			t.Fatal("duplex completion timeout")
 		}
 	}
-	if upSent.Load() == 0 || downSent.Load() == 0 || upSent.Load() != upReceived.Load() || downSent.Load() != downReceived.Load() {
-		t.Fatalf("totals up=%d/%d down=%d/%d", upSent.Load(), upReceived.Load(), downSent.Load(), downReceived.Load())
+	if upSent.Load() == 0 || downSent.Load() == 0 || upSent.Load() != upReceived.Load() ||
+		downSent.Load() != downReceived.Load() {
+		t.Fatalf(
+			"totals up=%d/%d down=%d/%d",
+			upSent.Load(),
+			upReceived.Load(),
+			downSent.Load(),
+			downReceived.Load(),
+		)
 	}
 	if accepted.Load() != 2 {
 		t.Fatalf("application streams replaced: %d", accepted.Load())
@@ -213,7 +293,14 @@ func runConfigBinaryWeakNetwork(t *testing.T, cb, sb string, tlsMode bool, mode 
 	if relay.active.Load() != 0 || relay.queued.Load() != 0 {
 		t.Fatalf("relay leaked active=%d queued=%d", relay.active.Load(), relay.queued.Load())
 	}
-	t.Logf("verified up=%d down=%d retransmissions=%d application_connections=%d active=0 queued=0", upSent.Load(), downSent.Load(), relay.losses.Load(), accepted.Load())
+	t.Logf(
+		("verified up=%d down=%d retransmissions=%d application_connections=%d active=0 " +
+			"queued=0"),
+		upSent.Load(),
+		downSent.Load(),
+		relay.losses.Load(),
+		accepted.Load(),
+	)
 }
 
 // Binary tests exercise the real config parser and flags. These matching option

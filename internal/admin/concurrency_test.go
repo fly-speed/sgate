@@ -27,7 +27,15 @@ func TestConcurrentLoginBoundedAndReplacementAtLimit(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			codes <- request(h, "POST", "/api/login", map[string]string{"username": "admin", "password": "test-management-password"}, nil, "", "").Code
+			codes <- request(
+				h,
+				"POST",
+				"/api/login",
+				map[string]string{"username": "admin", "password": "test-management-password"},
+				nil,
+				"",
+				"",
+			).Code
 		}()
 	}
 	wg.Wait()
@@ -42,7 +50,15 @@ func TestConcurrentLoginBoundedAndReplacementAtLimit(t *testing.T) {
 	h.attempts = make(map[string]attempt)
 	h.mu.Unlock()
 	login := func(cookie *http.Cookie) *httptest.ResponseRecorder {
-		return request(h, "POST", "/api/login", map[string]string{"username": "admin", "password": "test-management-password"}, cookie, "", "")
+		return request(
+			h,
+			"POST",
+			"/api/login",
+			map[string]string{"username": "admin", "password": "test-management-password"},
+			cookie,
+			"",
+			"",
+		)
 	}
 	if w := login(nil); w.Code != 500 {
 		t.Fatalf("limit not enforced: %d", w.Code)
@@ -79,7 +95,10 @@ type blockedBody struct {
 }
 
 func (b *blockedBody) Read(p []byte) (int, error) {
-	b.once.Do(func() { close(b.entered); <-b.release })
+	b.once.Do(func() {
+		close(b.entered)
+		<-b.release
+	})
 	return b.Reader.Read(p)
 }
 func (*blockedBody) Close() error { return nil }
@@ -91,13 +110,25 @@ func TestExpiredSessionCannotCommitQueuedMutation(t *testing.T) {
 			before, _ := os.ReadFile(h.view.AppConfigPath)
 			content := object(t, request(h, "GET", "/api/config", nil, cookie, "", ""))
 			path := "/api/config"
-			input := map[string]any{"content": content["content"].(string) + "# should not commit\n", "revision": content["revision"], "apply": true}
+			input := map[string]any{
+				"content":  content["content"].(string) + "# should not commit\n",
+				"revision": content["revision"],
+				"apply":    true,
+			}
 			if accountChange {
 				path = "/api/account"
-				input = map[string]any{"username": "changed-admin", "password": "changed-management-password", "current_password": "test-management-password"}
+				input = map[string]any{
+					"username":         "changed-admin",
+					"password":         "changed-management-password",
+					"current_password": "test-management-password",
+				}
 			}
 			data, _ := json.Marshal(input)
-			body := &blockedBody{Reader: strings.NewReader(string(data)), entered: make(chan struct{}), release: make(chan struct{})}
+			body := &blockedBody{
+				Reader:  strings.NewReader(string(data)),
+				entered: make(chan struct{}),
+				release: make(chan struct{}),
+			}
 			r := httptest.NewRequest("PUT", path, nil)
 			r.Body = body
 			r.Header.Set("Content-Type", "application/json")
@@ -105,7 +136,10 @@ func TestExpiredSessionCannotCommitQueuedMutation(t *testing.T) {
 			r.AddCookie(cookie)
 			w := httptest.NewRecorder()
 			done := make(chan struct{})
-			go func() { defer close(done); h.ServeHTTP(w, r) }()
+			go func() {
+				defer close(done)
+				h.ServeHTTP(w, r)
+			}()
 			<-body.entered
 			h.mu.Lock()
 			b, e := os.ReadFile(h.sessionPath(cookie.Value))
@@ -170,8 +204,14 @@ func TestManyPersistentSessionsExpireAcrossRestarts(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go func(handler *Handler) { handler.reap(ctx); close(done) }(h)
-	defer func() { cancel(); <-done }()
+	go func(handler *Handler) {
+		handler.reap(ctx)
+		close(done)
+	}(h)
+	defer func() {
+		cancel()
+		<-done
+	}()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		entries, _ := os.ReadDir(c.SessionDir)
@@ -206,7 +246,10 @@ func TestConcurrentConfigWritersOneRevision(t *testing.T) {
 	cookie, csrf := setupAccount(t, h, c)
 	v := object(t, request(h, "GET", "/api/config", nil, cookie, "", ""))
 	applied := 0
-	h.view.Apply = func() error { applied++; return nil }
+	h.view.Apply = func() error {
+		applied++
+		return nil
+	}
 	const count = 32
 	start := make(chan struct{})
 	codes := make(chan int, count)
@@ -216,7 +259,15 @@ func TestConcurrentConfigWritersOneRevision(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			w := request(h, "PUT", "/api/config", map[string]any{"content": v["content"].(string) + "# concurrent save\n", "revision": v["revision"], "apply": true}, cookie, csrf, "")
+			w := request(
+				h,
+				"PUT",
+				"/api/config",
+				map[string]any{"content": v["content"].(string) + "# concurrent save\n", "revision": v["revision"], "apply": true},
+				cookie,
+				csrf,
+				"",
+			)
 			codes <- w.Code
 		}()
 	}
@@ -262,7 +313,15 @@ func TestActualConcurrentLoginPersistenceAndLogout(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			responses <- request(h, "POST", "/api/login", map[string]string{"username": "admin", "password": "test-management-password"}, nil, "", "")
+			responses <- request(
+				h,
+				"POST",
+				"/api/login",
+				map[string]string{"username": "admin", "password": "test-management-password"},
+				nil,
+				"",
+				"",
+			)
 		}()
 	}
 	close(start)
@@ -328,5 +387,11 @@ func TestActualConcurrentLoginPersistenceAndLogout(t *testing.T) {
 			t.Fatal("logged-out session resurrected")
 		}
 	}
-	t.Logf("concurrent requests=%d successful=%d busy=%d persisted and revoked=%d", count, len(sessions)-1, busy, len(sessions))
+	t.Logf(
+		"concurrent requests=%d successful=%d busy=%d persisted and revoked=%d",
+		count,
+		len(sessions)-1,
+		busy,
+		len(sessions),
+	)
 }

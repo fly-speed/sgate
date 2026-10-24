@@ -31,7 +31,14 @@ func TestConfigPrecedence(t *testing.T) {
 			enabled := fs.Bool("enabled", false, "")
 			var args []string
 			if mode != "defaults" {
-				path := configFile(t, "listen = file\npassword = 'file # password=a'\nnoise-interval = 3s\ncount = 8\nenabled = true\n")
+				path := configFile(
+					t,
+					("listen = file\n" +
+						"password = 'file # password=a'\n" +
+						"noise-interval = 3s\n" +
+						"count = 8\n" +
+						"enabled = true\n"),
+				)
 				args = []string{"-config", path}
 			}
 			if mode == "command-line" {
@@ -47,7 +54,8 @@ func TestConfigPrecedence(t *testing.T) {
 					t.Fatal("defaults changed")
 				}
 			case "file":
-				if *listen != "file" || *password != "file # password=a" || *interval != 3*time.Second || *count != 8 || !*enabled {
+				if *listen != "file" || *password != "file # password=a" || *interval != 3*time.Second || *count != 8 ||
+					!*enabled {
 					t.Fatal("file values were not applied")
 				}
 			case "command-line":
@@ -100,7 +108,11 @@ func TestConfigTextAndHelp(t *testing.T) {
 	fs.SetOutput(io.Discard)
 	password := fs.String("password", "", "")
 	listen := fs.String("listen", "", "")
-	path := configFile(t, "\uFEFF# comment\r\n; comment\r\n\r\npassword = \" a#=b\\\"c \"\r\nlisten = [::1]:2901\r\n")
+	path := configFile(t, ("\ufeff# comment\r\n" +
+		"; comment\r\n" +
+		"\r\n" +
+		"password = \" a#=b\\\"c \"\r\n" +
+		"listen = [::1]:2901\r\n"))
 	if err := Parse(fs, []string{"-config=" + path}); err != nil {
 		t.Fatal(err)
 	}

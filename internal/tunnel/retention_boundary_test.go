@@ -31,7 +31,13 @@ func stressBoundaryOrderRemotes(t *testing.T, p *stressLifecycleProbe, remotes [
 	return ordered
 }
 
-func stressBoundaryRecovery(t *testing.T, f stressLifecycleContext, p *stressLifecycleProbe, start time.Time, clients, remotes []*session) {
+func stressBoundaryRecovery(
+	t *testing.T,
+	f stressLifecycleContext,
+	p *stressLifecycleProbe,
+	start time.Time,
+	clients, remotes []*session,
+) {
 	t.Helper()
 	all := append(append([]*session(nil), clients...), remotes...)
 	frozen := make([]uint64, len(all))
@@ -58,7 +64,11 @@ hold:
 			}
 		}
 		if time.Now().After(logAt) {
-			t.Logf("boundary %s offline %s: replay queues bounded and old padding timers stopped", f.boundaryOutage, time.Since(start).Round(time.Second))
+			t.Logf(
+				"boundary %s offline %s: replay queues bounded and old padding timers stopped",
+				f.boundaryOutage,
+				time.Since(start).Round(time.Second),
+			)
 			logAt = time.Now().Add(30 * time.Second)
 		}
 		select {
@@ -69,10 +79,17 @@ hold:
 	}
 	f.offline.Store(false)
 	f.report.BoundaryRestoreMilliseconds = append(f.report.BoundaryRestoreMilliseconds, time.Since(start).Milliseconds())
-	t.Logf("boundary network restored at %s (target %s); TLS handshake and expiry now race", time.Since(start).Round(time.Millisecond), f.boundaryOutage)
+	t.Logf(
+		"boundary network restored at %s (target %s); TLS handshake and expiry now race",
+		time.Since(start).Round(time.Millisecond),
+		f.boundaryOutage,
+	)
 	f.sample("boundary-network-restored", f.round, true)
 	done := make(chan struct{})
-	go func() { p.wg.Wait(); close(done) }()
+	go func() {
+		p.wg.Wait()
+		close(done)
+	}()
 	select {
 	case <-done:
 	case <-time.After(45 * time.Second):
@@ -104,11 +121,20 @@ hold:
 		if clientClosed || remoteClosed {
 			// A failed handshake must not leave the other half holding orphaned
 			// backend sockets and replay data for another full retention window.
-			stressWaitFor(t, "both halves of expired boundary session released", func() bool { return sessionReleased(client) && sessionReleased(remote) })
+			stressWaitFor(
+				t,
+				"both halves of expired boundary session released",
+				func() bool { return sessionReleased(client) && sessionReleased(remote) },
+			)
 			f.report.BoundaryExpiredSessions++
 		} else {
 			if completeByClient[i] != 2*f.streams {
-				t.Fatalf("resumed boundary client %d had truncated data: %d/%d directions", i, completeByClient[i], 2*f.streams)
+				t.Fatalf(
+					"resumed boundary client %d had truncated data: %d/%d directions",
+					i,
+					completeByClient[i],
+					2*f.streams,
+				)
 			}
 			f.states[i].mu.Lock()
 			same := f.states[i].current == client
@@ -145,9 +171,21 @@ hold:
 	f.report.BoundaryCompleteStreams += full
 	f.report.BoundaryInterruptedStreams += len(clients)*f.streams - full
 	stressWaitFor(t, "exactly one current server session per boundary client", f.attached)
-	stressWaitFor(t, "all old boundary application sockets released", func() bool { return f.backendCount.active.Load() == 0 && f.localCount.active.Load() == 0 })
+	stressWaitFor(
+		t,
+		"all old boundary application sockets released",
+		func() bool { return f.backendCount.active.Load() == 0 && f.localCount.active.Load() == 0 },
+	)
 	f.peer.Store(nil)
 	f.sample("boundary-resolved", f.round, true)
 	f.report.BoundaryResolveMilliseconds = append(f.report.BoundaryResolveMilliseconds, time.Since(start).Milliseconds())
-	t.Logf("boundary %s resolved: resumed=%d expired=%d complete old streams=%d interrupted=%d; fresh sessions ready", f.boundaryOutage, f.report.BoundaryResumedSessions, f.report.BoundaryExpiredSessions, full, len(clients)*f.streams-full)
+	t.Logf(
+		("boundary %s resolved: resumed=%d expired=%d complete old streams=%d interrupted=%d; " +
+			"fresh sessions ready"),
+		f.boundaryOutage,
+		f.report.BoundaryResumedSessions,
+		f.report.BoundaryExpiredSessions,
+		full,
+		len(clients)*f.streams-full,
+	)
 }

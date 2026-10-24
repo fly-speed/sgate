@@ -30,7 +30,8 @@ func Open(parent context.Context) (*Runtime, error) {
 		return nil, errors.New("acl_master listener count must be between 1 and 256")
 	}
 	if master.Chroot || master.Unprivileged {
-		return nil, errors.New("sgate requires master_chroot=n and master_unpriv=n; run acl_master under the intended service account")
+		return nil, errors.New(("sgate requires master_chroot=n and master_unpriv=n; run acl_master under the " +
+			"intended service account"))
 	}
 	closed, err := closeInheritedSockets(master.SocketCount)
 	if err != nil {
@@ -44,7 +45,8 @@ func Open(parent context.Context) (*Runtime, error) {
 	// sgate needs a joined, cancellable lifecycle and repeatable listener leases.
 	master.Prepare()
 	if master.AppConf.GetInt("master_maxproc") != 1 || master.AppConf.GetInt("master_prefork") != 1 {
-		return nil, errors.New("sgate requires master_maxproc=1 and master_prefork=1; tunnel sessions and Web management state belong to one process")
+		return nil, errors.New(("sgate requires master_maxproc=1 and master_prefork=1; tunnel sessions and Web " +
+			"management state belong to one process"))
 	}
 	if master.AppConf.GetBool("master_status_notify") {
 		return nil, errors.New("sgate requires master_status_notify=0")
@@ -82,7 +84,12 @@ func Open(parent context.Context) (*Runtime, error) {
 	go func() {
 		defer close(r.done)
 		readDone := make(chan struct{})
-		go func() { defer close(readDone); var b [1]byte; _, _ = state.Read(b[:]); cancel() }()
+		go func() {
+			defer close(readDone)
+			var b [1]byte
+			_, _ = state.Read(b[:])
+			cancel()
+		}()
 		<-ctx.Done()
 		state.Close()
 		r.Pool.Close()
@@ -91,4 +98,7 @@ func Open(parent context.Context) (*Runtime, error) {
 	log.Printf("acl_master inherited listeners: %v", r.Pool.Addresses())
 	return r, nil
 }
-func (r *Runtime) Close() { r.cancel(); <-r.done }
+func (r *Runtime) Close() {
+	r.cancel()
+	<-r.done
+}

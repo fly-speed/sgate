@@ -1,0 +1,147 @@
+package app
+
+import (
+	"context"
+	"crypto/tls"
+	"errors"
+	"net"
+	"net/http"
+	"time"
+
+	"sgate/internal/aclservice"
+	"sgate/internal/tunnel"
+)
+
+// definition 是一次配置加载的结果；instance 拥有这次运行需要释放的资源。
+type definition struct {
+	listen   string
+	client   *tunnel.ClientConfig
+	server   *tunnel.ServerConfig
+	tls      *tls.Config
+	managed  *aclservice.Pool
+	wrapHTTP func(net.Listener, http.Handler) http.Handler
+	service  HTTPService
+	shared   *sharedServer
+}
+type instance struct {
+	cancel   context.CancelFunc
+	listener net.Listener
+	server   *tunnel.Server
+	http     *http.Server
+	done     chan struct{}
+	err      error
+	service  HTTPWorker
+}
+
+func (d definition) start(ctx context.Context, stats *tunnel.Stats) (*instance, error) {
+	if d.service != nil {
+		return d.startService(stats)
+	}
+	var l net.Listener
+	var e error
+	if d.managed != nil {
+		l, e = d.managed.Lease()
+	} else {
+		l, e = net.Listen("tcp", d.listen)
+	}
+	if e != nil {
+		return nil, e
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	i := &instance{cancel: cancel, listener: l, done: make(chan struct{})}
+	if d.client != nil {
+		c, e := tunnel.NewClient(*d.client)
+		if e != nil {
+			l.Close()
+			cancel()
+			return nil, e
+		}
+		go func() {
+			i.err = c.Run(runCtx, l)
+			close(i.done)
+		}()
+	} else {
+		s, e := tunnel.NewServer(*d.server)
+		if e != nil {
+			l.Close()
+			cancel()
+			return nil, e
+		}
+		i.server = s
+		transport := stats.Listener(l)
+		if d.tls != nil {
+			transport = tls.NewListener(transport, d.tls.Clone())
+		}
+		var handler http.Handler = s
+		if d.wrapHTTP != nil {
+			handler = d.wrapHTTP(transport, s)
+		}
+		i.http = &http.Server{
+			Handler:           handler,
+			ReadHeaderTimeout: 10 * time.Second,
+			IdleTimeout:       60 * time.Second,
+			MaxHeaderBytes:    16 * 1024,
+		}
+		go func() {
+			e := i.http.Serve(transport)
+			if e == http.ErrServerClosed || errors.Is(e, net.ErrClosed) {
+				e = nil
+			}
+			i.err = e
+			close(i.done)
+		}()
+	}
+	return i, nil
+}
+func (i *instance) stop() error {
+	if i.service != nil {
+		e := i.service.Close()
+		<-i.done
+		return e
+	}
+	i.cancel()
+	_ = i.listener.Close()
+	if i.server != nil {
+		i.server.Close()
+	}
+	if i.http != nil {
+		_ = i.http.Close()
+	}
+	select {
+	case <-i.done:
+		return i.err
+	case <-time.After(7 * time.Second):
+		return errStopTimeout
+	}
+}
+
+// startService 把 HTTP/TLS 和监听的生命周期交给 gin-service。
+func (d definition) startService(stats *tunnel.Stats) (*instance, error) {
+	s, e := tunnel.NewServer(*d.server)
+	if e != nil {
+		return nil, e
+	}
+	var handler http.Handler = s
+	tlsConfig, onStop := d.tls, s.Close
+	if d.shared != nil {
+		d.shared.proxy.Store(s)
+		handler, tlsConfig, onStop = d.shared, d.shared.TLSConfig(d.tls), d.shared.Close
+	}
+	w, e := d.service.Configure(HTTPConfig{
+		Addresses:    d.listen,
+		TLS:          tlsConfig,
+		Handler:      handler,
+		WrapListener: stats.Listener,
+		OnStop:       onStop,
+	})
+	if e != nil {
+		s.Close()
+		return nil, e
+	}
+	i := &instance{cancel: func() {}, listener: w.PrimaryListener(), server: s, service: w, done: make(chan struct{})}
+	go func() {
+		i.err = w.Wait()
+		close(i.done)
+	}()
+	return i, nil
+}

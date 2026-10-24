@@ -67,7 +67,10 @@ func TestDownstreamLostACKIsDeduplicatedAndBuffersReleased(t *testing.T) {
 		return ws, done
 	}
 	ws, done := connect("0")
-	t.Cleanup(func() { s.close(); ws.Close() })
+	t.Cleanup(func() {
+		s.close()
+		ws.Close()
+	})
 	waitFor(t, "backend stream", func() bool { return f.accepted.Load() == 1 })
 	f.server.mu.Lock()
 	remote := f.server.sessions[id].session
@@ -88,7 +91,15 @@ func TestDownstreamLostACKIsDeduplicatedAndBuffersReleased(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("old client transport leaked")
 	}
-	waitFor(t, "server detach", func() bool { f.server.mu.Lock(); defer f.server.mu.Unlock(); return !f.server.sessions[id].inUse })
+	waitFor(
+		t,
+		"server detach",
+		func() bool {
+			f.server.mu.Lock()
+			defer f.server.mu.Unlock()
+			return !f.server.sessions[id].inUse
+		},
+	)
 	remote.mu.Lock()
 	retained := len(remote.pending) > 0
 	remote.mu.Unlock()
@@ -123,9 +134,19 @@ func TestDownstreamLostACKIsDeduplicatedAndBuffersReleased(t *testing.T) {
 }
 
 func TestUnauthenticatedGoneDoesNotDiscardSession(t *testing.T) {
-	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "proxy error", http.StatusGone) }))
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(
+			w,
+			"proxy error",
+			http.StatusGone,
+		)
+	}))
 	defer proxy.Close()
-	c, err := NewClient(ClientConfig{Password: testPassword, Key: bytes.Repeat([]byte{8}, 32), URL: "ws" + strings.TrimPrefix(proxy.URL, "http") + "/tunnel"})
+	c, err := NewClient(ClientConfig{
+		Password: testPassword,
+		Key:      bytes.Repeat([]byte{8}, 32),
+		URL:      "ws" + strings.TrimPrefix(proxy.URL, "http") + "/tunnel",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

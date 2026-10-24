@@ -27,7 +27,15 @@ func adminFixture(t *testing.T) (*Handler, Config) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	cfg := Config{WebDir: webDir, Listen: "127.0.0.1:9081", UsersFile: filepath.Join(dir, "users.json"), SessionDir: filepath.Join(dir, "sessions"), SetupTokenFile: filepath.Join(dir, "setup.token"), SessionTimeout: time.Hour, MaxSessions: 10}
+	cfg := Config{
+		WebDir:         webDir,
+		Listen:         "127.0.0.1:9081",
+		UsersFile:      filepath.Join(dir, "users.json"),
+		SessionDir:     filepath.Join(dir, "sessions"),
+		SetupTokenFile: filepath.Join(dir, "setup.token"),
+		SessionTimeout: time.Hour,
+		MaxSessions:    10,
+	}
 	h, e := New(cfg, View{Role: "client", AppConfigPath: path, Stats: tunnel.NewStats(), Validate: func(path string) error {
 		b, e := os.ReadFile(path)
 		if e != nil {
@@ -78,7 +86,19 @@ func setupAccount(t *testing.T, h *Handler, c Config) (*http.Cookie, string) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	w := request(h, "POST", "/api/setup", map[string]string{"username": "admin", "password": "test-management-password", "setup_token": strings.TrimSpace(string(token))}, nil, "", "")
+	w := request(
+		h,
+		"POST",
+		"/api/setup",
+		map[string]string{
+			"username":    "admin",
+			"password":    "test-management-password",
+			"setup_token": strings.TrimSpace(string(token)),
+		},
+		nil,
+		"",
+		"",
+	)
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
@@ -96,7 +116,15 @@ func TestFirstAccountAndPersistentSession(t *testing.T) {
 	if w := request(h, "POST", "/api/setup", map[string]string{}, nil, "", "http://attacker.example"); w.Code != 403 {
 		t.Fatal("cross origin setup allowed")
 	}
-	if w := request(h, "POST", "/api/setup", map[string]string{"username": "admin", "password": "test-management-password", "setup_token": "wrong"}, nil, "", ""); w.Code != 403 {
+	if w := request(
+		h,
+		"POST",
+		"/api/setup",
+		map[string]string{"username": "admin", "password": "test-management-password", "setup_token": "wrong"},
+		nil,
+		"",
+		"",
+	); w.Code != 403 {
 		t.Fatal(w.Code)
 	}
 	cookie, csrf := setupAccount(t, h, c)
@@ -147,7 +175,15 @@ func TestConfigRedactionValidationRevisionAndApplyRollback(t *testing.T) {
 		t.Fatal("BOM-prefixed password leaked")
 	}
 	save := func(text, revision string, apply bool) *httptest.ResponseRecorder {
-		return request(h, "PUT", "/api/config", map[string]any{"content": text, "revision": revision, "apply": apply}, cookie, csrf, "")
+		return request(
+			h,
+			"PUT",
+			"/api/config",
+			map[string]any{"content": text, "revision": revision, "apply": apply},
+			cookie,
+			csrf,
+			"",
+		)
 	}
 	if w = save(content, "stale", false); w.Code != 409 {
 		t.Fatal(w.Code)
@@ -165,12 +201,16 @@ func TestConfigRedactionValidationRevisionAndApplyRollback(t *testing.T) {
 		t.Fatal("failed apply did not restore file")
 	}
 	calls := 0
-	h.view.Apply = func() error { calls++; return nil }
+	h.view.Apply = func() error {
+		calls++
+		return nil
+	}
 	if w = save(content+"# updated\n", rev, true); w.Code != 200 || calls != 1 {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	after, _ = os.ReadFile(h.view.AppConfigPath)
-	if !strings.Contains(string(after), "existing-proxy-secret") || strings.Contains(string(after), secretMarker) {
+	if !strings.Contains(string(after), "existing-proxy-secret") ||
+		strings.Contains(string(after), secretMarker) {
 		t.Fatal("password not preserved")
 	}
 	st, e := os.Stat(h.view.AppConfigPath + ".bak")
@@ -184,12 +224,32 @@ func TestConfigRedactionValidationRevisionAndApplyRollback(t *testing.T) {
 func TestAccountChangeRevokesEverySession(t *testing.T) {
 	h, c := adminFixture(t)
 	cookie, csrf := setupAccount(t, h, c)
-	w := request(h, "POST", "/api/login", map[string]string{"username": "admin", "password": "test-management-password"}, nil, "", "")
+	w := request(
+		h,
+		"POST",
+		"/api/login",
+		map[string]string{"username": "admin", "password": "test-management-password"},
+		nil,
+		"",
+		"",
+	)
 	if w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
 	second := w.Result().Cookies()[0]
-	w = request(h, "PUT", "/api/account", map[string]string{"username": "new-admin", "current_password": "test-management-password", "password": "new-management-password"}, cookie, csrf, "")
+	w = request(
+		h,
+		"PUT",
+		"/api/account",
+		map[string]string{
+			"username":         "new-admin",
+			"current_password": "test-management-password",
+			"password":         "new-management-password",
+		},
+		cookie,
+		csrf,
+		"",
+	)
 	if w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
@@ -198,7 +258,15 @@ func TestAccountChangeRevokesEverySession(t *testing.T) {
 			t.Fatal("old session still accepted")
 		}
 	}
-	w = request(h, "POST", "/api/login", map[string]string{"username": "new-admin", "password": "new-management-password"}, nil, "", "")
+	w = request(
+		h,
+		"POST",
+		"/api/login",
+		map[string]string{"username": "new-admin", "password": "new-management-password"},
+		nil,
+		"",
+		"",
+	)
 	if w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
@@ -209,8 +277,14 @@ func TestExpiredSessionsCleanedAndStop(t *testing.T) {
 	cookie, _ := setupAccount(t, h, c)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go func() { h.reap(ctx); close(done) }()
-	defer func() { cancel(); <-done }()
+	go func() {
+		h.reap(ctx)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
 	deadline := time.Now().Add(4 * time.Second)
 	for time.Now().Before(deadline) {
 		files, _ := os.ReadDir(c.SessionDir)
@@ -235,10 +309,15 @@ func TestConfigTLSPathsAndRateLimit(t *testing.T) {
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "admin.conf")
-	text := "listen = 127.0.0.1:9081\nusers-file = private/users.json\nsession-dir = private/sessions\nsetup-token-file = private/setup.token\nsession-timeout = 45m\n"
+	text := ("listen = 127.0.0.1:9081\n" +
+		"users-file = private/users.json\n" +
+		"session-dir = private/sessions\n" +
+		"setup-token-file = private/setup.token\n" +
+		"session-timeout = 45m\n")
 	os.WriteFile(path, []byte(text), 0600)
 	got, e := LoadConfig(path)
-	if e != nil || got.UsersFile != filepath.Join(dir, "private/users.json") || got.SessionTimeout != 45*time.Minute {
+	if e != nil || got.UsersFile != filepath.Join(dir, "private/users.json") ||
+		got.SessionTimeout != 45*time.Minute {
 		t.Fatal(got, e)
 	}
 	for i := 0; i < 21; i++ {
@@ -262,7 +341,19 @@ func TestConcurrentFirstAccountCannotOverwrite(t *testing.T) {
 	done := make(chan int, 2)
 	for i, handler := range []*Handler{h, other} {
 		go func(h *Handler, i int) {
-			w := request(h, "POST", "/api/setup", map[string]string{"username": fmt.Sprintf("operator-%d", i), "password": "test-management-password", "setup_token": strings.TrimSpace(string(token))}, nil, "", "")
+			w := request(
+				h,
+				"POST",
+				"/api/setup",
+				map[string]string{
+					"username":    fmt.Sprintf("operator-%d", i),
+					"password":    "test-management-password",
+					"setup_token": strings.TrimSpace(string(token)),
+				},
+				nil,
+				"",
+				"",
+			)
 			done <- w.Code
 		}(handler, i)
 	}
@@ -274,7 +365,19 @@ func TestConcurrentFirstAccountCannotOverwrite(t *testing.T) {
 func TestHTTPSCookieAndInstanceIsolation(t *testing.T) {
 	h, c := adminFixture(t)
 	token, _ := os.ReadFile(c.SetupTokenFile)
-	w := request(h, "POST", "https://example.com/api/setup", map[string]string{"username": "admin", "password": "test-management-password", "setup_token": strings.TrimSpace(string(token))}, nil, "", "https://example.com")
+	w := request(
+		h,
+		"POST",
+		"https://example.com/api/setup",
+		map[string]string{
+			"username":    "admin",
+			"password":    "test-management-password",
+			"setup_token": strings.TrimSpace(string(token)),
+		},
+		nil,
+		"",
+		"https://example.com",
+	)
 	if w.Code != 200 || !w.Result().Cookies()[0].Secure {
 		t.Fatal("HTTPS cookie is not Secure", w.Code, w.Body.String())
 	}
@@ -298,7 +401,15 @@ func TestExternalEditDuringValidationIsNotOverwritten(t *testing.T) {
 	h.view.Validate = func(string) error {
 		return os.WriteFile(h.view.AppConfigPath, []byte("# external administrator update\n"), 0600)
 	}
-	w := request(h, "PUT", "/api/config", map[string]any{"content": v["content"], "revision": v["revision"], "apply": false}, cookie, csrf, "")
+	w := request(
+		h,
+		"PUT",
+		"/api/config",
+		map[string]any{"content": v["content"], "revision": v["revision"], "apply": false},
+		cookie,
+		csrf,
+		"",
+	)
 	if w.Code != 409 {
 		t.Fatal("external file edit overwritten", w.Code)
 	}
@@ -320,7 +431,11 @@ func TestSessionCleanupPreservesUnrelatedFiles(t *testing.T) {
 }
 
 func TestMergedFrameworkSecretsAreRedactedAndRestoredIndependently(t *testing.T) {
-	original := []byte("service test {\n master_args = -password argument-secret\n master_env = SGATE_KEY:environment-secret\n password = \"proxy-secret\"\n}\n")
+	original := []byte(("service test {\n" +
+		" master_args = -password argument-secret\n" +
+		" master_env = SGATE_KEY:environment-secret\n" +
+		" password = \"proxy-secret\"\n" +
+		"}\n"))
 	redacted := redactConfig(original)
 	for _, secret := range []string{"argument-secret", "environment-secret", "proxy-secret"} {
 		if strings.Contains(redacted, secret) {
@@ -333,7 +448,8 @@ func TestMergedFrameworkSecretsAreRedactedAndRestoredIndependently(t *testing.T)
 	}
 	updated := strings.Replace(redacted, "password = \""+secretMarker+"\"", "password = new-proxy-secret", 1)
 	restored, e = restoreSecret(updated, original)
-	if e != nil || !strings.Contains(restored, "master_args = -password argument-secret") || !strings.Contains(restored, "password = new-proxy-secret") {
+	if e != nil || !strings.Contains(restored, "master_args = -password argument-secret") ||
+		!strings.Contains(restored, "password = new-proxy-secret") {
 		t.Fatal("independent secret edit failed", e)
 	}
 }

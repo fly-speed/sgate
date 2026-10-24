@@ -69,7 +69,11 @@ func stressHoldRetainedOutage(t *testing.T, duration time.Duration, abort <-chan
 			break
 		}
 		if time.Now().After(logAt) {
-			t.Logf("retained outage %s: all old sessions alive, replay queues bounded, padding timers stopped", time.Since(start).Round(time.Second))
+			t.Logf(
+				("retained outage %s: all old sessions alive, replay queues bounded, padding timers " +
+					"stopped"),
+				time.Since(start).Round(time.Second),
+			)
 			logAt = time.Now().Add(30 * time.Second)
 		}
 		select {
@@ -84,7 +88,10 @@ func stressHoldRetainedOutage(t *testing.T, duration time.Duration, abort <-chan
 			t.Error("retained outage did not fill every bidirectional replay queue")
 		}
 	}
-	t.Logf("restoring network after %s within the default two-minute retention window", time.Since(start).Round(time.Millisecond))
+	t.Logf(
+		"restoring network after %s within the default two-minute retention window",
+		time.Since(start).Round(time.Millisecond),
+	)
 }
 
 func stressCheckRetainedIdentity(t *testing.T, states []*clientSessions, server *Server, clients, remotes []*session) {

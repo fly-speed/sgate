@@ -14,7 +14,11 @@ import (
 func externalWeb(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	for name, body := range map[string]string{"index.html": "<!doctype html><title>external v1</title>", "app.css": "body { color: navy; }", "app.js": "console.log('external v1');"} {
+	for name, body := range map[string]string{
+		"index.html": "<!doctype html><title>external v1</title>",
+		"app.css":    "body { color: navy; }",
+		"app.js":     "console.log('external v1');",
+	} {
 		if e := os.WriteFile(filepath.Join(dir, name), []byte(body), 0600); e != nil {
 			t.Fatal(e)
 		}
@@ -28,7 +32,11 @@ func TestExternalWebFilesReloadWithoutRestart(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	for route, name := range map[string]string{"/": "index.html", "/assets/app.css": "app.css", "/assets/app.js": "app.js"} {
+	for route, name := range map[string]string{
+		"/":               "index.html",
+		"/assets/app.css": "app.css",
+		"/assets/app.js":  "app.js",
+	} {
 		get := func() *httptest.ResponseRecorder {
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, httptest.NewRequest("GET", route, nil))
@@ -49,7 +57,13 @@ func TestExternalWebFilesReloadWithoutRestart(t *testing.T) {
 	}
 	// Even a file in web-dir is not published unless explicitly routed.
 	os.WriteFile(filepath.Join(c.WebDir, "private.conf"), []byte("secret"), 0600)
-	for _, path := range []string{"/private.conf", "/assets/private.conf", "/assets/../private.conf", "/assets/../../users.json", "/index.html"} {
+	for _, path := range []string{
+		"/private.conf",
+		"/assets/private.conf",
+		"/assets/../private.conf",
+		"/assets/../../users.json",
+		"/index.html",
+	} {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
 		if w.Code != 404 || strings.Contains(w.Body.String(), "secret") {

@@ -3,8 +3,6 @@ package app
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,10 +10,8 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"sgate/internal/aclservice"
 	"sgate/internal/admin"
@@ -26,170 +22,56 @@ import (
 
 var errStopTimeout = errors.New("proxy shutdown timed out")
 
-type definition struct {
-	listen   string
-	client   *tunnel.ClientConfig
-	server   *tunnel.ServerConfig
-	tls      *tls.Config
-	managed  *aclservice.Pool
-	wrapHTTP func(net.Listener, http.Handler) http.Handler
-}
-type instance struct {
-	cancel   context.CancelFunc
-	listener net.Listener
-	server   *tunnel.Server
-	http     *http.Server
-	done     chan struct{}
-	err      error
-}
-
-func (d definition) start(ctx context.Context, stats *tunnel.Stats) (*instance, error) {
-	var l net.Listener
-	var e error
-	if d.managed != nil {
-		l, e = d.managed.Lease()
-	} else {
-		l, e = net.Listen("tcp", d.listen)
-	}
-	if e != nil {
-		return nil, e
-	}
-	runCtx, cancel := context.WithCancel(ctx)
-	i := &instance{cancel: cancel, listener: l, done: make(chan struct{})}
-	if d.client != nil {
-		c, e := tunnel.NewClient(*d.client)
-		if e != nil {
-			l.Close()
-			cancel()
-			return nil, e
-		}
-		go func() { i.err = c.Run(runCtx, l); close(i.done) }()
-	} else {
-		s, e := tunnel.NewServer(*d.server)
-		if e != nil {
-			l.Close()
-			cancel()
-			return nil, e
-		}
-		i.server = s
-		transport := stats.Listener(l)
-		if d.tls != nil {
-			transport = tls.NewListener(transport, d.tls.Clone())
-		}
-		var handler http.Handler = s
-		if d.wrapHTTP != nil {
-			handler = d.wrapHTTP(transport, s)
-		}
-		i.http = &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024}
-		go func() {
-			e := i.http.Serve(transport)
-			if e == http.ErrServerClosed || errors.Is(e, net.ErrClosed) {
-				e = nil
-			}
-			i.err = e
-			close(i.done)
-		}()
-	}
-	return i, nil
-}
-func (i *instance) stop() error {
-	i.cancel()
-	_ = i.listener.Close()
-	if i.server != nil {
-		i.server.Close()
-	}
-	if i.http != nil {
-		_ = i.http.Close()
-	}
-	select {
-	case <-i.done:
-		return i.err
-	case <-time.After(7 * time.Second):
-		return errStopTimeout
-	}
-}
-
 type controller struct {
-	mu         sync.Mutex
-	ctx        context.Context
-	original   *flag.FlagSet
-	args       []string
-	role, path string
-	stats      *tunnel.Stats
-	current    definition
-	worker     *instance
-	generation int
-	lastError  string
-	overrides  []string
-	managed    *aclservice.Pool
-	wrapHTTP   func(net.Listener, http.Handler) http.Handler
-	controls   map[string]string
+	mu             sync.Mutex
+	ctx            context.Context
+	original       *flag.FlagSet
+	args           []string
+	role, path     string
+	stats          *tunnel.Stats
+	current        definition
+	worker         *instance
+	generation     int
+	lastError      string
+	overrides      []string
+	managed        *aclservice.Pool
+	wrapHTTP       func(net.Listener, http.Handler) http.Handler
+	controls       map[string]string
+	service        HTTPService
+	shared         *sharedServer
+	sharedMode     bool
+	servicePath    string
+	restartPending bool
 }
 
 func Run(ctx context.Context, role string, fs *flag.FlagSet, args []string, adminPath string) error {
-	return run(ctx, role, fs, args, adminPath, nil, nil)
+	return run(ctx, role, fs, args, adminPath, runtimeHooks{})
 }
 
 // RunACL inherits the official template's sockets once for the whole process.
-func RunACL(ctx context.Context, role string, fs *flag.FlagSet, args []string, adminPath string, wrapHTTP func(net.Listener, http.Handler) http.Handler) error {
+func RunACL(
+	ctx context.Context,
+	role string,
+	fs *flag.FlagSet,
+	args []string,
+	adminPath string,
+	wrapHTTP func(net.Listener, http.Handler) http.Handler,
+) error {
 	runtime, e := aclservice.Open(ctx)
 	if e != nil {
 		return e
 	}
 	defer runtime.Close()
-	return run(runtime.Context, role, fs, args, adminPath, runtime.Pool, wrapHTTP)
+	return run(
+		runtime.Context,
+		role,
+		fs,
+		args,
+		adminPath,
+		runtimeHooks{managed: runtime.Pool, wrapHTTP: wrapHTTP},
+	)
 }
 
-func run(ctx context.Context, role string, fs *flag.FlagSet, args []string, adminPath string, managed *aclservice.Pool, wrapHTTP func(net.Listener, http.Handler) http.Handler) error {
-	c := &controller{ctx: ctx, original: fs, args: append([]string(nil), args...), role: role, path: fs.Lookup("config").Value.String(), stats: tunnel.NewStats(), managed: managed, wrapHTTP: wrapHTTP}
-	var controlErr error
-	c.controls, controlErr = processSettings(c.path)
-	if controlErr != nil {
-		return controlErr
-	}
-	if c.path == "" && adminPath != "" {
-		return errors.New("Web management requires an application -config file")
-	}
-	overrides := cli.CloneFlags(fs)
-	overrides.String("config", "", "")
-	if e := overrides.Parse(args); e != nil {
-		return e
-	}
-	overrides.Visit(func(f *flag.Flag) {
-		if managed != nil {
-			switch f.Name {
-			case "f", "n", "t", "s", "c", "u", "v", "alone":
-				return
-			}
-		}
-		if f.Name != "config" {
-			c.overrides = append(c.overrides, f.Name)
-		}
-	})
-	next, e := c.load("")
-	if e != nil {
-		return e
-	}
-	c.current = next
-	c.worker, e = next.start(ctx, c.stats)
-	if e != nil {
-		return e
-	}
-	c.generation = 1
-	stopAdmin, e := admin.Start(ctx, adminPath, admin.View{Role: role, AppConfigPath: c.path, Stats: c.stats, Validate: func(path string) error { _, e := c.load(path); return e }, Apply: c.apply, Runtime: c.status})
-	if e != nil {
-		_ = c.worker.stop()
-		return e
-	}
-	defer stopAdmin()
-	<-ctx.Done()
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.worker != nil {
-		return c.worker.stop()
-	}
-	return nil
-}
 func (c *controller) status() any {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -209,23 +91,54 @@ func (c *controller) status() any {
 	}
 	owner := "sgate"
 	var addresses []string
+	if c.service != nil {
+		addresses = c.service.Addresses()
+		if c.service.Managed() {
+			owner = "acl_master"
+		}
+		if len(addresses) > 0 {
+			address = addresses[0]
+		}
+	}
 	if c.managed != nil {
 		owner = "acl_master"
 		addresses = c.managed.Addresses()
 	}
-	return map[string]any{"generation": c.generation, "running": running, "last_error": last, "listen": address, "cli_overrides": c.overrides, "listener_owner": owner, "listeners": addresses, "pid": os.Getpid()}
+	adminRoute := "/"
+	if c.sharedMode {
+		adminRoute = managementPath
+	}
+	return map[string]any{
+		"generation":                c.generation,
+		"running":                   running,
+		"last_error":                last,
+		"listen":                    address,
+		"cli_overrides":             c.overrides,
+		"listener_owner":            owner,
+		"listeners":                 addresses,
+		"pid":                       os.Getpid(),
+		"http_framework":            c.httpFramework(),
+		"management_shared":         c.sharedMode,
+		"management_path":           adminRoute,
+		"service_restart_available": owner == "acl_master" && c.servicePath != "",
+		"service_restart_pending":   c.restartPending,
+	}
 }
 func (c *controller) apply() error {
+	// 与状态查询和其它应用请求串行，确保失败回滚总是针对同一代运行配置。
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.ctx.Err() != nil {
 		return errors.New("process is stopping")
 	}
+	if c.restartPending {
+		return errors.New("acl_master 正在重启服务，请等待新进程恢复后再应用配置")
+	}
 	next, e := c.load("")
 	if e != nil {
 		return e
 	}
-	if c.managed != nil && next.listen != c.current.listen {
+	if (c.managed != nil || (c.service != nil && c.service.Managed())) && next.listen != c.current.listen {
 		return errors.New("监听端口由 acl_master 管理；请修改 .cf 的 master_service 并通过 master_ctl 重启服务")
 	}
 	controls, e := processSettings(c.path)
@@ -234,6 +147,9 @@ func (c *controller) apply() error {
 	}
 	if !maps.Equal(controls, c.controls) {
 		return errors.New("框架或管理界面配置已改变；请保存后重启整个进程，代理热重启不能应用这些配置")
+	}
+	if c.shared != nil {
+		return c.replaceShared(next)
 	}
 	if c.worker != nil {
 		if e = c.worker.stop(); errors.Is(e, errStopTimeout) {
@@ -272,7 +188,11 @@ func (c *controller) load(candidate string) (definition, error) {
 		if merged {
 			for key := range values {
 				if strings.HasPrefix(key, "admin_") {
-					if _, e := admin.LoadConfig(path); e != nil {
+					loadAdmin := admin.LoadConfig
+					if c.sharedMode {
+						loadAdmin = admin.LoadSharedConfig
+					}
+					if _, e := loadAdmin(path); e != nil {
 						return definition{}, e
 					}
 					break
@@ -298,6 +218,15 @@ func (c *controller) load(candidate string) (definition, error) {
 	d, e := build(c.role, fs, c.stats)
 	d.managed = c.managed
 	d.wrapHTTP = c.wrapHTTP
+	d.service = c.service
+	d.shared = c.shared
+	if e == nil && c.sharedMode {
+		var addresses []string
+		if c.service != nil {
+			addresses = c.service.Addresses()
+		}
+		e = validateShared(d, addresses)
+	}
 	return d, e
 }
 
@@ -317,63 +246,9 @@ func processSettings(path string) (map[string]string, error) {
 	}
 	return controls, nil
 }
-func build(role string, fs *flag.FlagSet, stats *tunnel.Stats) (definition, error) {
-	text := func(n string) string { return fs.Lookup(n).Value.String() }
-	integer := func(n string) int { v, _ := strconv.Atoi(text(n)); return v }
-	duration := func(n string) time.Duration { v, _ := time.ParseDuration(text(n)); return v }
-	d := definition{listen: text("listen")}
-	_, port, e := net.SplitHostPort(d.listen)
-	if e != nil {
-		return d, e
+func (c *controller) httpFramework() string {
+	if c.service != nil {
+		return "gin-service"
 	}
-	if p, e := net.LookupPort("tcp", port); e != nil || p < 0 || p > 65535 {
-		return d, errors.New("invalid listen port")
-	}
-	secret, e := cli.LoadKey(text("key-file"))
-	if e != nil {
-		return d, e
-	}
-	opts := tunnel.Options{Stats: stats, BufferBytes: integer("buffer-bytes"), MaxStreams: integer("max-streams"), Heartbeat: duration("heartbeat"), HeartbeatTimeout: duration("heartbeat-timeout"), NoiseInterval: duration("noise-interval"), NoiseIntervalMin: duration("noise-interval-min"), NoiseIntervalMax: duration("noise-interval-max"), NoiseMinBytes: integer("noise-min-bytes"), NoiseMaxBytes: integer("noise-max-bytes")}
-	if role == "client" {
-		cfg := &tls.Config{MinVersion: tls.VersionTLS12}
-		if path := text("tls-ca"); path != "" {
-			pem, e := os.ReadFile(path)
-			if e != nil {
-				return d, e
-			}
-			roots, e := x509.SystemCertPool()
-			if e != nil {
-				roots = x509.NewCertPool()
-			}
-			if !roots.AppendCertsFromPEM(pem) {
-				return d, errors.New("no CA certificates found")
-			}
-			cfg.RootCAs = roots
-		}
-		cc := tunnel.ClientConfig{Key: secret, Password: text("password"), URL: text("server"), TLSConfig: cfg, ReconnectMin: duration("reconnect-min"), ReconnectMax: duration("reconnect-max"), OfflineTimeout: duration("offline-timeout"), Options: opts}
-		if _, e := tunnel.NewClient(cc); e != nil {
-			return d, e
-		}
-		d.client = &cc
-	} else {
-		cert, key := text("tls-cert"), text("tls-key")
-		if (cert == "") != (key == "") {
-			return d, errors.New("both TLS certificate and key are required")
-		}
-		if cert != "" {
-			pair, e := tls.LoadX509KeyPair(cert, key)
-			if e != nil {
-				return d, e
-			}
-			d.tls = &tls.Config{Certificates: []tls.Certificate{pair}, MinVersion: tls.VersionTLS12}
-		}
-		sc := tunnel.ServerConfig{Key: secret, Password: text("password"), Target: text("target"), Path: text("path"), SessionTTL: duration("session-ttl"), MaxSessions: integer("max-sessions"), Options: opts}
-		s, e := tunnel.NewServer(sc)
-		if e != nil {
-			return d, e
-		}
-		s.Close()
-		d.server = &sc
-	}
-	return d, nil
+	return "net/http"
 }

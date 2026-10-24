@@ -296,14 +296,26 @@ func TestStressReconnectResources(t *testing.T) {
 	lifecycle := os.Getenv("SGATE_STRESS_LIFECYCLE") == "1"
 	defaultRetention := os.Getenv("SGATE_STRESS_DEFAULT_RETENTION") == "1"
 	unconfirmedMode := os.Getenv("SGATE_STRESS_UNCONFIRMED")
-	if unconfirmedMode != "" && (unconfirmedMode != "tls-timeout" && unconfirmedMode != "abandoned" && unconfirmedMode != "silent" && unconfirmedMode != "control" && unconfirmedMode != "fragmented" || !tlsMode || !duplex || !lifecycle || !defaultRetention) {
-		t.Fatal("unconfirmed mode requires WSS, duplex, lifecycle and default retention; choose tls-timeout, abandoned, silent, control or fragmented")
+	if unconfirmedMode != "" &&
+		(unconfirmedMode != "tls-timeout" && unconfirmedMode != "abandoned" && unconfirmedMode != "silent" &&
+			unconfirmedMode != "control" &&
+			unconfirmedMode != "fragmented" ||
+			!tlsMode ||
+			!duplex ||
+			!lifecycle ||
+			!defaultRetention) {
+		t.Fatal(("unconfirmed mode requires WSS, duplex, lifecycle and default retention; choose " +
+			"tls-timeout, abandoned, silent, control or fragmented"))
 	}
 	var boundaryOutage time.Duration
 	if v := os.Getenv("SGATE_STRESS_BOUNDARY_OUTAGE"); v != "" {
 		var err error
 		boundaryOutage, err = time.ParseDuration(v)
-		if err != nil || boundaryOutage < 119*time.Second || boundaryOutage > 121*time.Second || !defaultRetention || !tlsMode || !duplex || !lifecycle {
+		if err != nil || boundaryOutage < 119*time.Second || boundaryOutage > 121*time.Second ||
+			!defaultRetention ||
+			!tlsMode ||
+			!duplex ||
+			!lifecycle {
 			t.Fatal("boundary outage requires WSS, duplex, lifecycle, default retention and 119s..121s")
 		}
 	}
@@ -311,7 +323,8 @@ func TestStressReconnectResources(t *testing.T) {
 	if v := os.Getenv("SGATE_STRESS_RETENTION_OUTAGE"); v != "" {
 		var err error
 		retentionOutage, err = time.ParseDuration(v)
-		if err != nil || retentionOutage <= 0 || retentionOutage >= 2*time.Minute || !defaultRetention || lifecycle {
+		if err != nil || retentionOutage <= 0 || retentionOutage >= 2*time.Minute || !defaultRetention ||
+			lifecycle {
 			t.Fatal("retention outage requires default retention, 0 < outage < 2m, and no lifecycle mode")
 		}
 	}
@@ -376,7 +389,8 @@ func TestStressReconnectResources(t *testing.T) {
 	var uploadSent, uploadReceived, downloadSent, downloadReceived atomic.Int64
 	backendErrors := make(chan error, clients*streams*rounds)
 	var backendCount, localCount, httpCount connectionCounter
-	backendCount.socketBuffer, localCount.socketBuffer, httpCount.socketBuffer = report.SocketBufferBytes, report.SocketBufferBytes, report.SocketBufferBytes
+	backendCount.socketBuffer, localCount.socketBuffer, httpCount.socketBuffer =
+		report.SocketBufferBytes, report.SocketBufferBytes, report.SocketBufferBytes
 	report.BackendHost = os.Getenv("SGATE_STRESS_BACKEND_HOST")
 	if report.BackendHost == "" {
 		report.BackendHost = "127.0.0.1"
@@ -452,7 +466,14 @@ func TestStressReconnectResources(t *testing.T) {
 			}()
 		}
 	}()
-	opts := Options{BufferBytes: 256 * 1024, MaxStreams: streams + 16, Heartbeat: 5 * time.Second, DialTimeout: 2 * time.Second, WriteTimeout: 10 * time.Second, Logf: func(string, ...any) {}}
+	opts := Options{
+		BufferBytes:  256 * 1024,
+		MaxStreams:   streams + 16,
+		Heartbeat:    5 * time.Second,
+		DialTimeout:  2 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		Logf:         func(string, ...any) {},
+	}
 	if tlsMode {
 		opts.DialTimeout, opts.HeartbeatTimeout = 5*time.Second, 30*time.Second
 	}
@@ -506,7 +527,13 @@ func TestStressReconnectResources(t *testing.T) {
 	}
 	key := bytes.Repeat([]byte{42}, 32)
 	report.ChurnInterval, report.OfflineDuration = churnInterval.String(), offlineDuration.String()
-	serverConfig := ServerConfig{Password: testPassword, Key: key, Target: backend.Addr().String(), SessionTTL: 10 * time.Second, Options: opts}
+	serverConfig := ServerConfig{
+		Password:   testPassword,
+		Key:        key,
+		Target:     backend.Addr().String(),
+		SessionTTL: 10 * time.Second,
+		Options:    opts,
+	}
 	report.SessionRetention = "10s"
 	if defaultRetention {
 		serverConfig.SessionTTL = 0
@@ -571,7 +598,12 @@ func TestStressReconnectResources(t *testing.T) {
 	transportURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/tunnel"
 	var relay *weakRelay
 	if os.Getenv("SGATE_STRESS_WEAKNET") == "1" {
-		profile := weakProfile{delay: 150 * time.Millisecond, jitter: 100 * time.Millisecond, lossPercent: 15, retransmit: 200 * time.Millisecond}
+		profile := weakProfile{
+			delay:       150 * time.Millisecond,
+			jitter:      100 * time.Millisecond,
+			lossPercent: 15,
+			retransmit:  200 * time.Millisecond,
+		}
 		for name, dst := range map[string]*time.Duration{
 			"SGATE_STRESS_WEAK_DELAY":      &profile.delay,
 			"SGATE_STRESS_WEAK_JITTER":     &profile.jitter,
@@ -606,7 +638,10 @@ func TestStressReconnectResources(t *testing.T) {
 	addrs := make([]string, clients)
 	states := make([]*clientSessions, clients)
 	reconnectMin, reconnectMax := 5*time.Millisecond, 25*time.Millisecond
-	for name, dst := range map[string]*time.Duration{"SGATE_STRESS_RECONNECT_MIN": &reconnectMin, "SGATE_STRESS_RECONNECT_MAX": &reconnectMax} {
+	for name, dst := range map[string]*time.Duration{
+		"SGATE_STRESS_RECONNECT_MIN": &reconnectMin,
+		"SGATE_STRESS_RECONNECT_MAX": &reconnectMax,
+	} {
 		if value := os.Getenv(name); value != "" {
 			var err error
 			*dst, err = time.ParseDuration(value)
@@ -619,7 +654,16 @@ func TestStressReconnectResources(t *testing.T) {
 	for i := range addrs {
 		l := listen(&localCount)
 		addrs[i] = l.Addr().String()
-		c, err := NewClient(ClientConfig{Password: testPassword, Key: key, URL: transportURL, TLSConfig: clientTLS, OfflineTimeout: clientOfflineTimeout, ReconnectMin: reconnectMin, ReconnectMax: reconnectMax, Options: opts})
+		c, err := NewClient(ClientConfig{
+			Password:       testPassword,
+			Key:            key,
+			URL:            transportURL,
+			TLSConfig:      clientTLS,
+			OfflineTimeout: clientOfflineTimeout,
+			ReconnectMin:   reconnectMin,
+			ReconnectMax:   reconnectMax,
+			Options:        opts,
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -636,7 +680,10 @@ func TestStressReconnectResources(t *testing.T) {
 	var cleanupOnce sync.Once
 	cleanup := func() {
 		cleanupOnce.Do(func() {
-			applicationConns.Range(func(k, v any) bool { k.(net.Conn).Close(); return true })
+			applicationConns.Range(func(k, v any) bool {
+				k.(net.Conn).Close()
+				return true
+			})
 			cancel()
 			clientWG.Wait()
 			server.Close()
@@ -645,7 +692,10 @@ func TestStressReconnectResources(t *testing.T) {
 				relay.close()
 			}
 			backend.Close()
-			backendConns.Range(func(k, v any) bool { k.(net.Conn).Close(); return true })
+			backendConns.Range(func(k, v any) bool {
+				k.(net.Conn).Close()
+				return true
+			})
 			backendWG.Wait()
 		})
 	}
@@ -689,7 +739,24 @@ func TestStressReconnectResources(t *testing.T) {
 		}
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
-		p := stressSample{SampleTimeUnixNano: time.Now().UnixNano(), NetworkMemoryDenied: -1, Phase: phase, Round: round, Milliseconds: time.Since(start).Milliseconds(), HeapBytes: m.HeapAlloc, HeapInuseBytes: m.HeapInuse, HeapIdleBytes: m.HeapIdle, HeapReleasedBytes: m.HeapReleased, StackBytes: m.StackInuse, SysBytes: m.Sys, Goroutines: runtime.NumGoroutine(), FileDescriptors: -1, BackendConnections: backendCount.active.Load(), LocalConnections: localCount.active.Load(), HTTPConnections: httpCount.active.Load()}
+		p := stressSample{
+			SampleTimeUnixNano:  time.Now().UnixNano(),
+			NetworkMemoryDenied: -1,
+			Phase:               phase,
+			Round:               round,
+			Milliseconds:        time.Since(start).Milliseconds(),
+			HeapBytes:           m.HeapAlloc,
+			HeapInuseBytes:      m.HeapInuse,
+			HeapIdleBytes:       m.HeapIdle,
+			HeapReleasedBytes:   m.HeapReleased,
+			StackBytes:          m.StackInuse,
+			SysBytes:            m.Sys,
+			Goroutines:          runtime.NumGoroutine(),
+			FileDescriptors:     -1,
+			BackendConnections:  backendCount.active.Load(),
+			LocalConnections:    localCount.active.Load(),
+			HTTPConnections:     httpCount.active.Load(),
+		}
 		if phase != "load" && phase != "unconfirmed-progress" {
 			p.FileDescriptors = descriptorCount()
 		}
@@ -754,11 +821,44 @@ func TestStressReconnectResources(t *testing.T) {
 			}
 		}
 		if collect {
-			t.Logf("%s round=%d heap=%.2fMiB rss=%.2fMiB g=%d fd=%d backend=%d local=%d http=%d sessions=%d streams=%d pending=%d nonces=%d heap_idle=%d heap_released=%d", phase, round, float64(p.HeapBytes)/(1<<20), float64(p.RSSBytes)/(1<<20), p.Goroutines, p.FileDescriptors, p.BackendConnections, p.LocalConnections, p.HTTPConnections, p.Sessions, p.Streams, p.PendingBytes, p.Nonces, p.HeapIdleBytes, p.HeapReleasedBytes)
-			t.Logf("client streams=%d pending=%d; noise server tx/rx=%d/%d client tx/rx=%d/%d", p.ClientStreams, p.ClientPendingBytes, p.ServerNoiseSent, p.ServerNoiseReceived, p.ClientNoiseSent, p.ClientNoiseReceived)
+			t.Logf(
+				("%s round=%d heap=%.2fMiB rss=%.2fMiB g=%d fd=%d backend=%d local=%d http=%d " +
+					"sessions=%d streams=%d pending=%d nonces=%d heap_idle=%d heap_released=%d"),
+				phase,
+				round,
+				float64(p.HeapBytes)/(1<<20),
+				float64(p.RSSBytes)/(1<<20),
+				p.Goroutines,
+				p.FileDescriptors,
+				p.BackendConnections,
+				p.LocalConnections,
+				p.HTTPConnections,
+				p.Sessions,
+				p.Streams,
+				p.PendingBytes,
+				p.Nonces,
+				p.HeapIdleBytes,
+				p.HeapReleasedBytes,
+			)
+			t.Logf(
+				"client streams=%d pending=%d; noise server tx/rx=%d/%d client tx/rx=%d/%d",
+				p.ClientStreams,
+				p.ClientPendingBytes,
+				p.ServerNoiseSent,
+				p.ServerNoiseReceived,
+				p.ClientNoiseSent,
+				p.ClientNoiseReceived,
+			)
 			t.Logf("kernel network memory denied=%d", p.NetworkMemoryDenied)
 			if relay != nil {
-				t.Logf("relay connections=%d queued=%d retransmissions=%d accepted=%d; transport writers=%d", p.RelayConnections, p.RelayQueuedBytes, p.Retransmissions, p.RelayAccepted, p.TransportWriters)
+				t.Logf(
+					"relay connections=%d queued=%d retransmissions=%d accepted=%d; transport writers=%d",
+					p.RelayConnections,
+					p.RelayQueuedBytes,
+					p.Retransmissions,
+					p.RelayAccepted,
+					p.TransportWriters,
+				)
 			}
 		}
 		return p
@@ -795,7 +895,11 @@ func TestStressReconnectResources(t *testing.T) {
 		waitFor(t, "failed stress sockets closed", func() bool {
 			return backendCount.active.Load() == 0 && localCount.active.Load() == 0 && httpCount.active.Load() == 0
 		})
-		waitFor(t, "failed stress goroutines stopped", func() bool { return runtime.NumGoroutine() <= initialGoroutines+4 })
+		waitFor(
+			t,
+			"failed stress goroutines stopped",
+			func() bool { return runtime.NumGoroutine() <= initialGoroutines+4 },
+		)
 		closed := sample("closed", report.CompletedRounds, true)
 		if closed.TransportWriters != 0 || closed.RelayConnections != 0 || closed.RelayQueuedBytes != 0 ||
 			closed.Sessions != 0 || closed.Streams != 0 || closed.PendingBytes != 0 || closed.Nonces != 0 ||
@@ -810,7 +914,12 @@ func TestStressReconnectResources(t *testing.T) {
 		// Completed cohorts leave kernel TIME_WAIT entries. Wait between cohorts,
 		// never inside a live load/retention phase or by reducing active streams.
 		sample(phase, round, false)
-		t.Logf("%s: waiting %s for completed TCP cohort TIME_WAIT; active target remains %d", phase, cohortSettle, clients*streams)
+		t.Logf(
+			"%s: waiting %s for completed TCP cohort TIME_WAIT; active target remains %d",
+			phase,
+			cohortSettle,
+			clients*streams,
+		)
 		timer := time.NewTimer(cohortSettle)
 		defer timer.Stop()
 		select {
@@ -843,7 +952,11 @@ func TestStressReconnectResources(t *testing.T) {
 				conns = append(conns, c)
 			}
 		}
-		stressWaitFor(t, "all stress backend streams", func() bool { return backendCount.active.Load() == int64(clients*streams) })
+		stressWaitFor(
+			t,
+			"all stress backend streams",
+			func() bool { return backendCount.active.Load() == int64(clients*streams) },
+		)
 		report.BackendSocketsBound += stressBoundBackendSockets(t, server, report.SocketBufferBytes, clients*streams)
 		if barrierPrefix != "" {
 			for _, c := range conns {
@@ -861,7 +974,10 @@ func TestStressReconnectResources(t *testing.T) {
 		for _, c := range conns {
 			_ = c.SetDeadline(roundEnd.Add(drainBudget))
 		}
-		report.LoadWindows = append(report.LoadWindows, stressLoadWindow{round, clients * streams, ready.UnixNano(), roundEnd.UnixNano()})
+		report.LoadWindows = append(
+			report.LoadWindows,
+			stressLoadWindow{round, clients * streams, ready.UnixNano(), roundEnd.UnixNano()},
+		)
 		abort := make(chan struct{})
 		churnDone := make(chan struct{})
 		var retainedClients, retainedRemotes []*session
@@ -955,7 +1071,10 @@ func TestStressReconnectResources(t *testing.T) {
 			}(i, c)
 		}
 		done := make(chan struct{})
-		go func() { workers.Wait(); close(done) }()
+		go func() {
+			workers.Wait()
+			close(done)
+		}()
 		ticker := time.NewTicker(100 * time.Millisecond)
 		lastProgress, progressAt, dumped := int64(-1), time.Now(), false
 	run:
@@ -975,7 +1094,9 @@ func TestStressReconnectResources(t *testing.T) {
 					if progress != lastProgress {
 						lastProgress, progressAt = progress, time.Now()
 					}
-					if !dumped && (time.Since(progressAt) > 2*recordInterval+5*time.Second || os.Getenv("SGATE_STRESS_SNAPSHOT") == "1" && time.Since(start) > 3*time.Second) {
+					if !dumped &&
+						(time.Since(progressAt) > 2*recordInterval+5*time.Second ||
+							os.Getenv("SGATE_STRESS_SNAPSHOT") == "1" && time.Since(start) > 3*time.Second) {
 						dumped = true
 						if path := os.Getenv("SGATE_STRESS_REPORT"); path != "" {
 							buf := make([]byte, 8<<20)
@@ -1041,7 +1162,11 @@ func TestStressReconnectResources(t *testing.T) {
 			})
 		}
 		if relay != nil {
-			waitFor(t, "old weak relay connections released", func() bool { return relay.active.Load() == int64(clients) })
+			waitFor(
+				t,
+				"old weak relay connections released",
+				func() bool { return relay.active.Load() == int64(clients) },
+			)
 		}
 		idle := sample("idle", round, true)
 		if idle.TransportWriters > 2*clients {
@@ -1078,7 +1203,8 @@ func TestStressReconnectResources(t *testing.T) {
 			report.VerifiedUploadBytes = uploadReceived.Load()
 			report.VerifiedDownloadBytes = downloadReceived.Load()
 		}
-		if round == rounds && (opts.NoiseInterval > 0 || opts.NoiseIntervalMin > 0) && (idle.ServerNoiseReceived == 0 || idle.ClientNoiseReceived == 0) {
+		if round == rounds && (opts.NoiseInterval > 0 || opts.NoiseIntervalMin > 0) &&
+			(idle.ServerNoiseReceived == 0 || idle.ClientNoiseReceived == 0) {
 			t.Fatal("stress did not actually receive padding in both directions")
 		}
 		if lifecycle && round < rounds {
@@ -1140,7 +1266,11 @@ func TestStressReconnectResources(t *testing.T) {
 	waitFor(t, "stress sockets closed", func() bool {
 		return backendCount.active.Load() == 0 && localCount.active.Load() == 0 && httpCount.active.Load() == 0
 	})
-	waitFor(t, "stress goroutines stopped", func() bool { return runtime.NumGoroutine() <= initialGoroutines+4 })
+	waitFor(
+		t,
+		"stress goroutines stopped",
+		func() bool { return runtime.NumGoroutine() <= initialGoroutines+4 },
+	)
 	closed := sample("closed", report.CompletedRounds, true)
 	if closed.TransportWriters != 0 || closed.RelayConnections != 0 || closed.RelayQueuedBytes != 0 {
 		t.Fatal("transport writer, relay connection or queued bytes survived shutdown")
@@ -1148,15 +1278,29 @@ func TestStressReconnectResources(t *testing.T) {
 	if relay != nil && closed.Retransmissions == 0 {
 		t.Fatal("no simulated packet retransmission was injected")
 	}
-	if closed.ClientSessions != 0 || closed.ClientStreams != 0 || closed.ClientPendingBytes != 0 || closed.Sessions != 0 || closed.Streams != 0 || closed.PendingBytes != 0 {
+	if closed.ClientSessions != 0 || closed.ClientStreams != 0 || closed.ClientPendingBytes != 0 ||
+		closed.Sessions != 0 ||
+		closed.Streams != 0 ||
+		closed.PendingBytes != 0 {
 		t.Fatal("session resources survived shutdown")
 	}
 	if initialDescriptors >= 0 && closed.FileDescriptors > initialDescriptors+4 {
 		t.Fatalf("descriptors leaked after shutdown: %d -> %d", initialDescriptors, closed.FileDescriptors)
 	}
 	if duplex {
-		t.Logf("completed: rounds=%d disconnects=%d verified upload=%d download=%d", report.CompletedRounds, report.Disconnects, report.VerifiedUploadBytes, report.VerifiedDownloadBytes)
+		t.Logf(
+			"completed: rounds=%d disconnects=%d verified upload=%d download=%d",
+			report.CompletedRounds,
+			report.Disconnects,
+			report.VerifiedUploadBytes,
+			report.VerifiedDownloadBytes,
+		)
 	} else {
-		t.Logf("completed: rounds=%d disconnects=%d bytes/direction=%d", report.CompletedRounds, report.Disconnects, report.VerifiedBytesPerDirection)
+		t.Logf(
+			"completed: rounds=%d disconnects=%d bytes/direction=%d",
+			report.CompletedRounds,
+			report.Disconnects,
+			report.VerifiedBytesPerDirection,
+		)
 	}
 }

@@ -116,7 +116,13 @@ func TestResumeConfirmationControlsRetention(t *testing.T) {
 	for _, mode := range []string{"abandoned", "confirmed", "silent", "control", "fragmented"} {
 		t.Run(mode, func(t *testing.T) {
 			key := bytes.Repeat([]byte{42}, 32)
-			s, err := NewServer(ServerConfig{Key: key, Password: testPassword, Target: "127.0.0.1:1", SessionTTL: time.Second, Options: testOptions()})
+			s, err := NewServer(ServerConfig{
+				Key:        key,
+				Password:   testPassword,
+				Target:     "127.0.0.1:1",
+				SessionTTL: time.Second,
+				Options:    testOptions(),
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -132,7 +138,12 @@ func TestResumeConfirmationControlsRetention(t *testing.T) {
 			s.mu.Lock()
 			s.sessions[id] = e
 			s.mu.Unlock()
-			c, err := NewClient(ClientConfig{Key: key, Password: testPassword, URL: "ws" + strings.TrimPrefix(h.URL, "http") + "/tunnel", Options: testOptions()})
+			c, err := NewClient(ClientConfig{
+				Key:      key,
+				Password: testPassword,
+				URL:      "ws" + strings.TrimPrefix(h.URL, "http") + "/tunnel",
+				Options:  testOptions(),
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -207,7 +218,12 @@ func TestResumeConfirmationControlsRetention(t *testing.T) {
 						t.Error("insufficient unconfirmed progress")
 					}
 				}()
-				stressWaitForBudget(t, "active unconfirmed resume expires at original deadline", 1500*time.Millisecond, func() bool { return sessionReleased(old) })
+				stressWaitForBudget(
+					t,
+					"active unconfirmed resume expires at original deadline",
+					1500*time.Millisecond,
+					func() bool { return sessionReleased(old) },
+				)
 				s.mu.Lock()
 				after := e.idle
 				s.mu.Unlock()
@@ -217,24 +233,49 @@ func TestResumeConfirmationControlsRetention(t *testing.T) {
 				return
 			}
 			if mode == "silent" {
-				stressWaitForBudget(t, "unconfirmed resume expires at original deadline", 1500*time.Millisecond, func() bool { return sessionReleased(old) })
+				stressWaitForBudget(
+					t,
+					"unconfirmed resume expires at original deadline",
+					1500*time.Millisecond,
+					func() bool { return sessionReleased(old) },
+				)
 				return
 			}
 			if mode == "confirmed" {
 				if err := ws.WriteMessage(websocket.BinaryMessage, codec.seal((frame{op: opAck, ack: 1}).encode())); err != nil {
 					t.Fatal(err)
 				}
-				waitFor(t, "confirmed peer acknowledgement", func() bool { old.mu.Lock(); defer old.mu.Unlock(); return old.pendingBytes == 0 })
+				waitFor(
+					t,
+					"confirmed peer acknowledgement",
+					func() bool {
+						old.mu.Lock()
+						defer old.mu.Unlock()
+						return old.pendingBytes == 0
+					},
+				)
 				// Confirmation must disarm the original deadline, including when
 				// its timer callback races a successfully authenticated frame.
 				time.Sleep(max(time.Until(idle.Add(s.cfg.SessionTTL)), 0) + 100*time.Millisecond)
 				if err := ws.WriteMessage(websocket.BinaryMessage, codec.seal((frame{op: opNoise, data: []byte{1}}).encode())); err != nil {
 					t.Fatal(err)
 				}
-				waitFor(t, "confirmed resume survives original deadline", func() bool { old.mu.Lock(); defer old.mu.Unlock(); return old.noiseReceived > 0 })
+				waitFor(
+					t,
+					"confirmed resume survives original deadline",
+					func() bool {
+						old.mu.Lock()
+						defer old.mu.Unlock()
+						return old.noiseReceived > 0
+					},
+				)
 			}
 			ws.Close()
-			waitFor(t, "resume handler returned", func() bool { s.mu.Lock(); defer s.mu.Unlock(); return !e.inUse })
+			waitFor(t, "resume handler returned", func() bool {
+				s.mu.Lock()
+				defer s.mu.Unlock()
+				return !e.inUse
+			})
 			s.mu.Lock()
 			after := e.idle
 			s.mu.Unlock()

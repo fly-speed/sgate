@@ -59,7 +59,10 @@ func (o *configNoiseObserver) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 			headers[k] = v
 		}
 	}
-	up, response, err := (&websocket.Dialer{TLSClientConfig: o.tlsConfig, HandshakeTimeout: time.Second}).Dial(o.target, headers)
+	up, response, err := (&websocket.Dialer{TLSClientConfig: o.tlsConfig, HandshakeTimeout: time.Second}).Dial(
+		o.target,
+		headers,
+	)
 	if err != nil {
 		if response != nil {
 			defer response.Body.Close()
@@ -105,7 +108,11 @@ func (o *configNoiseObserver) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	o.sessions[r.Header.Get("X-Sgate-Session")] = true
 	o.wg.Add(2)
 	o.mu.Unlock()
-	defer func() { o.mu.Lock(); delete(o.pairs, down); o.mu.Unlock() }()
+	defer func() {
+		o.mu.Lock()
+		delete(o.pairs, down)
+		o.mu.Unlock()
+	}()
 	// Masking is handled by Gorilla. Ciphertext, crypto counters and application
 	// frame ordering are unchanged; control replies belong to each relay leg.
 	done := make(chan struct{}, 2)
@@ -114,10 +121,20 @@ func (o *configNoiseObserver) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		if direction == 1 {
 			src, dst = up, down
 		}
-		crypt := newCodec(o.key, r.Header.Get("X-Sgate-Session"), r.Header.Get("X-Sgate-Nonce"), response.Header.Get("X-Sgate-Nonce"), direction == 1)
+		crypt := newCodec(
+			o.key,
+			r.Header.Get("X-Sgate-Session"),
+			r.Header.Get("X-Sgate-Nonce"),
+			response.Header.Get("X-Sgate-Nonce"),
+			direction == 1,
+		)
 		go func(direction int, src, dst *websocket.Conn, crypt *codec) {
 			defer o.wg.Done()
-			defer func() { src.Close(); dst.Close(); done <- struct{}{} }()
+			defer func() {
+				src.Close()
+				dst.Close()
+				done <- struct{}{}
+			}()
 			for {
 				typ, data, err := src.ReadMessage()
 				if err != nil {
@@ -184,7 +201,11 @@ func (o *configNoiseObserver) disconnect() {
 		b.Close()
 	}
 }
-func (o *configNoiseObserver) active() int { o.mu.Lock(); defer o.mu.Unlock(); return len(o.pairs) }
+func (o *configNoiseObserver) active() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return len(o.pairs)
+}
 
 func configBinaryStart(t *testing.T, binary string, args ...string) func() {
 	t.Helper()
@@ -256,7 +277,14 @@ func TestConfigBinaryNoiseReconnect(t *testing.T) {
 		t.Skip("set SGATE_CONFIG_CLIENT_BINARY and SGATE_CONFIG_SERVER_BINARY to matching builds")
 	}
 	for _, tlsMode := range []bool{false, true} {
-		for _, mode := range []string{"file", "override", "disable-client", "disable-server", "disable-both", "file-production"} {
+		for _, mode := range []string{
+			"file",
+			"override",
+			"disable-client",
+			"disable-server",
+			"disable-both",
+			"file-production",
+		} {
 			t.Run(fmt.Sprintf("tls=%t/%s", tlsMode, mode), func(t *testing.T) {
 				noiseRecoveryResourceCheck(t)
 				trafficDuration := 2 * time.Second
@@ -279,7 +307,11 @@ func TestConfigBinaryNoiseReconnect(t *testing.T) {
 				if e != nil {
 					t.Fatal(e)
 				}
-				if e = os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificate.Certificate[0]}), 0600); e != nil {
+				if e = os.WriteFile(
+					certPath,
+					pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificate.Certificate[0]}),
+					0600,
+				); e != nil {
 					t.Fatal(e)
 				}
 				if e = os.WriteFile(keyTLSPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: private}), 0600); e != nil {
@@ -310,13 +342,25 @@ func TestConfigBinaryNoiseReconnect(t *testing.T) {
 							defer c.Close()
 							defer backendConns.Delete(c)
 							c.SetDeadline(time.Now().Add(trafficDuration + 15*time.Second))
-							results <- stressDuplex(c, uint64(i), time.Now().Add(trafficDuration), 1024, true, &downSent, &upReceived, 20*time.Millisecond)
+							results <- stressDuplex(
+								c,
+								uint64(i),
+								time.Now().Add(trafficDuration),
+								1024,
+								true,
+								&downSent,
+								&upReceived,
+								20*time.Millisecond,
+							)
 						}(c, i)
 					}
 				}()
 				cleanupBackend := func() {
 					backend.Close()
-					backendConns.Range(func(k, v any) bool { k.(net.Conn).Close(); return true })
+					backendConns.Range(func(k, v any) bool {
+						k.(net.Conn).Close()
+						return true
+					})
 					backendWG.Wait()
 				}
 				t.Cleanup(cleanupBackend)
@@ -325,8 +369,21 @@ func TestConfigBinaryNoiseReconnect(t *testing.T) {
 				if tlsMode {
 					scheme = "wss"
 				}
-				expected := Options{NoiseIntervalMin: 20 * time.Millisecond, NoiseIntervalMax: 60 * time.Millisecond, NoiseMinBytes: 1024, NoiseMaxBytes: 4096}
-				observer := &configNoiseObserver{pairs: make(map[*websocket.Conn]*websocket.Conn), key: key, target: scheme + "://" + serverAddr + "/tunnel", tlsConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}, expected: [2]Options{expected, expected}, sessions: make(map[string]bool), byGeneration: make(map[int][2]int)}
+				expected := Options{
+					NoiseIntervalMin: 20 * time.Millisecond,
+					NoiseIntervalMax: 60 * time.Millisecond,
+					NoiseMinBytes:    1024,
+					NoiseMaxBytes:    4096,
+				}
+				observer := &configNoiseObserver{
+					pairs:        make(map[*websocket.Conn]*websocket.Conn),
+					key:          key,
+					target:       scheme + "://" + serverAddr + "/tunnel",
+					tlsConfig:    &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12},
+					expected:     [2]Options{expected, expected},
+					sessions:     make(map[string]bool),
+					byGeneration: make(map[int][2]int),
+				}
 				for i := range observer.sizes {
 					observer.sizes[i] = make(map[int]bool)
 				}
@@ -337,10 +394,24 @@ func TestConfigBinaryNoiseReconnect(t *testing.T) {
 				} else {
 					relay.Start()
 				}
-				closeRelay := func() { observer.disconnect(); relay.Close(); observer.wg.Wait() }
+				closeRelay := func() {
+					observer.disconnect()
+					relay.Close()
+					observer.wg.Wait()
+				}
 				t.Cleanup(closeRelay)
 				common := func() map[string]string {
-					return map[string]string{"key-file": keyPath, "password": testPassword, "heartbeat": "1s", "heartbeat-timeout": "30s", "noise-interval": "0", "noise-interval-min": "20ms", "noise-interval-max": "60ms", "noise-min-bytes": "1024", "noise-max-bytes": "4096"}
+					return map[string]string{
+						"key-file":           keyPath,
+						"password":           testPassword,
+						"heartbeat":          "1s",
+						"heartbeat-timeout":  "30s",
+						"noise-interval":     "0",
+						"noise-interval-min": "20ms",
+						"noise-interval-max": "60ms",
+						"noise-min-bytes":    "1024",
+						"noise-max-bytes":    "4096",
+					}
 				}
 				sv, cv := common(), common()
 				sv["listen"], sv["target"] = serverAddr, backend.Addr().String()
@@ -354,18 +425,37 @@ func TestConfigBinaryNoiseReconnect(t *testing.T) {
 						v["noise-interval-min"], v["noise-interval-max"], v["noise-max-bytes"] = "1s", "3s", "10240"
 					}
 					for i := range observer.expected {
-						observer.expected[i] = Options{NoiseIntervalMin: time.Second, NoiseIntervalMax: 3 * time.Second, NoiseMinBytes: 1024, NoiseMaxBytes: 10240}
+						observer.expected[i] = Options{
+							NoiseIntervalMin: time.Second,
+							NoiseIntervalMax: 3 * time.Second,
+							NoiseMinBytes:    1024,
+							NoiseMaxBytes:    10240,
+						}
 					}
 				}
 				sp, cp := configBinaryFile(t, "server.conf", sv), configBinaryFile(t, "client.conf", cv)
 				sa, ca := []string{"-config", sp}, []string{"-config", cp}
 				switch mode {
 				case "override":
-					flags := []string{"-noise-interval-min", "5ms", "-noise-interval-max", "15ms", "-noise-min-bytes", "128", "-noise-max-bytes", "512"}
+					flags := []string{
+						"-noise-interval-min",
+						"5ms",
+						"-noise-interval-max",
+						"15ms",
+						"-noise-min-bytes",
+						"128",
+						"-noise-max-bytes",
+						"512",
+					}
 					sa = append(sa, flags...)
 					ca = append(ca, flags...)
 					for i := range observer.expected {
-						observer.expected[i] = Options{NoiseIntervalMin: 5 * time.Millisecond, NoiseIntervalMax: 15 * time.Millisecond, NoiseMinBytes: 128, NoiseMaxBytes: 512}
+						observer.expected[i] = Options{
+							NoiseIntervalMin: 5 * time.Millisecond,
+							NoiseIntervalMax: 15 * time.Millisecond,
+							NoiseMinBytes:    128,
+							NoiseMaxBytes:    512,
+						}
 					}
 				case "disable-client", "disable-server", "disable-both":
 					flags := []string{"-noise-interval-min", "0", "-noise-interval-max", "0"}
@@ -412,7 +502,16 @@ func TestConfigBinaryNoiseReconnect(t *testing.T) {
 				}
 				for i, c := range apps {
 					go func(i int, c net.Conn) {
-						results <- stressDuplex(c, uint64(i), time.Now().Add(trafficDuration), 1024, false, &upSent, &downReceived, 20*time.Millisecond)
+						results <- stressDuplex(
+							c,
+							uint64(i),
+							time.Now().Add(trafficDuration),
+							1024,
+							false,
+							&upSent,
+							&downReceived,
+							20*time.Millisecond,
+						)
 					}(i, c)
 				}
 				for n := 0; n < 3; n++ {
@@ -468,7 +567,19 @@ func TestConfigBinaryNoiseReconnect(t *testing.T) {
 				for _, e := range observer.errors {
 					t.Error(e)
 				}
-				t.Logf("noise up/down=%v sizes=%d/%d upgrades=%d upload=%d download=%d ACK=%v seq=%v generations=%v", observer.counts, len(observer.sizes[0]), len(observer.sizes[1]), observer.upgrades, upReceived.Load(), downReceived.Load(), observer.ack, observer.sent, observer.byGeneration)
+				t.Logf(
+					("noise up/down=%v sizes=%d/%d upgrades=%d upload=%d download=%d ACK=%v seq=%v " +
+						"generations=%v"),
+					observer.counts,
+					len(observer.sizes[0]),
+					len(observer.sizes[1]),
+					observer.upgrades,
+					upReceived.Load(),
+					downReceived.Load(),
+					observer.ack,
+					observer.sent,
+					observer.byGeneration,
+				)
 				observer.mu.Unlock()
 				stopClient()
 				stopServer()

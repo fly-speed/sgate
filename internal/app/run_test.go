@@ -23,7 +23,15 @@ import (
 
 func appFlags(role string) *flag.FlagSet {
 	fs := flag.NewFlagSet(role, flag.ContinueOnError)
-	for _, v := range []struct{ n, v string }{{"listen", "127.0.0.1:0"}, {"key-file", ""}, {"password", ""}, {"admin-config", ""}} {
+	for _, v := range []struct{ n, v string }{
+		{"listen", "127.0.0.1:0"},
+		{"key-file", ""},
+		{"password", ""},
+		{
+			"admin-config",
+			"",
+		},
+	} {
 		fs.String(v.n, v.v, "")
 	}
 	fs.Int("max-streams", 128, "")
@@ -153,7 +161,17 @@ func TestApplyRestartAndBindRollback(t *testing.T) {
 	}
 }
 func TestApplyKeepsCLIOverrideAndRejectsBadCandidate(t *testing.T) {
-	c := newController(t, "client", "server = ws://127.0.0.1:1/tunnel\nnoise-interval-min = 1s\nnoise-interval-max = 3s\n", "-noise-interval-min", "0", "-noise-interval-max", "0")
+	c := newController(
+		t,
+		"client",
+		("server = ws://127.0.0.1:1/tunnel\n" +
+			"noise-interval-min = 1s\n" +
+			"noise-interval-max = 3s\n"),
+		"-noise-interval-min",
+		"0",
+		"-noise-interval-max",
+		"0",
+	)
 	setConfig(t, c, "noise-interval-min", "2s")
 	if e := c.apply(); e != nil {
 		t.Fatal(e)
@@ -183,7 +201,10 @@ func TestManagedClientServerDuplexAndStats(t *testing.T) {
 					if e != nil {
 						return
 					}
-					go func() { defer conn.Close(); io.Copy(conn, conn) }()
+					go func() {
+						defer conn.Close()
+						io.Copy(conn, conn)
+					}()
 				}
 			}()
 			serverText := "target = " + backend.Addr().String() + "\n"

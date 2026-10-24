@@ -36,7 +36,13 @@ func TestFrameValidation(t *testing.T) {
 	if err != nil || f.seq != 1 || string(f.data) != "hello" {
 		t.Fatal(f, err)
 	}
-	for _, bad := range []frame{{op: 99}, {op: opAck, seq: 1}, {op: opOpen, seq: 1}, {op: opData, seq: 1, stream: 1}, {op: opFin, seq: 1, stream: 1, data: []byte{1}}} {
+	for _, bad := range []frame{
+		{op: 99},
+		{op: opAck, seq: 1},
+		{op: opOpen, seq: 1},
+		{op: opData, seq: 1, stream: 1},
+		{op: opFin, seq: 1, stream: 1, data: []byte{1}},
+	} {
 		if _, err := decodeFrame(bad.encode()); err == nil {
 			t.Fatalf("accepted malformed frame: %+v", bad)
 		}

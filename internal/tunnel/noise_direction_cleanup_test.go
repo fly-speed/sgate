@@ -19,7 +19,14 @@ func TestNoiseDirectionTimersReleaseOnExpiry(t *testing.T) {
 				if disabled != "client" && disabled != "both" {
 					clientOpts.NoiseIntervalMin, clientOpts.NoiseIntervalMax = time.Hour, 2*time.Hour
 				}
-				f := newRecoveryFixtureOptions(t, 200*time.Millisecond, 250*time.Millisecond, tlsMode, serverOpts, func(c *ClientConfig) { c.Options = clientOpts })
+				f := newRecoveryFixtureOptions(
+					t,
+					200*time.Millisecond,
+					250*time.Millisecond,
+					tlsMode,
+					serverOpts,
+					func(c *ClientConfig) { c.Options = clientOpts },
+				)
 				app := f.dial()
 				if e := exchange(app, []byte("timer-cleanup")); e != nil {
 					t.Fatal(e)
@@ -43,7 +50,11 @@ func TestNoiseDirectionTimersReleaseOnExpiry(t *testing.T) {
 						t.Fatal("disabled or hour-long pending noise timer fired")
 					}
 				}
-				waitFor(t, "all application sockets released", func() bool { return f.backendCount.active.Load() == 0 && f.localCount.active.Load() == 0 })
+				waitFor(
+					t,
+					"all application sockets released",
+					func() bool { return f.backendCount.active.Load() == 0 && f.localCount.active.Load() == 0 },
+				)
 			})
 		}
 	}

@@ -64,40 +64,15 @@ func sameOrigin(r *http.Request) bool {
 		if r.TLS != nil {
 			scheme = "https"
 		}
-		return e == nil && u.Host == r.Host && u.Scheme == scheme && u.User == nil && u.Path == "" && u.RawQuery == "" && u.Fragment == ""
+		return e == nil && u.Host == r.Host && u.Scheme == scheme && u.User == nil && u.Path == "" &&
+			u.RawQuery == "" &&
+			u.Fragment == ""
 	}
 	return true
 }
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("X-Frame-Options", "DENY")
-	w.Header().Set("Referrer-Policy", "no-referrer")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
-	if r.URL.Path == "/" || r.URL.Path == "/assets/app.css" || r.URL.Path == "/assets/app.js" {
-		if r.Method != "GET" {
-			w.WriteHeader(405)
-			return
-		}
-		name := "index.html"
-		typ := "text/html; charset=utf-8"
-		if r.URL.Path != "/" {
-			name = strings.TrimPrefix(r.URL.Path, "/assets/")
-			if name == "app.css" {
-				typ = "text/css; charset=utf-8"
-			} else {
-				typ = "text/javascript; charset=utf-8"
-			}
-		}
-		// Read from disk on every request so interface updates need no rebuild
-		// or proxy restart. Only these explicit routes expose files.
-		b, e := regularRead(filepath.Join(h.cfg.WebDir, name), 1<<20)
-		if e != nil {
-			problem(w, 503, "管理界面文件不可读取，请检查 web-dir")
-			return
-		}
-		w.Header().Set("Content-Type", typ)
-		_, _ = w.Write(b)
+	setSecurityHeaders(w)
+	if h.serveAsset(w, r) {
 		return
 	}
 	if !strings.HasPrefix(r.URL.Path, "/api/") {
@@ -109,15 +84,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == "/api/status" && r.Method == "GET" {
-		h.mu.Lock()
-		defer h.mu.Unlock()
-		_, ae := loadAccount(h.cfg.UsersFile)
-		s, e := h.readSession(r)
-		v := map[string]any{"setup_required": os.IsNotExist(ae), "authenticated": e == nil, "role": h.view.Role, "session_timeout_seconds": h.cfg.SessionTimeout.Seconds(), "setup_token_file": filepath.Base(h.cfg.SetupTokenFile)}
-		if e == nil {
-			v["username"], v["csrf"], v["expires"] = s.Username, s.CSRF, s.Expires
-		}
-		reply(w, 200, v)
+		h.getStatus(w, r)
 		return
 	}
 	if (r.URL.Path == "/api/login" || r.URL.Path == "/api/setup") && r.Method == "POST" {
@@ -131,7 +98,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		problem(w, 401, "登录已过期，请重新登录")
 		return
 	}
-	if r.Method != "GET" && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-CSRF-Token")), []byte(s.CSRF)) != 1 {
+	if r.Method != "GET" &&
+		subtle.ConstantTimeCompare([]byte(r.Header.Get("X-CSRF-Token")), []byte(s.CSRF)) != 1 {
 		problem(w, 403, "请求验证失败，请刷新页面")
 		return
 	}
@@ -143,43 +111,144 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/api/config" && r.Method == "PUT":
 		h.putConfig(w, r)
 	case r.URL.Path == "/api/apply" && r.Method == "POST":
-		h.mu.Lock()
-		defer h.mu.Unlock()
-		if !h.authorizeMutation(w, r) {
-			return
-		}
-		if h.view.Apply == nil {
-			problem(w, 503, "代理重启不可用")
-			return
-		}
-		if e := h.view.Apply(); e != nil {
-			problem(w, 409, e.Error())
-			return
-		}
-		b, e := regularRead(h.view.AppConfigPath, 1<<20)
-		if e == nil {
-			h.startupRevision = digest(b)
-		}
-		reply(w, 200, map[string]any{"applied": true})
+		h.applyProxy(w, r)
+	case r.URL.Path == "/api/restart-service" && r.Method == "POST":
+		h.restartService(w, r)
 	case r.URL.Path == "/api/logout" && r.Method == "POST":
-		h.mu.Lock()
-		defer h.mu.Unlock()
-		if !h.authorizeMutation(w, r) {
-			return
-		}
-		if c, e := r.Cookie(h.cookie); e == nil {
-			if e = os.Remove(h.sessionPath(c.Value)); e != nil && !os.IsNotExist(e) {
-				problem(w, 500, "退出登录失败")
-				return
-			}
-		}
-		h.clearCookie(w, r)
-		reply(w, 200, map[string]bool{"ok": true})
+		h.logout(w, r)
 	case r.URL.Path == "/api/account" && r.Method == "PUT":
 		h.changeAccount(w, r, s)
 	default:
 		problem(w, 405, "请求方法或接口不存在")
 	}
+}
+
+func setSecurityHeaders(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set(
+		"Content-Security-Policy",
+		("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src " +
+			"'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"),
+	)
+}
+
+// serveAsset 只暴露明确列出的页面文件，每次从磁盘读取以支持热更新。
+func (h *Handler) serveAsset(w http.ResponseWriter, r *http.Request) bool {
+	if !(r.URL.Path == "/" || r.URL.Path == "/assets/app.css" || r.URL.Path == "/assets/app.js") {
+		return false
+	}
+	if r.Method != "GET" {
+		w.WriteHeader(405)
+		return true
+	}
+	name := "index.html"
+	typ := "text/html; charset=utf-8"
+	if r.URL.Path != "/" {
+		name = strings.TrimPrefix(r.URL.Path, "/assets/")
+		if name == "app.css" {
+			typ = "text/css; charset=utf-8"
+		} else {
+			typ = "text/javascript; charset=utf-8"
+		}
+	}
+	// Read from disk on every request so interface updates need no rebuild
+	// or proxy restart. Only these explicit routes expose files.
+	b, e := regularRead(filepath.Join(h.cfg.WebDir, name), 1<<20)
+	if e != nil {
+		problem(w, 503, "管理界面文件不可读取，请检查 web-dir")
+		return true
+	}
+	w.Header().Set("Content-Type", typ)
+	_, _ = w.Write(b)
+	return true
+}
+
+func (h *Handler) getStatus(w http.ResponseWriter, r *http.Request) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	_, ae := loadAccount(h.cfg.UsersFile)
+	s, e := h.readSession(r)
+	v := map[string]any{
+		"setup_required":          os.IsNotExist(ae),
+		"authenticated":           e == nil,
+		"role":                    h.view.Role,
+		"session_timeout_seconds": h.cfg.SessionTimeout.Seconds(),
+		"setup_token_file":        filepath.Base(h.cfg.SetupTokenFile),
+	}
+	if e == nil {
+		v["username"], v["csrf"], v["expires"] = s.Username, s.CSRF, s.Expires
+	}
+	reply(w, 200, v)
+	return
+}
+
+func (h *Handler) applyProxy(w http.ResponseWriter, r *http.Request) {
+	// 等待锁期间会话可能已经到期，因此提交前再次验证会话和 CSRF。
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !h.authorizeMutation(w, r) {
+		return
+	}
+	if h.view.Apply == nil {
+		problem(w, 503, "代理重启不可用")
+		return
+	}
+	if e := h.view.Apply(); e != nil {
+		problem(w, 409, e.Error())
+		return
+	}
+	b, e := regularRead(h.view.AppConfigPath, 1<<20)
+	if e == nil {
+		h.startupRevision = digest(b)
+	}
+	reply(w, 200, map[string]any{"applied": true})
+}
+
+func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !h.authorizeMutation(w, r) {
+		return
+	}
+	if c, e := r.Cookie(h.cookie); e == nil {
+		if e = os.Remove(h.sessionPath(c.Value)); e != nil && !os.IsNotExist(e) {
+			problem(w, 500, "退出登录失败")
+			return
+		}
+	}
+	h.clearCookie(w, r)
+	reply(w, 200, map[string]bool{"ok": true})
+}
+
+func (h *Handler) restartService(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		ExpectedPID int `json:"expected_pid"`
+	}
+	if !decode(w, r, &request, 256) {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !h.authorizeMutation(w, r) {
+		return
+	}
+	if request.ExpectedPID <= 0 {
+		problem(w, 400, "请刷新配置后使用当前进程标识发起重启")
+		return
+	}
+	if h.view.RestartService == nil {
+		problem(w, 409, "当前启动方式不支持 acl_master 整服务重启")
+		return
+	}
+	if err := h.view.RestartService(h.cfg.MasterCtl, h.cfg.MasterSocket, request.ExpectedPID); err != nil {
+		problem(w, 409, err.Error())
+		return
+	}
+	// 此处只确认命令已启动，前端必须等到 PID 改变且登录恢复才能报告成功。
+	reply(w, http.StatusAccepted, map[string]bool{"restart_requested": true})
 }
 
 // Call with mu held immediately before a mutation. Reading a request body or
@@ -225,7 +294,8 @@ func (h *Handler) authenticate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		token, e := regularRead(h.cfg.SetupTokenFile, 256)
-		if e != nil || subtle.ConstantTimeCompare([]byte(strings.TrimSpace(string(token))), []byte(input.SetupToken)) != 1 {
+		if e != nil ||
+			subtle.ConstantTimeCompare([]byte(strings.TrimSpace(string(token))), []byte(input.SetupToken)) != 1 {
 			problem(w, 403, "初始化令牌无效")
 			return
 		}
@@ -249,7 +319,18 @@ func (h *Handler) authenticate(w http.ResponseWriter, r *http.Request) {
 	}
 }
 func (h *Handler) clearCookie(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{Name: h.cookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(
+		w,
+		&http.Cookie{
+			Name:     h.cookie,
+			Value:    "",
+			Path:     "/",
+			MaxAge:   -1,
+			HttpOnly: true,
+			Secure:   r.TLS != nil,
+			SameSite: http.SameSiteStrictMode,
+		},
+	)
 }
 func (h *Handler) changeAccount(w http.ResponseWriter, r *http.Request, s loginSession) {
 	select {
@@ -348,7 +429,20 @@ func (h *Handler) getConfig(w http.ResponseWriter) {
 		problem(w, 500, "无法读取代理配置")
 		return
 	}
-	v := map[string]any{"content": redactConfig(b), "revision": digest(b), "requires_restart": digest(b) != h.startupRevision, "path": h.view.AppConfigPath, "role": h.view.Role, "password_placeholder": secretMarker}
+	fields, e := configFields(redactConfig(b))
+	if e != nil {
+		problem(w, 500, "无法生成配置表单："+e.Error())
+		return
+	}
+	v := map[string]any{
+		"fields":               fields,
+		"content":              redactConfig(b),
+		"revision":             digest(b),
+		"requires_restart":     digest(b) != h.startupRevision,
+		"path":                 h.view.AppConfigPath,
+		"role":                 h.view.Role,
+		"password_placeholder": secretMarker,
+	}
 	if h.view.Runtime != nil {
 		v["runtime"] = h.view.Runtime()
 	}
@@ -356,9 +450,10 @@ func (h *Handler) getConfig(w http.ResponseWriter) {
 }
 func (h *Handler) putConfig(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		Content  string `json:"content"`
-		Revision string `json:"revision"`
-		Apply    bool   `json:"apply"`
+		Content  string            `json:"content"`
+		Fields   map[string]string `json:"fields"`
+		Revision string            `json:"revision"`
+		Apply    bool              `json:"apply"`
 	}
 	if !decode(w, r, &input, 2<<20) {
 		return
@@ -380,6 +475,17 @@ func (h *Handler) putConfig(w http.ResponseWriter, r *http.Request) {
 	if input.Revision == "" || input.Revision != digest(current) {
 		problem(w, 409, "配置已被其他操作修改，请重新加载后再编辑")
 		return
+	}
+	if input.Fields != nil {
+		if input.Content != "" {
+			problem(w, 400, "不能同时提交表单和文件内容")
+			return
+		}
+		input.Content, e = updateConfigFields(current, input.Fields)
+		if e != nil {
+			problem(w, 400, e.Error())
+			return
+		}
 	}
 	content, e := restoreSecret(input.Content, current)
 	if e != nil {
@@ -414,6 +520,12 @@ func (h *Handler) putConfig(w http.ResponseWriter, r *http.Request) {
 		problem(w, 409, "校验期间配置发生变化，请重新加载后再编辑")
 		return
 	}
+	h.commitConfig(w, current, content, input.Apply)
+}
+
+// commitConfig 在 h.mu 持有期间执行：先备份并保存，应用失败则恢复原文件。
+func (h *Handler) commitConfig(w http.ResponseWriter, current []byte, content string, apply bool) {
+	var e error
 	if e = atomicFile(h.view.AppConfigPath+".bak", current); e != nil {
 		problem(w, 500, "无法保存配置备份")
 		return
@@ -422,7 +534,7 @@ func (h *Handler) putConfig(w http.ResponseWriter, r *http.Request) {
 		problem(w, 500, "配置保存失败")
 		return
 	}
-	if input.Apply {
+	if apply {
 		if h.view.Apply == nil {
 			problem(w, 503, "配置已保存，但代理重启不可用")
 			return
@@ -437,8 +549,13 @@ func (h *Handler) putConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		h.startupRevision = digest([]byte(content))
 	}
-	reply(w, 200, map[string]any{"revision": digest([]byte(content)), "requires_restart": !input.Apply, "applied": input.Apply})
+	reply(
+		w,
+		200,
+		map[string]any{"revision": digest([]byte(content)), "requires_restart": !apply, "applied": apply},
+	)
 }
+
 func exclusiveFile(path string, data []byte) error {
 	f, e := os.CreateTemp(filepath.Dir(path), ".sgate-account-*")
 	if e != nil {

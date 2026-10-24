@@ -58,14 +58,43 @@ func managementFor(t *testing.T, c *controller) *managementAPI {
 	if e != nil {
 		t.Fatal(e)
 	}
-	cfg := admin.Config{WebDir: webDir, Listen: "127.0.0.1:9081", UsersFile: filepath.Join(dir, "users.json"), SessionDir: filepath.Join(dir, "sessions"), SetupTokenFile: filepath.Join(dir, "setup.token"), SessionTimeout: time.Hour, MaxSessions: 128}
-	h, e := admin.New(cfg, admin.View{Role: c.role, AppConfigPath: c.path, Stats: c.stats, Validate: func(path string) error { _, e := c.load(path); return e }, Apply: c.apply, Runtime: c.status})
+	cfg := admin.Config{
+		WebDir:         webDir,
+		Listen:         "127.0.0.1:9081",
+		UsersFile:      filepath.Join(dir, "users.json"),
+		SessionDir:     filepath.Join(dir, "sessions"),
+		SetupTokenFile: filepath.Join(dir, "setup.token"),
+		SessionTimeout: time.Hour,
+		MaxSessions:    128,
+	}
+	h, e := admin.New(
+		cfg,
+		admin.View{
+			Role:          c.role,
+			AppConfigPath: c.path,
+			Stats:         c.stats,
+			Validate: func(path string) error {
+				_, e := c.load(path)
+				return e
+			},
+			Apply:   c.apply,
+			Runtime: c.status,
+		},
+	)
 	if e != nil {
 		t.Fatal(e)
 	}
 	a := &managementAPI{h: h}
 	token, _ := os.ReadFile(cfg.SetupTokenFile)
-	w := a.call("POST", "/api/setup", map[string]string{"username": "test-admin", "password": "test-management-password", "setup_token": strings.TrimSpace(string(token))})
+	w := a.call(
+		"POST",
+		"/api/setup",
+		map[string]string{
+			"username":    "test-admin",
+			"password":    "test-management-password",
+			"setup_token": strings.TrimSpace(string(token)),
+		},
+	)
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
@@ -87,7 +116,11 @@ func replaceSetting(s, key, value string) string {
 func (a *managementAPI) save(t *testing.T, edit func(string) string, want int) {
 	t.Helper()
 	v := apiObject(t, a.call("GET", "/api/config", nil))
-	w := a.call("PUT", "/api/config", map[string]any{"revision": v["revision"], "content": edit(v["content"].(string)), "apply": true})
+	w := a.call(
+		"PUT",
+		"/api/config",
+		map[string]any{"revision": v["revision"], "content": edit(v["content"].(string)), "apply": true},
+	)
 	if w.Code != want {
 		t.Fatalf("save/apply: %d want %d: %s", w.Code, want, w.Body.String())
 	}
@@ -128,10 +161,19 @@ func TestManagementRepeatedSaveRestartDuplexResources(t *testing.T) {
 					}
 					active.Add(1)
 					peers.Add(1)
-					go func() { defer peers.Done(); defer active.Add(-1); defer conn.Close(); io.Copy(conn, conn) }()
+					go func() {
+						defer peers.Done()
+						defer active.Add(-1)
+						defer conn.Close()
+						io.Copy(conn, conn)
+					}()
 				}
 			}()
-			noise := "heartbeat = 1h\nnoise-interval-min = 5ms\nnoise-interval-max = 15ms\nnoise-min-bytes = 1024\nnoise-max-bytes = 8192\n"
+			noise := ("heartbeat = 1h\n" +
+				"noise-interval-min = 5ms\n" +
+				"noise-interval-max = 15ms\n" +
+				"noise-min-bytes = 1024\n" +
+				"noise-max-bytes = 8192\n")
 			serverText := "listen = " + temporaryAddress(t) + "\ntarget = " + backend.Addr().String() + "\nsession-ttl = 100ms\n" + noise
 			ca := ""
 			scheme := "ws"
@@ -142,7 +184,19 @@ func TestManagementRepeatedSaveRestartDuplexResources(t *testing.T) {
 				scheme = "wss"
 			}
 			server := newController(t, "server", serverText)
-			client := newController(t, "client", "listen = "+temporaryAddress(t)+"\nserver = "+scheme+"://"+server.worker.listener.Addr().String()+"/tunnel\n"+ca+noise, "-noise-interval-min", "0", "-noise-interval-max", "0", "-reconnect-min", "1ms", "-reconnect-max", "5ms")
+			client := newController(
+				t,
+				"client",
+				"listen = "+temporaryAddress(t)+"\nserver = "+scheme+"://"+server.worker.listener.Addr().String()+"/tunnel\n"+ca+noise,
+				"-noise-interval-min",
+				"0",
+				"-noise-interval-max",
+				"0",
+				"-reconnect-min",
+				"1ms",
+				"-reconnect-max",
+				"5ms",
+			)
 			sa, caAPI := managementFor(t, server), managementFor(t, client)
 			exchange := func(round int) {
 				const count = 32
@@ -200,7 +254,10 @@ func TestManagementRepeatedSaveRestartDuplexResources(t *testing.T) {
 					conn.(*net.TCPConn).SetReadBuffer(4096)
 					conn.(*net.TCPConn).SetWriteBuffer(4096)
 					conn.SetDeadline(time.Now().Add(10 * time.Second))
-					go func() { conn.Write(payload); writers <- struct{}{} }()
+					go func() {
+						conn.Write(payload)
+						writers <- struct{}{}
+					}()
 				}
 				waitManaged(t, "backlogged backend admission", func() bool { return active.Load() > 0 })
 				time.Sleep(50 * time.Millisecond)
@@ -241,11 +298,14 @@ func TestManagementRepeatedSaveRestartDuplexResources(t *testing.T) {
 				}, 200)
 				releaseBacklog()
 				currentClient, currentServer := client.stats.Snapshot(), server.stats.Snapshot()
-				if currentClient.TX < priorClient.TX || currentClient.RX < priorClient.RX || currentServer.TX < priorServer.TX || currentServer.RX < priorServer.RX {
+				if currentClient.TX < priorClient.TX || currentClient.RX < priorClient.RX ||
+					currentServer.TX < priorServer.TX ||
+					currentServer.RX < priorServer.RX {
 					t.Fatal("proxy restart reset cumulative traffic")
 				}
 
-				if client.current.client.Options.NoiseIntervalMin != 0 || client.current.client.Options.NoiseIntervalMax != 0 {
+				if client.current.client.Options.NoiseIntervalMin != 0 ||
+					client.current.client.Options.NoiseIntervalMax != 0 {
 					t.Fatal("explicit CLI zero overridden by saved file")
 				}
 				for _, old := range []*instance{oldClient, oldServer} {
@@ -266,13 +326,22 @@ func TestManagementRepeatedSaveRestartDuplexResources(t *testing.T) {
 					caAPI.save(t, func(s string) string { return replaceSetting(s, "listen", occupied.Addr().String()) }, 409)
 					occupied.Close()
 					after, _ := os.ReadFile(client.path)
-					if !bytes.Equal(before, after) || client.generation != generation || client.worker.listener.Addr().String() != oldAddress {
+					if !bytes.Equal(before, after) || client.generation != generation ||
+						client.worker.listener.Addr().String() != oldAddress {
 						t.Fatal("failed apply corrupted config/generation")
 					}
 					exchange(round + 100)
 					runtime.GC()
 					runtime.ReadMemStats(&mem)
-					t.Logf("round=%d goroutines=%d heap=%d tunnel_connections=%d/%d backend=%d", round+1, runtime.NumGoroutine(), mem.HeapAlloc, client.stats.Snapshot().Connections, server.stats.Snapshot().Connections, active.Load())
+					t.Logf(
+						"round=%d goroutines=%d heap=%d tunnel_connections=%d/%d backend=%d",
+						round+1,
+						runtime.NumGoroutine(),
+						mem.HeapAlloc,
+						client.stats.Snapshot().Connections,
+						server.stats.Snapshot().Connections,
+						active.Load(),
+					)
 				}
 			}
 			// Disable remaining padding, wait for counters to quiesce, then independently
@@ -306,7 +375,13 @@ func TestManagementRepeatedSaveRestartDuplexResources(t *testing.T) {
 			if ce.TX-cb.TX != se.RX-sb.RX || ce.RX-cb.RX != se.TX-sb.TX {
 				t.Fatalf("raw byte mismatch client %d/%d server %d/%d", ce.TX-cb.TX, ce.RX-cb.RX, se.TX-sb.TX, se.RX-sb.RX)
 			}
-			t.Logf("verified raw TCP byte deltas: client TX/RX=%d/%d server TX/RX=%d/%d", ce.TX-cb.TX, ce.RX-cb.RX, se.TX-sb.TX, se.RX-sb.RX)
+			t.Logf(
+				"verified raw TCP byte deltas: client TX/RX=%d/%d server TX/RX=%d/%d",
+				ce.TX-cb.TX,
+				ce.RX-cb.RX,
+				se.TX-sb.TX,
+				se.RX-sb.RX,
+			)
 			if e := client.worker.stop(); e != nil {
 				t.Fatal(e)
 			}
@@ -314,14 +389,24 @@ func TestManagementRepeatedSaveRestartDuplexResources(t *testing.T) {
 				t.Fatal(e)
 			}
 			waitManaged(t, "all TCP connections", func() bool {
-				return client.stats.Snapshot().Connections == 0 && server.stats.Snapshot().Connections == 0 && active.Load() == 0
+				return client.stats.Snapshot().Connections == 0 && server.stats.Snapshot().Connections == 0 &&
+					active.Load() == 0
 			})
 			backend.Close()
 			<-acceptDone
 			peers.Wait()
-			waitManaged(t, "goroutines", func() bool { runtime.GC(); return runtime.NumGoroutine() <= baseline+4 })
+			waitManaged(t, "goroutines", func() bool {
+				runtime.GC()
+				return runtime.NumGoroutine() <= baseline+4
+			})
 			runtime.ReadMemStats(&mem)
-			t.Logf("released: goroutines=%d baseline=%d heap=%d baseline_heap=%d connections=0", runtime.NumGoroutine(), baseline, mem.HeapAlloc, baseHeap)
+			t.Logf(
+				"released: goroutines=%d baseline=%d heap=%d baseline_heap=%d connections=0",
+				runtime.NumGoroutine(),
+				baseline,
+				mem.HeapAlloc,
+				baseHeap,
+			)
 			if mem.HeapAlloc > baseHeap+24*1024*1024 {
 				t.Fatal("retained heap grew beyond 24MiB after cleanup")
 			}

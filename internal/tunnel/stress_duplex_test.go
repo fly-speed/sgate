@@ -162,7 +162,15 @@ func stressReadRecords(c net.Conn, seed uint64, size int, total *atomic.Int64) e
 	}
 }
 
-func stressDuplex(c net.Conn, seed uint64, end time.Time, size int, backend bool, sent, received *atomic.Int64, interval time.Duration) error {
+func stressDuplex(
+	c net.Conn,
+	seed uint64,
+	end time.Time,
+	size int,
+	backend bool,
+	sent, received *atomic.Int64,
+	interval time.Duration,
+) error {
 	txSeed, rxSeed := seed, seed^0xa0761d6478bd642f
 	if backend {
 		txSeed, rxSeed = rxSeed, txSeed

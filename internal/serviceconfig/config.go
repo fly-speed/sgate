@@ -77,44 +77,9 @@ func Read(path string) (values map[string]string, merged bool, err error) {
 		if _, ok := values[key]; ok {
 			return nil, true, fmt.Errorf("configuration line %d: duplicate option", lineNo)
 		}
-		value := cfg.GetString(key)
-		if strings.HasPrefix(raw, "\"") {
-			// The template strips inline comments without recognizing quoted strings.
-			// Decode from the original quoted literal to preserve passwords and paths.
-			end := 1
-			escaped := false
-			for ; end < len(raw); end++ {
-				if raw[end] == '"' && !escaped {
-					break
-				}
-				if raw[end] == '\\' && !escaped {
-					escaped = true
-				} else {
-					escaped = false
-				}
-			}
-			if end >= len(raw) {
-				return nil, true, fmt.Errorf("configuration line %d: invalid quoted value", lineNo)
-			}
-			tail := strings.TrimSpace(raw[end+1:])
-			if tail != "" && !strings.HasPrefix(tail, "#") {
-				return nil, true, fmt.Errorf("configuration line %d: invalid quoted value", lineNo)
-			}
-			value, err = strconv.Unquote(raw[:end+1])
-			if err != nil {
-				return nil, true, fmt.Errorf("configuration line %d: invalid quoted value", lineNo)
-			}
-		} else if strings.HasPrefix(raw, "'") {
-			end := strings.Index(raw[1:], "'")
-			if end < 0 {
-				return nil, true, fmt.Errorf("configuration line %d: invalid quoted value", lineNo)
-			}
-			end++
-			tail := strings.TrimSpace(raw[end+1:])
-			if tail != "" && !strings.HasPrefix(tail, "#") {
-				return nil, true, fmt.Errorf("configuration line %d: invalid quoted value", lineNo)
-			}
-			value = raw[1:end]
+		value, err := decodeServiceValue(raw, cfg.GetString(key), lineNo)
+		if err != nil {
+			return nil, true, err
 		}
 		values[key] = value
 	}
@@ -125,5 +90,51 @@ func Read(path string) (values map[string]string, merged bool, err error) {
 }
 
 func FrameworkKey(key string) bool {
-	return strings.HasPrefix(key, "master_") || strings.HasPrefix(key, "app_") || key == "tls_cert_file" || key == "tls_key_file"
+	return strings.HasPrefix(key, "master_") || strings.HasPrefix(key, "app_") || key == "tls_cert_file" ||
+		key == "tls_key_file"
+}
+
+// decodeServiceValue 从原始带引号文本恢复值，保留密码或路径中的 #。
+// 未带引号的值仍由 go-service 读取，维持模板的注释解析规则。
+func decodeServiceValue(raw, value string, lineNo int) (string, error) {
+	var err error
+	if strings.HasPrefix(raw, "\"") {
+		// The template strips inline comments without recognizing quoted strings.
+		// Decode from the original quoted literal to preserve passwords and paths.
+		end := 1
+		escaped := false
+		for ; end < len(raw); end++ {
+			if raw[end] == '"' && !escaped {
+				break
+			}
+			if raw[end] == '\\' && !escaped {
+				escaped = true
+			} else {
+				escaped = false
+			}
+		}
+		if end >= len(raw) {
+			return "", fmt.Errorf("configuration line %d: invalid quoted value", lineNo)
+		}
+		tail := strings.TrimSpace(raw[end+1:])
+		if tail != "" && !strings.HasPrefix(tail, "#") {
+			return "", fmt.Errorf("configuration line %d: invalid quoted value", lineNo)
+		}
+		value, err = strconv.Unquote(raw[:end+1])
+		if err != nil {
+			return "", fmt.Errorf("configuration line %d: invalid quoted value", lineNo)
+		}
+	} else if strings.HasPrefix(raw, "'") {
+		end := strings.Index(raw[1:], "'")
+		if end < 0 {
+			return "", fmt.Errorf("configuration line %d: invalid quoted value", lineNo)
+		}
+		end++
+		tail := strings.TrimSpace(raw[end+1:])
+		if tail != "" && !strings.HasPrefix(tail, "#") {
+			return "", fmt.Errorf("configuration line %d: invalid quoted value", lineNo)
+		}
+		value = raw[1:end]
+	}
+	return value, nil
 }

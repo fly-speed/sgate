@@ -31,7 +31,10 @@ func TestCloneFlagsPreservesFileAndExplicitPrecedence(t *testing.T) {
 		if override {
 			want = "7"
 		}
-		if copy.Lookup("count").Value.String() != want || copy.Lookup("password").Value.String() != "file-password" || copy.Lookup("enabled").Value.String() != "false" || copy.Lookup("delay").Value.String() != "3s" {
+		if copy.Lookup("count").Value.String() != want ||
+			copy.Lookup("password").Value.String() != "file-password" ||
+			copy.Lookup("enabled").Value.String() != "false" ||
+			copy.Lookup("delay").Value.String() != "3s" {
 			t.Fatal("file/CLI precedence lost")
 		}
 		if fs.Lookup("password").Value.String() != "" {

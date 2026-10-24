@@ -23,12 +23,22 @@ import (
 type Config struct {
 	Listen, UsersFile, SessionDir, SetupTokenFile, TLSCert, TLSKey string
 	WebDir                                                         string
+	MasterCtl, MasterSocket                                        string
 	SessionTimeout                                                 time.Duration
 	MaxSessions                                                    int
+	shared                                                         bool
 }
 
 func LoadConfig(path string) (Config, error) {
-	var c Config
+	return loadConfig(path, false)
+}
+
+// LoadSharedConfig retains Listen for the existing cookie identity, but does
+// not use the legacy management address or certificate to bind a second socket.
+func LoadSharedConfig(path string) (Config, error) { return loadConfig(path, true) }
+
+func loadConfig(path string, shared bool) (Config, error) {
+	c := Config{shared: shared}
 	fs := flag.NewFlagSet("management", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&c.Listen, "listen", "127.0.0.1:9081", "management address")
@@ -40,6 +50,8 @@ func LoadConfig(path string) (Config, error) {
 	fs.StringVar(&c.TLSKey, "tls-key", "", "management TLS key")
 	fs.DurationVar(&c.SessionTimeout, "session-timeout", 12*time.Hour, "absolute login lifetime")
 	fs.IntVar(&c.MaxSessions, "max-sessions", 128, "maximum persisted login sessions")
+	fs.StringVar(&c.MasterCtl, "master-ctl", "/opt/soft/acl-master/bin/master_ctl", "acl_master service control executable")
+	fs.StringVar(&c.MasterSocket, "master-socket", "", "optional acl_master management socket")
 	if e := cli.ParseSection(fs, path, "admin_"); e != nil {
 		return c, e
 	}
@@ -48,10 +60,20 @@ func LoadConfig(path string) (Config, error) {
 			*p = filepath.Join(filepath.Dir(path), *p)
 		}
 	}
+	for _, p := range []*string{&c.MasterCtl, &c.MasterSocket} {
+		if *p != "" && !filepath.IsAbs(*p) {
+			resolved, err := filepath.Abs(filepath.Join(filepath.Dir(path), *p))
+			if err != nil {
+				return c, err
+			}
+			*p = resolved
+		}
+	}
 	return c, c.validate()
 }
 func (c Config) validate() error {
-	if c.SessionTimeout < time.Second || c.SessionTimeout > 365*24*time.Hour || c.MaxSessions < 1 || c.MaxSessions > 10000 {
+	if c.SessionTimeout < time.Second || c.SessionTimeout > 365*24*time.Hour || c.MaxSessions < 1 ||
+		c.MaxSessions > 10000 {
 		return errors.New("invalid management session timeout or limit")
 	}
 	if c.UsersFile == "" || c.SessionDir == "" || c.SetupTokenFile == "" {
@@ -60,16 +82,18 @@ func (c Config) validate() error {
 	if c.WebDir == "" {
 		return errors.New("management web-dir is required")
 	}
-	if (c.TLSCert == "") != (c.TLSKey == "") {
+	if !c.shared && (c.TLSCert == "") != (c.TLSKey == "") {
 		return errors.New("both management TLS files are required")
 	}
-	host, _, e := net.SplitHostPort(c.Listen)
-	if e != nil {
-		return e
-	}
-	ip := net.ParseIP(host)
-	if (ip == nil || !ip.IsLoopback()) && c.TLSCert == "" {
-		return errors.New("management listening outside loopback requires TLS")
+	if !c.shared {
+		host, _, e := net.SplitHostPort(c.Listen)
+		if e != nil {
+			return e
+		}
+		ip := net.ParseIP(host)
+		if (ip == nil || !ip.IsLoopback()) && c.TLSCert == "" {
+			return errors.New("management listening outside loopback requires TLS")
+		}
 	}
 	paths := []string{c.UsersFile, c.SessionDir, c.SetupTokenFile}
 	for i, p := range paths {
@@ -90,6 +114,33 @@ type View struct {
 	Validate            func(path string) error
 	Apply               func() error
 	Runtime             func() any
+	RestartService      func(control, socket string, expectedPID int) error
+}
+
+// Shared creates only a handler and session reaper. The proxy's HTTP service
+// owns the listener and joins requests before this cleanup function returns.
+func Shared(ctx context.Context, path string, v View) (http.Handler, func(), error) {
+	c, e := LoadSharedConfig(path)
+	if e != nil {
+		return nil, nil, e
+	}
+	h, e := New(c, v)
+	if e != nil {
+		return nil, nil, e
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.reap(runCtx)
+	}()
+	var once sync.Once
+	return h, func() {
+		once.Do(func() {
+			cancel()
+			<-done
+		})
+	}, nil
 }
 
 // Start binds synchronously so management startup errors cannot be hidden.
@@ -116,7 +167,14 @@ func Start(ctx context.Context, path string, v View) (func(), error) {
 	if e != nil {
 		return nil, e
 	}
-	srv := &http.Server{Handler: h, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024}
+	srv := &http.Server{
+		Handler:           h,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    16 * 1024,
+	}
 	if c.TLSCert != "" {
 		srv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS12}
 	}
@@ -144,14 +202,24 @@ func Start(ctx context.Context, path string, v View) (func(), error) {
 		defer stop()
 		_ = srv.Shutdown(shutdown)
 	}()
-	go func() { defer background.Done(); h.reap(runCtx) }()
+	go func() {
+		defer background.Done()
+		h.reap(runCtx)
+	}()
 	scheme := "http"
 	if c.TLSCert != "" {
 		scheme = "https"
 	}
 	log.Printf("sgate %s management: %s://%s", v.Role, scheme, l.Addr())
 	var once sync.Once
-	return func() { once.Do(func() { cancel(); _ = srv.Close(); <-done; background.Wait() }) }, nil
+	return func() {
+		once.Do(func() {
+			cancel()
+			_ = srv.Close()
+			<-done
+			background.Wait()
+		})
+	}, nil
 }
 func atomicFile(path string, data []byte) error {
 	if st, e := os.Lstat(path); e == nil && !st.Mode().IsRegular() {

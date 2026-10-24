@@ -8,14 +8,21 @@ service ssh-client {
 	master_type = sock
 # acl_master 持有监听端口，Go 服务继承套接字；管理界面重启仅替换代理工作实例。
 	master_reuseport = no
+	# 框架停止或重启服务时是否采用发送 SIGTERM 的方式；false 使用框架原有停止流程。
 	master_stop_kill = false
+	# 当 master_stop_kill 启用时，是否等待旧子进程退出。
 	master_stop_wait = true
 
 
+	# 是否采集子进程的文件描述符使用情况。
 	master_check_fds = true
+	# 是否采集子进程的内存使用情况。
 	master_check_mem = true
+	# 是否采集子进程的 CPU 使用情况。
 	master_check_cpu = true
+	# 是否采集子进程的 I/O 使用情况。
 	master_check_io  = true
+	# 是否检查子进程资源限制。
 	master_check_limit = true
 
 #	当子进程异常退出时，如果该值非空，则将子进程异常退出的消息通知该服务
@@ -30,6 +37,7 @@ service ssh-client {
 #	是否只允许私有访问, 如果为 y, 则域套接口创建在 /opt/soft/acl-master/var/log/private/ 目录下,
 #	如果为 n, 则域套接口创建在 /opt/soft/acl-master/var/log/public/ 目录下,
 	master_private = n
+	# 是否以框架配置的非特权身份运行；n 不切换身份，y 启用。
 	master_unpriv = n
 #	是否需要 chroot: n -- no, y -- yes
 	master_chroot = n
@@ -41,15 +49,19 @@ service ssh-client {
 	master_prefork = 1
 #	进程程序名
 	master_command = /opt/soft/sgate/sbin/sgate-client
+	# 服务版本标识，供 acl_master 管理与展示使用。
 	master_version = 1.0.0-0
 #	进程日志记录文件
 	master_log = /opt/soft/sgate/logs/ssh-client.log
+	# 服务标准输出的重定向日志文件路径。
 	master_stdout = /opt/soft/sgate/logs/ssh-stdout.log
+	# 服务标准错误的重定向日志文件路径。
 	master_stderr = /opt/soft/sgate/logs/ssh-stderr.log
 #	调试日志方式，格式：tag:level; tag:level; tab:level, 如：all:1; 101:2
 #	master_debug =
 # 附加命令行覆盖项，通常留空；框架自动传入 -f <本文件>。
     master_args =
+	# acl_master 启动服务子进程时使用的工作目录；业务相对路径以此目录解析。
 	master_home = /opt/soft/sgate/var
 #	传递给服务子进程的环境变量, 可以通过 getenv("SERVICE_ENV") 获得此值
 #	master_env = mempool_limit:512000000

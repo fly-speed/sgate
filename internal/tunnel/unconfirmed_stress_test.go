@@ -122,7 +122,16 @@ func (p *unconfirmedProbes) batch(ctx context.Context, f stressLifecycleContext,
 				return
 			}
 			serverNonce := response.Header.Get("X-Sgate-Nonce")
-			expected := mac(f.serverConfig.Key, protocol, "server", e.id, nonce, serverNonce, stamp, headers.Get(passwordHeader))
+			expected := mac(
+				f.serverConfig.Key,
+				protocol,
+				"server",
+				e.id,
+				nonce,
+				serverNonce,
+				stamp,
+				headers.Get(passwordHeader),
+			)
 			if !hmac.Equal([]byte(expected), []byte(response.Header.Get("X-Sgate-Auth"))) {
 				ws.Close()
 				p.errors <- fmt.Errorf("unconfirmed server authentication failed")
@@ -152,13 +161,31 @@ func (p *unconfirmedProbes) batch(ctx context.Context, f stressLifecycleContext,
 			reportEarly := func(err error) {
 				if ctx.Err() == nil && time.Now().Before(deadline.Add(-time.Second)) {
 					if relayPair != nil {
-						err = fmt.Errorf("pair-close=%v read=%d/%d written=%d/%d: %w", relayPair.closeCause.Load(), relayPair.read[0].Load(), relayPair.read[1].Load(), relayPair.written[0].Load(), relayPair.written[1].Load(), err)
+						err = fmt.Errorf(
+							"pair-close=%v read=%d/%d written=%d/%d: %w",
+							relayPair.closeCause.Load(),
+							relayPair.read[0].Load(),
+							relayPair.read[1].Load(),
+							relayPair.written[0].Load(),
+							relayPair.written[1].Load(),
+							err,
+						)
 					}
-					p.errors <- fmt.Errorf("%s probe stopped at %s with %s remaining, client=%s: %w", f.kind, time.Now().Format(time.RFC3339Nano), time.Until(deadline).Round(time.Millisecond), ws.LocalAddr(), err)
+					p.errors <- fmt.Errorf(
+						"%s probe stopped at %s with %s remaining, client=%s: %w",
+						f.kind,
+						time.Now().Format(time.RFC3339Nano),
+						time.Until(deadline).Round(time.Millisecond),
+						ws.LocalAddr(),
+						err,
+					)
 				}
 			}
 			var writeMu sync.Mutex
-			ws.SetPongHandler(func(string) error { p.pongs.Add(1); return nil })
+			ws.SetPongHandler(func(string) error {
+				p.pongs.Add(1)
+				return nil
+			})
 			// Raw fragmented writes and control replies share a mutex so their
 			// TLS writes cannot interleave WebSocket frame bytes.
 			writeBudget := (*f.server).cfg.Options.WriteTimeout
@@ -253,7 +280,13 @@ func (p *unconfirmedProbes) batch(ctx context.Context, f stressLifecycleContext,
 	wg.Wait()
 }
 
-func stressUnconfirmedRecovery(t *testing.T, f stressLifecycleContext, oldProbe *stressLifecycleProbe, start time.Time, clients, remotes []*session) {
+func stressUnconfirmedRecovery(
+	t *testing.T,
+	f stressLifecycleContext,
+	oldProbe *stressLifecycleProbe,
+	start time.Time,
+	clients, remotes []*session,
+) {
 	t.Helper()
 	s := *f.server
 	retention := s.cfg.SessionTTL
@@ -286,7 +319,11 @@ func stressUnconfirmedRecovery(t *testing.T, f stressLifecycleContext, oldProbe 
 	ctx, cancel := context.WithCancel(context.Background())
 	p := &unconfirmedProbes{errors: make(chan error, 8*len(entries))}
 	manualDone := make(chan struct{})
-	defer func() { cancel(); <-manualDone; p.close() }()
+	defer func() {
+		cancel()
+		<-manualDone
+		p.close()
+	}()
 	go func() {
 		defer close(manualDone)
 		schedule := []time.Duration{0}
@@ -359,7 +396,11 @@ func stressUnconfirmedRecovery(t *testing.T, f stressLifecycleContext, oldProbe 
 			sampleAt = time.Now().Add(time.Second)
 		}
 		if time.Now().After(logAt) {
-			t.Logf("%s offline %s: all old retention timestamps unchanged; caches bounded", f.kind, time.Since(start).Round(time.Second))
+			t.Logf(
+				"%s offline %s: all old retention timestamps unchanged; caches bounded",
+				f.kind,
+				time.Since(start).Round(time.Second),
+			)
 			logAt = time.Now().Add(30 * time.Second)
 		}
 		return false
@@ -371,7 +412,10 @@ func stressUnconfirmedRecovery(t *testing.T, f stressLifecycleContext, oldProbe 
 	}
 	p.close()
 	leftoverNonce := false
-	f.probeNonces.Range(func(_, _ any) bool { leftoverNonce = true; return false })
+	f.probeNonces.Range(func(_, _ any) bool {
+		leftoverNonce = true
+		return false
+	})
 	if leftoverNonce {
 		t.Fatal("probe authorization entries were not released")
 	}
@@ -394,22 +438,28 @@ func stressUnconfirmedRecovery(t *testing.T, f stressLifecycleContext, oldProbe 
 	if f.kind == "abandoned" && p.abandoned.Load() < int64(2*len(entries)) {
 		t.Fatal("insufficient actual abandoned upgrades")
 	}
-	if (f.kind == "silent" || f.kind == "control" || f.kind == "fragmented") && (p.silent.Load() != int64(len(entries)) || p.noise.Load() == 0) {
+	if (f.kind == "silent" || f.kind == "control" || f.kind == "fragmented") &&
+		(p.silent.Load() != int64(len(entries)) || p.noise.Load() == 0) {
 		t.Fatal("silent probes did not cover every old session and encrypted padding")
 	}
-	if f.kind == "control" && (p.control.Load() < int64(len(entries)*10) || p.pongs.Load() < int64(len(entries)*3)) {
+	if f.kind == "control" &&
+		(p.control.Load() < int64(len(entries)*10) || p.pongs.Load() < int64(len(entries)*3)) {
 		t.Fatal("continuous control probes did not exchange enough Ping/Pong frames")
 	}
 	if f.kind == "fragmented" && p.fragments.Load() < int64(len(entries)*10) {
 		t.Fatal("incomplete encrypted frames were not sent in enough fragments")
 	}
 	done := make(chan struct{})
-	go func() { oldProbe.wg.Wait(); close(done) }()
+	go func() {
+		oldProbe.wg.Wait()
+		close(done)
+	}()
 	cleanupDeadline := time.Now().Add(20 * time.Second)
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Log("application close notification exceeded five seconds; retaining the 20-second stress cleanup budget")
+		t.Log(("application close notification exceeded five seconds; retaining the 20-second stress " +
+			"cleanup budget"))
 		if path := os.Getenv("SGATE_STRESS_REPORT"); path != "" {
 			buf := make([]byte, 16<<20)
 			n := runtime.Stack(buf, true)
@@ -417,7 +467,10 @@ func stressUnconfirmedRecovery(t *testing.T, f stressLifecycleContext, oldProbe 
 			var connections []map[string]any
 			oldProbe.connections.Range(func(key, value any) bool {
 				c := key.(net.Conn)
-				connections = append(connections, map[string]any{"local": c.LocalAddr().String(), "remote": c.RemoteAddr().String(), "backend": value})
+				connections = append(
+					connections,
+					map[string]any{"local": c.LocalAddr().String(), "remote": c.RemoteAddr().String(), "backend": value},
+				)
 				return true
 			})
 			data, _ := json.MarshalIndent(connections, "", "  ")
@@ -439,9 +492,24 @@ func stressUnconfirmedRecovery(t *testing.T, f stressLifecycleContext, oldProbe 
 	for err := range oldProbe.errors {
 		t.Error(err)
 	}
-	stressWaitFor(t, "old unconfirmed application connections released offline", func() bool { return f.backendCount.active.Load() == 0 && f.localCount.active.Load() == 0 })
+	stressWaitFor(
+		t,
+		"old unconfirmed application connections released offline",
+		func() bool { return f.backendCount.active.Load() == 0 && f.localCount.active.Load() == 0 },
+	)
 	f.sample(f.kind+"-offline-expired", f.round, true)
-	t.Logf("%s: original retention held; sessions, caches and transport timers released at %s; application peers released by %s; TLS timeouts=%d abandoned=%d silent=%d noise received=%d", f.kind, time.Duration(f.report.UnconfirmedReleaseMilliseconds)*time.Millisecond, time.Duration(f.report.UnconfirmedApplicationReleaseMilliseconds)*time.Millisecond, p.timeouts.Load(), p.abandoned.Load(), p.silent.Load(), p.noise.Load())
+	t.Logf(
+		("%s: original retention held; sessions, caches and transport timers released at %s; " +
+			"application peers released by %s; TLS timeouts=%d abandoned=%d silent=%d noise " +
+			"received=%d"),
+		f.kind,
+		time.Duration(f.report.UnconfirmedReleaseMilliseconds)*time.Millisecond,
+		time.Duration(f.report.UnconfirmedApplicationReleaseMilliseconds)*time.Millisecond,
+		p.timeouts.Load(),
+		p.abandoned.Load(),
+		p.silent.Load(),
+		p.noise.Load(),
+	)
 	f.offline.Store(false)
 	stressWaitFor(t, "fresh sessions after unconfirmed attempts", f.attached)
 	f.peer.Store(nil)
@@ -477,7 +545,13 @@ func writeUnconfirmedFragment(w io.Writer, opcode byte, payload []byte) error {
 
 // Only pre-upgrade failures are retried. A successfully upgraded probe that
 // stops early still fails coverage/integrity checks in batch.
-func retryUnconfirmedUpgrade(parent context.Context, deadline time.Time, minimum, maximum time.Duration, attempt func(context.Context) error, retried func()) error {
+func retryUnconfirmedUpgrade(
+	parent context.Context,
+	deadline time.Time,
+	minimum, maximum time.Duration,
+	attempt func(context.Context) error,
+	retried func(),
+) error {
 	ctx, cancel := context.WithDeadline(parent, deadline)
 	defer cancel()
 	backoff := minimum
@@ -529,8 +603,19 @@ func TestUnconfirmedUpgradeRetryKeepsOriginalDeadline(t *testing.T) {
 	t.Run("expiry interrupts backoff", func(t *testing.T) {
 		started := time.Now()
 		attempts := 0
-		err := retryUnconfirmedUpgrade(context.Background(), started.Add(40*time.Millisecond), time.Second, time.Second, func(ctx context.Context) error { attempts++; return errors.New("offline") }, func() {})
-		if !errors.Is(err, context.DeadlineExceeded) || attempts != 1 || time.Since(started) > 500*time.Millisecond {
+		err := retryUnconfirmedUpgrade(
+			context.Background(),
+			started.Add(40*time.Millisecond),
+			time.Second,
+			time.Second,
+			func(ctx context.Context) error {
+				attempts++
+				return errors.New("offline")
+			},
+			func() {},
+		)
+		if !errors.Is(err, context.DeadlineExceeded) || attempts != 1 ||
+			time.Since(started) > 500*time.Millisecond {
 			t.Fatalf("attempts=%d elapsed=%s err=%v", attempts, time.Since(started), err)
 		}
 	})
@@ -538,7 +623,18 @@ func TestUnconfirmedUpgradeRetryKeepsOriginalDeadline(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		attempts := 0
-		err := retryUnconfirmedUpgrade(ctx, time.Now().Add(time.Hour), time.Second, time.Second, func(context.Context) error { attempts++; cancel(); return errors.New("offline") }, func() {})
+		err := retryUnconfirmedUpgrade(
+			ctx,
+			time.Now().Add(time.Hour),
+			time.Second,
+			time.Second,
+			func(context.Context) error {
+				attempts++
+				cancel()
+				return errors.New("offline")
+			},
+			func() {},
+		)
 		if !errors.Is(err, context.Canceled) || attempts != 1 {
 			t.Fatalf("attempts=%d err=%v", attempts, err)
 		}
