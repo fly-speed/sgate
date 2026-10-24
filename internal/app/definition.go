@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"sgate/internal/cli"
@@ -120,6 +121,11 @@ func (v configValues) serverConfig(secret []byte, options tunnel.Options) (*tunn
 		SessionTTL:  v.duration("session-ttl"),
 		MaxSessions: v.integer("max-sessions"),
 		Options:     options,
+	}
+	if raw := strings.TrimSpace(v.text("allowed-targets")); raw != "" {
+		for _, target := range strings.Split(raw, ",") {
+			config.AllowedTargets = append(config.AllowedTargets, strings.TrimSpace(target))
+		}
 	}
 	// NewServer 完成协议参数校验；这个临时实例不能留下清理协程。
 	server, err := tunnel.NewServer(config)

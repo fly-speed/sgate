@@ -65,6 +65,9 @@ func ConfigSoakCensus() map[string]int64 {
 		v["pending_bytes"] += int64(s.pendingBytes)
 		v["noise_sent"] += int64(s.noiseSent)
 		v["noise_received"] += int64(s.noiseReceived)
+		if s.target != "" {
+			v["target_streams:"+s.target] += int64(len(s.streams))
+		}
 	}
 	configSoakClients.Range(func(k, x any) bool {
 		state := x.(*clientSessions)
@@ -144,7 +147,7 @@ func ConfigSoakDetails() map[string]any {
         for id, st := range s.streams {
             streams = append(streams, map[string]any{"id": id, "local": st.conn.LocalAddr().String(), "remote": st.conn.RemoteAddr().String()})
         }
-        sessions = append(sessions, map[string]any{"closed": s.closed, "attached": s.active != nil, "pending_bytes": s.pendingBytes, "pending_frames": len(s.pending), "reset_queue": len(s.resets), "streams": streams})
+        sessions = append(sessions, map[string]any{"target": s.target, "closed": s.closed, "attached": s.active != nil, "pending_bytes": s.pendingBytes, "pending_frames": len(s.pending), "reset_queue": len(s.resets), "streams": streams})
     }
     configSoakClients.Range(func(key, value any) bool {
         state := value.(*clientSessions)

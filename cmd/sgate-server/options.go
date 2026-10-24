@@ -13,6 +13,7 @@ func parseOptions(args []string) (string, error) {
 	adminConfig := flag.String("admin-config", "", "separate Web management configuration (disabled when empty)")
 	flag.String("listen", ":8081", "HTTP listen address")
 	flag.String("target", "", "fixed backend TCP host:port (required)")
+	flag.String("allowed-targets", "", "comma-separated host:port allowlist for client addr query (empty disables selection)")
 	flag.String("path", "/tunnel", "WebSocket endpoint")
 	flag.String("key-file", "", "shared key file (defaults to SGATE_KEY environment variable)")
 	flag.String("password", "", "connection authentication password (required)")

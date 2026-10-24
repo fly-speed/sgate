@@ -82,6 +82,9 @@ service ssh-server {
     listen = ":1080"
     # 固定转发的后端 TCP 地址；保留现有地址。
     target = "127.0.0.1:1982"
+    # 客户端 addr 可选后端的允许列表，逗号分隔且按完整 host:port 精确匹配；支持 IP 或域名。
+    # 留空禁止客户端选择后端；未传 addr 时仍使用上面的 target。示例：127.0.0.1:8088,example.com:443
+    allowed-targets =
     # WebSocket 服务路径，默认 /tunnel，须与客户端 URL 路径一致。
     path = "/tunnel"
     # 两端共享密钥文件路径；保留现有路径。
@@ -129,6 +132,10 @@ service ssh-server {
     # 每次白噪音随机负载的最大字节数，默认 10240；允许范围为 1～16384。
     noise-max-bytes = 10240
 
+    # 可选的独立管理配置文件；非空时使用该文件并启用管理界面。
+    # 留空则通过 admin_enabled 或 -admin-enabled 开启本 .cf 中的管理配置。
+    admin-config =
+
 # Web 管理配置：默认关闭；命令行 -admin-enabled 可开启。
 # 账号和持久化会话仍是独立数据文件，下面的相对路径以本 .cf 所在目录为基准。
     # 是否启用 Web 管理，默认关闭；命令行 -admin-enabled 可覆盖
@@ -151,4 +158,8 @@ service ssh-server {
     admin_tls_cert =
     # 旧管理私钥参数，仅保留兼容
     admin_tls_key =
+    # acl_master 控制程序路径，用于界面“重启服务”；默认使用安装目录下的 master_ctl。
+    admin_master_ctl = /opt/soft/acl-master/bin/master_ctl
+    # acl_master 管理套接字路径；留空使用 master_ctl 的默认设置，可填绝对路径显式指定。
+    admin_master_socket =
 }

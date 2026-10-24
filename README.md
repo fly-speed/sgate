@@ -348,6 +348,27 @@ GOMAXPROCS=4 go test ./internal/tunnel -run '^TestConfigBinaryNoiseSoak$' \
 
 私有 CA 可以在客户端加上 `-tls-ca ca.crt`。客户端会校验证书链和服务器名称。
 
+### 客户端选择后端服务
+
+一个服务端进程可以为不同客户端代理不同的后端端口。在服务端 `.cf` 中保留默认后端，并列出允许客户端选择的地址：
+
+```ini
+# 未传 addr 时使用的默认后端，仍为必填项。
+target = 127.0.0.1:9001
+# 完整 host:port 允许列表，逗号分隔；留空禁止客户端指定后端。
+allowed-targets = 127.0.0.1:8088,127.0.0.1:22,backend.example.com:443
+```
+
+客户端将目标加入 `server` URL，无需新增客户端参数：
+
+```ini
+server = "wss://gateway.example.com/tunnel?addr=127.0.0.1:8088"
+```
+
+域名示例为 `?addr=backend.example.com:443`，IPv6 使用 `[::1]:8088`；构造 URL 时可对参数值作 URL 编码。地址按完整字符串精确匹配，不支持通配符、网段或通过 DNS 解析结果匹配别名。即使显式指定默认后端，也必须把该地址列入 `allowed-targets`。参数为空、重复或格式错误返回 `400`，未获允许返回 `403`；这些检查在握手身份验证通过后、创建会话和连接后端前完成。
+
+后端绑定到隧道会话，同一会话的所有 TCP 流和重连均保持该目标；重连试图换成另一后端返回 `409`，不会续期或改变原会话。要切换目标，应修改客户端 URL 并重启客户端代理，建立新会话。允许列表同时支持 `-allowed-targets` 命令行覆盖和管理页面编辑；保存后应用代理配置即可生效，应用会关闭旧代理会话。
+
 ### HTTP 反向代理
 
 也可以让 Nginx 提供 HTTPS，sgate 服务端监听 `127.0.0.1:8080`。在已有 HTTPS `server` 块中加入：
@@ -391,7 +412,8 @@ location /tunnel {
 | 参数 | 默认值 | 含义 |
 | --- | --- | --- |
 | `-listen` | `:8080` | HTTP/HTTPS 监听地址 |
-| `-target` | 必填 | 应用服务器的 `host:port` |
+| `-target` | 必填 | 未传 `addr` 时默认连接的 `host:port` |
+| `-allowed-targets` | 空 | 客户端 `addr` 可选地址的完整允许列表，逗号分隔；空值禁止选择 |
 | `-path` | `/tunnel` | WebSocket 路径 |
 | `-session-ttl` | `2m` | 传输连接断开后保留会话的时间 |
 | `-max-sessions` | `128` | 活跃及保留会话总数上限 |

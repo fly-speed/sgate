@@ -13,13 +13,14 @@ import (
 )
 
 type ServerConfig struct {
-	Key         []byte
-	Password    string
-	Target      string
-	Path        string
-	SessionTTL  time.Duration
-	MaxSessions int
-	Options     Options
+	Key            []byte
+	Password       string
+	Target         string
+	AllowedTargets []string
+	Path           string
+	SessionTTL     time.Duration
+	MaxSessions    int
+	Options        Options
 }
 type serverEntry struct {
 	session *session
@@ -30,13 +31,14 @@ type serverEntry struct {
 // Server.mu 保护会话索引、nonce 防重放表和占用标志。
 // 业务流与确认序列属于各自 session，使用 session.mu 单独保护。
 type Server struct {
-	cfg      ServerConfig
-	ctx      context.Context
-	cancel   context.CancelFunc
-	mu       sync.Mutex
-	sessions map[string]*serverEntry
-	nonces   map[string]time.Time
-	closed   bool
+	cfg            ServerConfig
+	ctx            context.Context
+	cancel         context.CancelFunc
+	mu             sync.Mutex
+	sessions       map[string]*serverEntry
+	nonces         map[string]time.Time
+	closed         bool
+	allowedTargets map[string]struct{}
 }
 
 func NewServer(cfg ServerConfig) (*Server, error) {
@@ -49,6 +51,14 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	if _, _, err := net.SplitHostPort(cfg.Target); err != nil {
 		return nil, errors.New("target must be host:port")
 	}
+	allowedTargets := make(map[string]struct{}, len(cfg.AllowedTargets))
+	for _, target := range cfg.AllowedTargets {
+		if err := validateSelectableTarget(target); err != nil {
+			return nil, err
+		}
+		allowedTargets[target] = struct{}{}
+	}
+	cfg.AllowedTargets = append([]string(nil), cfg.AllowedTargets...)
 	if cfg.Path == "" {
 		cfg.Path = "/tunnel"
 	}
@@ -72,11 +82,12 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	cfg.Key = append([]byte(nil), cfg.Key...)
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
-		cfg:      cfg,
-		ctx:      ctx,
-		cancel:   cancel,
-		sessions: make(map[string]*serverEntry),
-		nonces:   make(map[string]time.Time),
+		cfg:            cfg,
+		ctx:            ctx,
+		cancel:         cancel,
+		sessions:       make(map[string]*serverEntry),
+		nonces:         make(map[string]time.Time),
+		allowedTargets: allowedTargets,
 	}
 	go s.reap()
 	return s, nil
@@ -145,6 +156,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	request.target, ok = s.selectTarget(w, r)
+	if !ok {
+		return
+	}
 	entry, resumeDeadline, ok := s.acquireSession(w, r, request)
 	if !ok {
 		return
@@ -186,6 +201,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // tunnelRequest 是通过请求头完整性和密码校验后才能使用的握手信息。
 type tunnelRequest struct {
 	id, nonce, timestamp, resume, credential string
+	target                                   string
 }
 
 func (s *Server) authenticateRequest(r *http.Request) (tunnelRequest, bool) {
@@ -258,8 +274,14 @@ func (s *Server) acquireSession(w http.ResponseWriter, r *http.Request, request 
 			http.Error(w, "busy", http.StatusServiceUnavailable)
 			return nil, time.Time{}, false
 		}
-		e = &serverEntry{session: newSession(s.ctx, s.cfg.Target, s.cfg.Options), idle: time.Now()}
+		e = &serverEntry{session: newSession(s.ctx, request.target, s.cfg.Options), idle: time.Now()}
 		s.sessions[id] = e
+	}
+	// 会话内所有流始终属于首次选择的后端；重连不能把旧缓存送给另一个服务。
+	if e.session.target != request.target {
+		s.mu.Unlock()
+		http.Error(w, "session target mismatch", http.StatusConflict)
+		return nil, time.Time{}, false
 	}
 	if e.inUse {
 		s.mu.Unlock()

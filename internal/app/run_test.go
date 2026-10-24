@@ -51,6 +51,7 @@ func appFlags(role string) *flag.FlagSet {
 		fs.Duration("offline-timeout", 2*time.Minute, "")
 	} else {
 		fs.String("target", "", "")
+		fs.String("allowed-targets", "", "")
 		fs.String("path", "/tunnel", "")
 		fs.String("tls-cert", "", "")
 		fs.String("tls-key", "", "")
