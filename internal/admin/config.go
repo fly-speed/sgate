@@ -40,7 +40,7 @@ func LoadConfig(path string) (Config, error) {
 	fs.StringVar(&c.TLSKey, "tls-key", "", "management TLS key")
 	fs.DurationVar(&c.SessionTimeout, "session-timeout", 12*time.Hour, "absolute login lifetime")
 	fs.IntVar(&c.MaxSessions, "max-sessions", 128, "maximum persisted login sessions")
-	if e := cli.Parse(fs, []string{"-config", path}); e != nil {
+	if e := cli.ParseSection(fs, path, "admin_"); e != nil {
 		return c, e
 	}
 	for _, p := range []*string{&c.WebDir, &c.UsersFile, &c.SessionDir, &c.SetupTokenFile, &c.TLSCert, &c.TLSKey} {

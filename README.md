@@ -29,13 +29,13 @@ Go 编写的通用 TCP 加密通道。客户端和服务端使用标准 HTTP Upg
 与两个模板示例一样，手工启动可显式加 `-alone`，客户端和服务端使用相同方式：
 
 ```sh
-./bin/sgate-client -alone -config conf/ssh-client.conf
-./bin/sgate-server -alone -config conf/ssh-server.conf
+./bin/sgate-client -alone -config ssh-client.cf
+./bin/sgate-server -alone -config ssh-server.cf
 ```
 
-原有不带 `-alone` 的直接启动命令继续可用；也可以不提供 `-config`，全部通过命令行指定应用参数。需要 Web 管理时再加 `-admin-config`，并提供要管理的 `-config`。在 acl_master 下启动时，`master_args` 保持 `-config /opt/soft/sgate/conf/ssh-client.conf` 或对应服务端配置，**不要加 `-alone`**；框架自动注入监听描述符及控制参数。
+原有不带 `-alone` 的直接启动命令继续可用；也可以不提供 `-config`，全部通过命令行指定应用参数。需要 Web 管理时加 `-admin-enabled`。在 acl_master 下启动时，`master_args` 可以留空（或仅包含应用参数覆盖项），**不要加 `-alone`**；框架自动传入 `-f <当前 .cf>`，程序直接读取这份文件中的代理与管理配置，无需另一个 `-config`。独立启动也支持 `-alone -f ssh-client.cf`。
 
-仓库根目录的 `ssh-client.cf`、`vpn-client.cf`、`web-client.cf`、`ssh-server.cf`、`vpn-server.cf` 已改为 `master_type = sock`，`master_service` 对应各自应用配置原有的监听地址。`master_args` 继续仅通过 `-config` 指定应用配置。VPN/Web 客户端服务名也已分别校正，注释统一为 UTF-8。两端 `.conf` 的地址、代理密码和证书内容不因本次接入修改。
+仓库根目录的 `ssh-client.cf`、`vpn-client.cf`、`web-client.cf`、`ssh-server.cf`、`vpn-server.cf` 已改为 `master_type = sock`，`master_service` 对应各自应用配置原有的监听地址。代理参数及管理参数已从 `conf/*.conf` 合并到各自 `.cf` 的 `service` 块；两份通用示例为 `sgate-client.cf`、`sgate-server.cf`，默认 `master_disable = yes`，避免自动加载示例。原有地址、代理密码和证书保持不变，管理界面默认仍关闭。
 
 托管配置须设置：
 
@@ -68,7 +68,7 @@ master_stop_wait = true
 
 ```sh
 make build
-python3 scripts/test-acl-master.py --client bin/sgate-client --server bin/sgate-server --output artifacts/acl-master-test
+python3 scripts/test-acl-master.py --merged --client bin/sgate-client --server bin/sgate-server --output artifacts/acl-master-test
 ```
 
 该测试创建独立临时框架、Unix 管理套接字和随机回环端口，覆盖 WS/WSS、HTTP/HTTPS 管理、每端两个监听、32 路完整性校验、Web 应用、登录持久化和 `master_ctl` 启停/重启。不会载入现有 `/opt/soft/acl-master/conf/service`；`--master`、`--ctl` 可指定其它安装路径，`--client`、`--server` 可指向竞态构建。
@@ -77,7 +77,7 @@ python3 scripts/test-acl-master.py --client bin/sgate-client --server bin/sgate-
 
 ```sh
 python3 scripts/build-config-soak.py --managed --output artifacts/acl-stress/plain
-python3 scripts/test-acl-master.py --stress --concurrency 128 --rounds 6 \
+python3 scripts/test-acl-master.py --merged --stress --concurrency 128 --rounds 6 \
   --client artifacts/acl-stress/plain/sgate-client \
   --server artifacts/acl-stress/plain/sgate-server --output artifacts/acl-stress/plain-results
 ```
@@ -93,24 +93,30 @@ SGATE_ADMIN_CLIENT_BINARY="$PWD/bin/sgate-client" SGATE_ADMIN_SERVER_BINARY="$PW
   go test ./internal/app -run '^TestStandaloneStartModesBinaries$' -v -count=1 -timeout=2m
 ```
 
-## Web 管理界面
-
-客户端与服务端均提供独立的管理工作台，包含实时发送/接收速率、累计流量、曲线、通道 TCP 连接数、配置编辑及账号管理。默认关闭，通过 `-admin-config` 启用；必须同时提供 `-config`，以明确要管理的代理配置文件。先将应用配置中的地址、密钥、代理密码填写正确：
+合并配置的独立管理部署验证（不同工作目录、HTTP/HTTPS、WS/WSS、配置应用和登录持久化）：
 
 ```sh
-./bin/sgate-client -config conf/sgate-client.conf -admin-config conf/admin-client.conf
-./bin/sgate-server -config conf/sgate-server.conf -admin-config conf/admin-server.conf
+python3 scripts/test-merged-standalone.py --client bin/sgate-client --server bin/sgate-server --output artifacts/merged-standalone
 ```
 
-管理界面的 HTML、CSS、JavaScript 位于独立的 `web/admin/` 目录，不嵌入 Go 可执行文件。部署时同时复制 `bin/`、`conf/` 和 `web/`，保持此目录结构；也可在管理配置中设置 `web-dir = /opt/soft/sgate/web/admin`。默认 `web-dir = ../web/admin`，相对管理配置文件所在目录解析。客户端和服务端可共用同一份界面文件，也可分别指定目录。直接修改或替换界面文件后，刷新浏览器即可加载，无需编译或重启代理。目录中必须有 `index.html`、`app.css`、`app.js`，缺失时管理服务启动会明确报错；更新部署时建议原子替换文件。
+## Web 管理界面
+
+客户端与服务端均提供独立的管理工作台，包含实时发送/接收速率、累计流量、曲线、通道 TCP 连接数、配置编辑及账号管理。默认关闭，通过 `.cf` 的 `admin_enabled = true` 或命令行 `-admin-enabled` 启用；独立运行需提供 `-config` 或 `-f`，托管运行自动使用框架的 `-f`。先将应用配置中的地址、密钥、代理密码填写正确：
+
+```sh
+./bin/sgate-client -config sgate-client.cf -admin-enabled
+./bin/sgate-server -config sgate-server.cf -admin-enabled
+```
+
+管理界面的 HTML、CSS、JavaScript 位于独立的 `web/admin/` 目录，不嵌入 Go 可执行文件。部署时复制程序、`.cf` 和 `web/`，并保留 `conf/` 作为账号与会话数据目录；也可在 `.cf` 中设置 `admin_web_dir = /opt/soft/sgate/web/admin`。合并示例设置 `admin_web_dir = web/admin`，相对 `.cf` 所在目录解析。客户端和服务端可共用同一份界面文件，也可分别指定目录。直接修改或替换界面文件后，刷新浏览器即可加载，无需编译或重启代理。目录中必须有 `index.html`、`app.css`、`app.js`，缺失时管理服务启动会明确报错；更新部署时建议原子替换文件。
 
 管理进程需要界面目录的遍历权限、界面文件的读取权限，以及业务配置所在目录的写入权限（用于临时校验、备份和原子替换）。启动时界面文件不可访问会报告具体路径及系统错误；运行中丢失或不可读时，相应页面请求返回 `503`，管理 API 和已有登录会话仍可使用，恢复文件或权限后刷新即可。配置目录不可写时，保存失败，文件和正在运行的代理保持原状。
 
-默认客户端管理地址为 `http://127.0.0.1:9081`，服务端为 `http://127.0.0.1:9082`。启动参数也可以写入应用配置：`admin-config = conf/admin-client.conf`。业务配置路径仍按进程工作目录解析，管理配置中的存储及证书路径则相对于管理配置文件所在目录解析。现有 SSH、VPN、Web 配置可直接作为 `-config`，无需迁移其地址或密码。
+默认客户端管理地址为 `http://127.0.0.1:9081`，服务端为 `http://127.0.0.1:9082`。管理参数以 `admin_` 为前缀，连字符改为下划线，例如 `admin_session_timeout = 12h`。业务相对路径仍按进程工作目录解析，管理存储、静态目录和证书路径相对 `.cf` 所在目录解析。合并示例中的 `conf/admin-*-users.json`、`conf/admin-*-sessions` 继续指向原存储位置。现有 SSH、VPN、Web 配置可直接作为 `-config`，无需迁移其地址或密码。
 
 首次打开界面会主动进入“创建首个管理员”，没有预设账号和密码。程序生成一次性初始化令牌，日志只提示 `setup-token-file` 路径；从该文件读取令牌，在页面输入用户名、至少 12 个字符的密码及令牌即可创建账号。创建成功后令牌文件删除，后续直接登录。管理密码与代理的 `-password` 分开保存。账号文件存用户名、随机盐及 PBKDF2-HMAC-SHA256 密码哈希（600,000 次迭代，参照 [OWASP 密码存储建议](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)），不保存明文密码。
 
-管理配置示例见 [客户端](conf/admin-client.conf)、[服务端](conf/admin-server.conf)：
+管理配置示例见 [客户端](sgate-client.cf)、[服务端](sgate-server.cf)。下表是兼容的独立管理文件键名；合并配置使用 `admin_` 前缀并将 `-` 换为 `_`：
 
 | 参数 | 用途 |
 | --- | --- |
@@ -123,9 +129,9 @@ SGATE_ADMIN_CLIENT_BINARY="$PWD/bin/sgate-client" SGATE_ADMIN_SERVER_BINARY="$PW
 | `setup-token-file` | 首次建号令牌文件 |
 | `tls-cert` / `tls-key` | 管理界面 HTTPS 证书/私钥，与业务 WSS 配置独立 |
 
-绑定非回环地址必须配置管理 HTTPS。账号、会话、令牌与配置备份文件按 `0600` 创建；管理配置应与业务配置分开。持久 Cookie 使用 HttpOnly、SameSite=Strict，HTTPS 下同时使用 Secure。会话有效期固定，不随访问延长；进程重启或浏览器重开后，在原有效期内仍可登录。到期立即拒绝访问，后台最多每分钟清理过期文件。退出会删除对应会话；修改管理员账号/密码需要当前密码，并使全部旧会话失效。管理监听、证书、超时及存储路径修改后，需要重启整个程序。
+绑定非回环地址必须配置管理 HTTPS。账号、会话、令牌与配置备份文件按 `0600` 创建；管理员账号和登录会话继续与代理配置分开存储。持久 Cookie 使用 HttpOnly、SameSite=Strict，HTTPS 下同时使用 Secure。会话有效期固定，不随访问延长；进程重启或浏览器重开后，在原有效期内仍可登录。到期立即拒绝访问，后台最多每分钟清理过期文件。退出会删除对应会话；修改管理员账号/密码需要当前密码，并使全部旧会话失效。管理监听、证书、超时及存储路径修改后，需要重启整个程序。合并 `.cf` 中的框架参数及 `admin_` 参数变更可“仅保存”，但“保存并重启代理”会拒绝并回滚这些变更，避免误报已经生效；随后使用 `master_ctl` 或手工重启整个程序。
 
-代理配置页只管理当前 `-config` 指定的文件，保留中文注释。原代理密码以 `__SGATE_KEEP_EXISTING_PASSWORD__` 占位符隐藏；保留占位符会保留原值，也可改成新密码。保存前做语法、参数及密钥/证书校验，再备份至 `.bak` 并原子替换；旧版本编辑会被拒绝，避免覆盖其他操作。可选择“仅保存”，或“保存并重启代理”立即应用。命令行显式参数在重启后仍优先，页面显示优先项名称及实际监听地址。
+代理配置页只管理当前 `-config` 指定的文件，保留中文注释。代理密码及可能含密码或密钥的 `master_args`、`master_env` 以 `__SGATE_KEEP_EXISTING_PASSWORD__` 占位符分别隐藏；保留占位符会保留原值，也可改成新密码。保存前做语法、参数及密钥/证书校验，再备份至 `.bak` 并原子替换；旧版本编辑会被拒绝，避免覆盖其他操作。可选择“仅保存”，或“保存并重启代理”立即应用。命令行显式参数在重启后仍优先，页面显示优先项名称及实际监听地址。
 
 界面内重启只替换业务代理，管理端口、登录会话及本进程流量累计继续保留。重启会中断本端现有业务连接，远端按原会话保留机制清理；不能恢复这些已断开的业务连接。若新监听端口被占用等导致启动失败，会尝试恢复上次运行的代理配置，并在界面显示结果；“保存并重启”失败还会还原本次保存前的文件。
 
@@ -195,20 +201,37 @@ openssl rand -hex 32 > sgate.key
 
 也可以在两端用 `SGATE_KEY` 环境变量传入 64 位十六进制密钥；指定 `-key-file` 时优先使用文件内容。
 
-### 应用配置文件
+### 合并配置的部署回归
 
-两端均支持 `-config`，所有现有运行参数都可以写入配置文件，键名与命令行参数相同，省略前导 `-`。优先级为：**显式命令行参数 > 配置文件 > 内置默认值**。不指定 `-config` 时仍按原有命令行方式启动，不自动寻找配置文件。
-
-完整示例见 [客户端配置](conf/sgate-client.conf) 和 [服务端配置](conf/sgate-server.conf)。先修改密码、地址和密钥路径，再启动：
+下面的矩阵先用旧的分离配置建立管理员账号和登录会话，再移除旧配置并切换到单份 `.cf`，检查原 Cookie 和原账号密码仍可使用：
 
 ```sh
-./bin/sgate-server -config conf/sgate-server.conf
-./bin/sgate-client -config conf/sgate-client.conf -listen 127.0.0.1:2901
+python3 scripts/build-config-soak.py --managed --output artifacts/merged-deployment/plain
+python3 scripts/test-merged-deployment.py \
+  --client artifacts/merged-deployment/plain/sgate-client \
+  --server artifacts/merged-deployment/plain/sgate-server \
+  --output artifacts/merged-deployment/plain-results
 ```
 
-配置文件为 UTF-8 文本，每行一个 `key = value`，支持空行、以 `#` 或 `;` 开头的整行注释。例如：
+覆盖独立/隔离 acl_master、WS/WSS、相对/绝对路径八种组合。工作目录与配置目录位于不同深度，重启后切换工作目录；应用密钥和证书按工作目录解析，管理存储、证书和外部页面按 `.cf` 目录解析。每组含 32 路字节完整性检查、命令行覆盖、配置保存/代理应用、进程重启及资源采样。测试要求旧账号和会话文件保持原样、退出会话/流/缓存清空、传输写协程退出、进程消失、端口可重新绑定；`lsof` 留档检查工作进程未持有框架管理套接字。诊断采样仅存在于 overlay 构建中。
+
+构建加 `--race` 后使用 `sgate-client-race`、`sgate-server-race` 可重复竞态对照。`--mode managed --tls ws --paths relative --restarts 3` 可单独验证连续托管重启；其他值见脚本 `--help`。Unix 托管启动只接管 FD 5 状态通道及 FD 6 起的监听套接字，清理框架额外继承且未设置 CLOEXEC 的套接字，避免工作进程持有 `master_ctl` 管理连接；不关闭标准流、普通文件、管道及 Go 自有 CLOEXEC 套接字。
+
+### 应用配置文件
+
+两端均支持 `-config`，所有现有运行参数都可以写入配置文件，键名与命令行参数相同，省略前导 `-`。优先级为：**显式命令行参数 > 配置文件 > 内置默认值**。托管模式自动读取 `-f` 指定的服务文件；未指定 `-config` 和 `-f` 时仅使用命令行参数，不搜索文件。
+
+完整示例见 [客户端配置](sgate-client.cf) 和 [服务端配置](sgate-server.cf)。先修改密码、地址和密钥路径，再启动：
+
+```sh
+./bin/sgate-server -config sgate-server.cf
+./bin/sgate-client -config sgate-client.cf -listen 127.0.0.1:2901
+```
+
+合并配置为一个 `service 名称 { ... }` 块，UTF-8 文本，每行一个 `key = value`（不超过 4095 字节），支持空行、以 `#` 或 `;` 开头的整行注释。例如：
 
 ```ini
+service example-client {
 server = wss://gateway.example.com:8443/tunnel
 key-file = /opt/soft/sgate/conf/sgate.key
 password = 'replace-with-your-password'
@@ -219,25 +242,19 @@ noise-interval-min = 1s
 noise-interval-max = 3s
 noise-min-bytes = 1024
 noise-max-bytes = 10240
+admin_enabled = false
+}
 ```
 
-时间沿用命令行格式（如 `250ms`、`3s`、`2m`），大小为整数、单位为字节。字符串可以不加引号；需要保留首尾空白时使用引号，单引号内容原样保留，双引号支持 `\"`、`\\` 等 Go 字符串转义。不支持行尾注释，值中的 `#`、`;` 和 `=` 都保留。未知键、重复键、文件语法错误、最终生效的参数值无效或文件读取失败会中止启动。命令行已覆盖的文件值不再进行类型转换。相对文件路径相对于进程工作目录解析。
+时间沿用命令行格式（如 `250ms`、`3s`、`2m`），大小为整数、单位为字节。字符串可以不加引号；需要保留首尾空白时使用引号，单引号内容原样保留，双引号支持 `\"`、`\\` 等 Go 字符串转义。`.cf` 通过服务模板 `Config.InitConfig/GetString` 读取；未加引号的值支持以空格加 `#` 开始的行尾注释，密码中的字面 `#` 请放在引号内。旧独立 `.conf` 不支持行尾注释。未知键、重复键、文件语法错误、最终生效的参数值无效或文件读取失败会中止启动。命令行已覆盖的文件值不再进行类型转换。相对文件路径相对于进程工作目录解析。
 
 命令行覆盖按每个参数独立处理，显式 `0` 或空字符串也会生效。例如文件已开启随机间隔白噪音时，关闭发送使用 `-noise-interval-min 0 -noise-interval-max 0`；切换为固定间隔还需加上 `-noise-interval 1s`。固定间隔和随机范围仍须满足原有互斥校验。未提供有效 `key-file` 时继续使用 `SGATE_KEY` 环境变量。
 
-仓库中的 `.cf` 是 **acl-master 启动配置**，与本应用配置格式不同。现有 SSH、VPN 和 Web 启动配置已将原 `master_args` 参数迁移到下列文件，并用 `-config /opt/soft/sgate/conf/<文件名>` 加载：
+所有配置均位于根目录的 `.cf`：`ssh-client.cf`、`ssh-server.cf`、`vpn-client.cf`、`vpn-server.cf`、`web-client.cf` 以及两份通用示例。旧 `conf/*.conf` 已合并并移除，`conf/` 仍可放密钥、管理员账号、会话及令牌等数据文件。程序保留旧独立 `.conf` 的兼容读取，以及显式 `-admin-config` 指定外部管理配置的能力。
 
-| acl-master 配置 | 对应应用配置 |
-| --- | --- |
-| `ssh-client.cf` | [conf/ssh-client.conf](conf/ssh-client.conf) |
-| `ssh-server.cf` | [conf/ssh-server.conf](conf/ssh-server.conf) |
-| `vpn-client.cf` | [conf/vpn-client.conf](conf/vpn-client.conf) |
-| `vpn-server.cf` | [conf/vpn-server.conf](conf/vpn-server.conf) |
-| `web-client.cf` | [conf/web-client.conf](conf/web-client.conf) |
+部署时把所需 `.cf` 安装到 acl_master 的服务配置目录，权限设为 `0600`，并保留程序对该目录的写权限以使用 Web 保存功能。升级前先停止旧服务，再安装新版程序和合并配置，最后启动；管理参数相对路径以安装后的 `.cf` 目录为基准，部署到不同目录时应改为原存储位置的绝对路径，以继续使用已有账号和会话。原业务地址、密码和证书路径保持不变；Web 客户端原密码为空，部署前仍须填写或通过 `-password` 提供。
 
-部署时安装支持 `-config` 的新版二进制，并将所需应用配置复制到 `/opt/soft/sgate/conf/`，例如 `install -m 600 conf/ssh-client.conf /opt/soft/sgate/conf/ssh-client.conf`，然后再重启对应 acl-master 服务。新文件沿用原来的监听地址、转发目标、密码和证书路径；**Web 客户端原本未配置密码，迁移后仍留空，启动前须填写与 Web 服务端一致的密码，或在 `master_args` 中追加 `-password`**。
-
-可以继续在 `master_args` 的 `-config` 后追加覆盖项，例如 `master_args = -config /opt/soft/sgate/conf/vpn-client.conf -listen 127.0.0.1:2901`。配置文件包含密码时，应仅允许部署用户读取。
+`master_args` 可留空，也可直接写覆盖项，例如 `master_args = -noise-interval-min 1s -noise-interval-max 3s`。托管监听仍由 `master_service` 决定；业务 `-listen` 只在独立运行时改变实际绑定端口。不要再将 `master_args` 指向已删除的 `conf/*.conf`。
 
 ### 配置白噪音与重连回归
 
@@ -329,7 +346,8 @@ location /tunnel {
 
 | 参数 | 默认值 | 含义 |
 | --- | --- | --- |
-| `-config` | 无 | 应用配置文件；显式命令行参数优先于文件值 |
+| `-config` | 无 | 合并的服务 `.cf`（兼容旧 `.conf`）；省略时使用框架 `-f` |
+| `-admin-enabled` | false | 启用同一 `.cf` 中的 `admin_` 管理配置；可显式设 false 关闭 |
 | `-key-file` | 无 | 密钥文件；未指定时读取 `SGATE_KEY` |
 | `-password` | 必填 | 连接验证密码，两端保持一致，1～1024 字节 |
 | `-max-streams` | `128` | 每个会话允许的 TCP 流数 |
@@ -371,7 +389,7 @@ location /tunnel {
 -noise-interval 1s -noise-min-bytes 1024 -noise-max-bytes 10240
 ```
 
-这表示每秒调度一次填充，负载大小在 1～10 KiB 间均匀随机选择（包含上下限）。也可使用 `500ms` 等 Go 时间格式；大小参数使用整数，单位为字节，必须满足 `1 <= min <= max <= 16384`。两端独立配置，可以单端发送，也可以双端发送；关闭发送的一端仍能接收并丢弃填充。使用 acl-master 的 `.cf` 配置时，将这些参数追加到该服务的 `master_args` 中。
+这表示每秒调度一次填充，负载大小在 1～10 KiB 间均匀随机选择（包含上下限）。也可使用 `500ms` 等 Go 时间格式；大小参数使用整数，单位为字节，必须满足 `1 <= min <= max <= 16384`。两端独立配置，可以单端发送，也可以双端发送；关闭发送的一端仍能接收并丢弃填充。使用 acl-master 时可直接编辑 `.cf` 的白噪音配置项，也可通过 `master_args` 中的命令行参数覆盖。
 
 如需发送间隔也随机变化，改用以下参数：
 

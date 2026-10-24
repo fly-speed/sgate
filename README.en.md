@@ -13,11 +13,11 @@ sgate owns cancellable shutdown and HTTP/TLS serving around these template APIs 
 Like the template examples, both programs support explicit standalone startup:
 
 ```sh
-./bin/sgate-client -alone -config conf/ssh-client.conf
-./bin/sgate-server -alone -config conf/ssh-server.conf
+./bin/sgate-client -alone -config ssh-client.cf
+./bin/sgate-server -alone -config ssh-server.cf
 ```
 
-Existing direct commands without `-alone` remain valid. Without Web management, `-config` is optional and all application options may be passed on the command line. Web management requires both `-config` and `-admin-config`. Under acl_master, keep `master_args = -config /opt/soft/sgate/conf/ssh-client.conf` (or the server configuration) and omit `-alone`; the framework supplies control arguments and listening descriptors.
+Existing direct commands without `-alone` remain valid. Without Web management, `-config` is optional and all application options may be passed on the command line. Enable embedded management with `-admin-enabled`. Under acl_master, leave `master_args` empty or include only CLI overrides, and omit `-alone`: the framework supplies `-f <service.cf>`, which now contains both proxy and management settings. Standalone mode also accepts `-alone -f ssh-client.cf`.
 
 The five root application `.cf` files now use `master_type = sock` with addresses taken from their existing application configurations. Keep `master_maxproc = 1`, `master_prefork = 1`, `master_reuseport = no`, `master_status_notify = 0`, `master_unpriv = n`, and `master_chroot = n`. Set `master_stop_kill = false` and `master_stop_wait = true` for status-channel shutdown. Credentials, certificates and application addresses are preserved. Process identity is established by acl_master or the service account; in-template privilege changes/chroot are rejected.
 
@@ -27,7 +27,7 @@ When migrating from `master_type = none`, stop the old service first, install th
 
 ```sh
 make build
-python3 scripts/test-acl-master.py --client bin/sgate-client --server bin/sgate-server --output artifacts/acl-master-test
+python3 scripts/test-acl-master.py --merged --client bin/sgate-client --server bin/sgate-server --output artifacts/acl-master-test
 ```
 
 Use `--master` and `--ctl` for other framework installations. The same test accepts race-instrumented binaries and covers WS/WSS, HTTP/HTTPS management, two listeners per role, 32-stream integrity, Web apply, persistent login and framework stop/start/restart.
@@ -36,7 +36,7 @@ For managed stress testing, build disposable diagnostic binaries through Go over
 
 ```sh
 python3 scripts/build-config-soak.py --managed --output artifacts/acl-stress/plain
-python3 scripts/test-acl-master.py --stress --concurrency 128 --rounds 6 \
+python3 scripts/test-acl-master.py --merged --stress --concurrency 128 --rounds 6 \
   --client artifacts/acl-stress/plain/sgate-client \
   --server artifacts/acl-stress/plain/sgate-server --output artifacts/acl-stress/plain-results
 ```
@@ -55,17 +55,17 @@ SGATE_ADMIN_CLIENT_BINARY="$PWD/bin/sgate-client" SGATE_ADMIN_SERVER_BINARY="$PW
 Both programs support an independent, optional management listener. Enable it alongside the application file being managed:
 
 ```sh
-./bin/sgate-client -config conf/sgate-client.conf -admin-config conf/admin-client.conf
-./bin/sgate-server -config conf/sgate-server.conf -admin-config conf/admin-server.conf
+./bin/sgate-client -config sgate-client.cf -admin-enabled
+./bin/sgate-server -config sgate-server.cf -admin-enabled
 ```
 
-The HTML, CSS and JavaScript are external files in `web/admin/`; they are not embedded in the Go binaries. Deploy `bin/`, `conf/` and `web/` together, or set `web-dir` to an absolute UI directory. The default `../web/admin` resolves relative to the management configuration file. Both programs can share one UI directory or use separate ones. Editing/replacing these files takes effect on browser refresh without rebuilding or restarting the proxy. All three files (`index.html`, `app.css`, `app.js`) must exist at startup. Use atomic file replacement when deploying updates.
+The HTML, CSS and JavaScript are external files in `web/admin/`; they are not embedded in the Go binaries. Deploy the executable, `.cf` and `web/`, retaining `conf/` for account/session data. The merged examples set `admin_web_dir = web/admin`, relative to the `.cf`; absolute paths are also supported. Both programs can share one UI directory or use separate ones. Editing/replacing these files takes effect on browser refresh without rebuilding or restarting the proxy. All three files (`index.html`, `app.css`, `app.js`) must exist at startup. Use atomic file replacement when deploying updates.
 
 The process needs search permission on UI directories, read permission on UI files, and write permission on the application configuration's parent directory for validation, backups and atomic replacement. Startup errors preserve the affected path and underlying filesystem error. Missing or unreadable assets at runtime return `503`; authenticated APIs and existing sessions remain available, and restoring the files or permissions restores the page without a restart. A non-writable configuration directory rejects saves without changing the file or running proxy.
 
-Set the application addresses, key and proxy password first. Management defaults to `http://127.0.0.1:9081` for the client and `http://127.0.0.1:9082` for the server; it remains disabled without `-admin-config`. The first visit prompts for an administrator account. Obtain the generated initialization token from the `setup-token-file` path printed in the local startup log; the token itself is never logged. Enter a username, a password of at least 12 characters, and the token in the setup form. Successful setup removes the token. No default account is shipped. The separate `users-file` stores only a salted PBKDF2-HMAC-SHA256 hash with 600,000 iterations; it does not reuse the tunnel password.
+Set the application addresses, key and proxy password first. Management defaults to `http://127.0.0.1:9081` for the client and `http://127.0.0.1:9082` for the server; it remains disabled unless `admin_enabled = true` or `-admin-enabled` is supplied. The first visit prompts for an administrator account. Obtain the generated initialization token from the `setup-token-file` path printed in the local startup log; the token itself is never logged. Enter a username, a password of at least 12 characters, and the token in the setup form. Successful setup removes the token. No default account is shipped. The separate `users-file` stores only a salted PBKDF2-HMAC-SHA256 hash with 600,000 iterations; it does not reuse the tunnel password.
 
-The [client management example](conf/admin-client.conf) and [server example](conf/admin-server.conf) configure `listen`, `web-dir`, `users-file`, `session-dir`, `session-timeout` (default `12h`, fixed absolute expiry), `max-sessions` (default 128), `setup-token-file`, and optional `tls-cert`/`tls-key`. Paths inside management configuration resolve relative to that file's directory, unlike application paths which keep resolving against the process working directory. The session directory must be private (`0700`); generated credential, session, token and backup files use `0600`. Non-loopback management listeners require HTTPS. Cookies are persistent, HttpOnly and SameSite=Strict, with Secure on HTTPS. Login survives process restarts until the original expiry; activity does not renew it. Expiry rejects requests immediately and background cleanup runs at most one minute later. Logout revokes the stored session, and changing the administrator credentials requires the current password and revokes all sessions. Changes to management listener/TLS/storage/timeout settings require a full process restart.
+The [client example](sgate-client.cf) and [server example](sgate-server.cf) contain the management settings in the same service block. Prefix the following legacy management option names with `admin_` and replace hyphens with underscores: `listen`, `web-dir`, `users-file`, `session-dir`, `session-timeout` (default `12h`, fixed absolute expiry), `max-sessions` (default 128), `setup-token-file`, and optional `tls-cert`/`tls-key`. Paths inside management configuration resolve relative to that file's directory, unlike application paths which keep resolving against the process working directory. The session directory must be private (`0700`); generated credential, session, token and backup files use `0600`. Non-loopback management listeners require HTTPS. Cookies are persistent, HttpOnly and SameSite=Strict, with Secure on HTTPS. Login survives process restarts until the original expiry; activity does not renew it. Expiry rejects requests immediately and background cleanup runs at most one minute later. Logout revokes the stored session, and changing the administrator credentials requires the current password and revokes all sessions. Changes to management listener/TLS/storage/timeout settings require a full process restart.
 
 The configuration editor manages only the selected `-config` file and redacts its proxy password. Keep the displayed placeholder to preserve the existing password. Saves validate syntax, effective proxy settings and key/certificate files, check a content revision, back up the old file to `.bak`, and replace it atomically. **Save and restart proxy** applies changes within the process while keeping the management listener and login alive. Existing local application connections close; the peer follows the existing retention rules. Explicit CLI overrides remain in effect and their names are shown. Failed new listener startup attempts to restore the previous running proxy; a failed save-and-restart also restores the prior on-disk file. Interrupted application connections cannot be restored by this rollback.
 
@@ -81,22 +81,30 @@ go test ./internal/app -run '^TestManagementDeploymentBinaries$' -v -count=1 -ti
 
 The test uses temporary deployment trees and loopback listeners, with both HTTP and HTTPS, varied working directories, relative/absolute UI paths, permission failures and recovery. The variables can also point to race-instrumented binaries. Unix permission-denial checks are skipped when running as root.
 
+## Merged configuration deployment regression
+
+Build diagnostic binaries with `python3 scripts/build-config-soak.py --managed --output artifacts/merged-deployment/plain`, then run `python3 scripts/test-merged-deployment.py --client artifacts/merged-deployment/plain/sgate-client --server artifacts/merged-deployment/plain/sgate-server --output artifacts/merged-deployment/plain-results`. Add `--race` to the build and use the `-race` binaries for race detection.
+
+The eight cases cover standalone/isolated acl_master, WS/WSS and relative/absolute paths. They seed accounts and cookies using the legacy split files, remove those files, migrate to `.cf`, and restart from different working directories at a different depth from configuration files. The matrix checks original cookies and password login, CLI overrides, 32-stream integrity, configuration save/apply, restart, idle/closed resource censuses and port rebinding. Descriptor inventories ensure workers do not retain master control sockets. Use `--mode managed --tls ws --paths relative --restarts 3` for repeated managed restart checks. Unix startup closes unrelated inherited sockets lacking CLOEXEC, preserving the reserved state/listener descriptors and Go-owned sockets, files and pipes.
+
 ## Application configuration files
 
-Both programs accept `-config FILE`. Every existing runtime flag can be set using its name without the leading dash. Precedence is **explicit command-line flags > configuration file > built-in defaults**, including explicit zero and empty values. Without `-config`, startup keeps using command-line flags only.
+Both programs accept `-config FILE`. Every existing runtime flag can be set using its name without the leading dash. Precedence is **explicit command-line flags > configuration file > built-in defaults**, including explicit zero and empty values. The framework `-f` file is used when `-config` is omitted; without either flag, startup uses CLI options only.
 
-Complete examples: [client](conf/sgate-client.conf) and [server](conf/sgate-server.conf). Set your password, addresses and key paths before running:
+Complete examples: [client](sgate-client.cf) and [server](sgate-server.cf). Set your password, addresses and key paths before running:
 
 ```sh
-./bin/sgate-server -config conf/sgate-server.conf
-./bin/sgate-client -config conf/sgate-client.conf -listen 127.0.0.1:2901
+./bin/sgate-server -config sgate-server.cf
+./bin/sgate-client -config sgate-client.cf -listen 127.0.0.1:2901
 ```
 
-Files use UTF-8 `key = value` lines. Blank lines and full-line `#` / `;` comments are supported. Durations use Go syntax (`250ms`, `2m`); sizes use integer bytes. Unquoted values are trimmed, single quotes preserve literal content, and double quotes accept Go string escapes. There are no inline comments: `#`, `;`, and `=` inside values are preserved. Unknown or duplicate keys, malformed syntax, invalid effective values and unreadable files fail startup. File values overridden by flags are not converted. Relative paths resolve against the process working directory. `SGATE_KEY` remains the fallback when no key file is supplied.
+Files use UTF-8 `key = value` lines. Blank lines and full-line `#` / `;` comments are supported. Durations use Go syntax (`250ms`, `2m`); sizes use integer bytes. Unquoted values are trimmed, single quotes preserve literal content, and double quotes accept Go string escapes. Native `.cf` files use the template Config.InitConfig/GetString API and support whitespace followed by `#` for inline comments; quote literal `#` in secrets. Legacy flat `.conf` files retain their original comment rules. Unknown or duplicate keys, malformed syntax, invalid effective values and unreadable files fail startup. File values overridden by flags are not converted. Relative paths resolve against the process working directory. `SGATE_KEY` remains the fallback when no key file is supplied.
 
-Overrides apply separately to each option. To disable a configured random padding interval, pass `-noise-interval-min 0 -noise-interval-max 0`; to switch to fixed scheduling, also pass `-noise-interval 1s`. Existing interval validation still applies. The repository's acl-master `.cf` files are launcher configurations: point their `master_args` at an application file, e.g. `-config /opt/soft/sgate/conf/sgate-client.conf`, then append any overrides. Restrict access to files containing passwords, for example with `chmod 600`.
+Overrides apply separately to each option. To disable a configured random padding interval, pass `-noise-interval-min 0 -noise-interval-max 0`; to switch to fixed scheduling, also pass `-noise-interval 1s`. Existing interval validation still applies. The service `.cf` combines framework, proxy and `admin_` settings; `master_args` may be empty or contain CLI overrides. Managed startup automatically reads the framework's `-f` file. Restrict access to files containing passwords, for example with `chmod 600`.
 
-The existing SSH, VPN and Web acl-master `.cf` launchers now load matching `conf/ssh-client.conf`, `conf/ssh-server.conf`, `conf/vpn-client.conf`, `conf/vpn-server.conf` and `conf/web-client.conf` files through absolute `/opt/soft/sgate/conf/` paths. Install the new binaries and the required application files before restarting the services; use mode `600` for application files. Original settings are preserved. The Web client originally had no password: its migrated password stays empty and must be filled in or supplied with `-password` before deployment. Append flags after `-config` in `master_args` to override individual settings.
+The five SSH/VPN/Web `.cf` files preserve existing application values. Generic examples `sgate-client.cf` and `sgate-server.cf` have `master_disable = yes`. The old shipped `conf/*.conf` files have been merged and removed; readers remain backward compatible. Management remains disabled by default. Users, sessions and tokens remain separate data files. Their paths and `admin_web_dir` are relative to the installed `.cf`, so use absolute paths when relocating service files to retain existing login state. Application paths still use the working directory. Stop old services before upgrading binaries and configuration. The Web client password remains empty until supplied at deployment.
+
+Framework and management settings require a full process restart: Web save-only is allowed, but proxy-only apply rejects and rolls back these changes. Application options still support Web proxy restart. Protect service files with mode 0600 and enable directory write access only where Web saving is needed. Use `python3 scripts/test-acl-master.py --merged ...` to run the isolated single-file integration matrix.
 
 ## Build
 

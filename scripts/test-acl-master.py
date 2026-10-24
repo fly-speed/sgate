@@ -103,7 +103,7 @@ class FaultRelay:
         with self.lock: assert not self.peers
 
 
-def stress(args, case, output, admin, addresses, relay, ctl, pid, pid_gone, peers, peers_lock):
+def stress(args, case, output, admin, addresses, relay, ctl, pid, pid_gone, peers, peers_lock, configs):
     """128 application streams share each tunnel; process restart intentionally closes them."""
     samples = []
     def collect(phase):
@@ -111,7 +111,7 @@ def stress(args, case, output, admin, addresses, relay, ctl, pid, pid_gone, peer
         # expire under session-ttl; it is deliberately retained until then.
         def drained():
             for role in admin:
-                path = case/f'app/{role}.conf.metrics'
+                path = pathlib.Path(str(configs[role])+'.metrics')
                 if not path.exists(): return False
                 lines = path.read_text().splitlines()
                 try: v = json.loads(lines[-1])
@@ -120,11 +120,11 @@ def stress(args, case, output, admin, addresses, relay, ctl, pid, pid_gone, peer
                 if v['census']['streams'] or v['census']['pending_bytes']: return False
             return no_backend()
         eventually(drained, 35)
-        for role in admin: write(case/f'app/{role}.conf.collect', phase)
+        for role in admin: write(pathlib.Path(str(configs[role])+'.collect'), phase)
         found = {}
         def poll():
             for role in admin:
-                path = case/f'app/{role}.conf.metrics'
+                path = pathlib.Path(str(configs[role])+'.metrics')
                 if not path.exists(): continue
                 for line in path.read_text().splitlines():
                     try: v = json.loads(line)
@@ -245,6 +245,7 @@ def run(args, secure):
     owned_pids = set()
     master = None
     services = {}
+    configs = {}
     admin = {}
     addresses = {role: [port(), port()] for role in ['client','server']}
     admin_ports = {role:port() for role in ['client','server']}
@@ -278,6 +279,7 @@ def run(args, secure):
         acfg=case/f'app/{role}-admin.conf'
         write(acfg,f'listen = 127.0.0.1:{admin_ports[role]}\nweb-dir = {ROOT}/web/admin\nusers-file = {role}-users.json\nsession-dir = {role}-sessions\nsetup-token-file = {role}-setup.token\nsession-timeout = 1h\n'+(f'tls-cert = {cert}\ntls-key = {tls_key}\n' if secure else ''))
         cf=case/f'conf/service/{role}.cf';services[role]=cf
+        configs[role] = cfg
         write(cf,f'''service sgate-test-{role} {{
  master_disable = no
  master_service = 127.0.0.1|{addresses[role][0]}, 127.0.0.1|{addresses[role][1]}
@@ -301,6 +303,17 @@ def run(args, secure):
  app_threads = 0
 }}
 ''')
+        if args.merged:
+            # A real framework passes -f; no second -config file or admin file.
+            text = cf.read_text().replace(f'master_args = -config {cfg} -admin-config {acfg}', 'master_args = -noise-min-bytes 256')
+            section = '\n# Integrated proxy and management settings\n' + settings + 'admin_enabled = true\n'
+            for line in acfg.read_text().splitlines():
+                admin_key, value = line.split('=', 1)
+                if admin_key.strip() in ['users-file','session-dir','setup-token-file']:
+                    value = str(acfg.parent / value.strip())
+                section += 'admin_' + admin_key.strip().replace('-', '_') + ' = ' + value.strip() + '\n'
+            write(cf, text[:text.rfind('}')] + section + '}\n')
+            cfg.unlink(); acfg.unlink(); configs[role] = cf
         admin[role]=Admin(f'{scheme}://127.0.0.1:{admin_ports[role]}',context)
     write(case/'conf/main.cf',f'''owner_user = {pwd.getpwuid(os.getuid()).pw_name}
 owner_group = {grp.getgrgid(os.getgid()).gr_name}
@@ -339,12 +352,14 @@ scan_subdir = 0
         with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
             return sum(pool.map(lambda index:exchange(round_no,index),range(32)))
     def pid(role):
-        rt=admin[role].runtime();assert rt['listener_owner']=='acl_master';assert len(rt['listeners'])==2
+        rt=admin[role].runtime()
+        if args.merged: assert 'noise-min-bytes' in rt['cli_overrides']
+        assert rt['listener_owner']=='acl_master';assert len(rt['listeners'])==2
         owned_pids.add(int(rt['pid']));return int(rt['pid'])
     def pid_gone(p):
         try:os.kill(p,0);return False
         except ProcessLookupError:return True
-    result={'secure':secure,'listeners_per_role':2,'concurrency':32,'payload_bytes':0,'framework_root':str(case)}
+    result={'merged_config':args.merged,'secure':secure,'listeners_per_role':2,'concurrency':32,'payload_bytes':0,'framework_root':str(case)}
     try:
         master=subprocess.Popen([args.master,'-c',str(case/'conf'),'-l',str(output/'master.log')],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         eventually(lambda:all(admin[role].call('status')['setup_required'] for role in admin))
@@ -361,10 +376,20 @@ scan_subdir = 0
         assert held.recv(1)==b''
         held.close()
         # Framework-owned listener changes are rejected with disk rollback.
-        a=admin['client'];before=(case/'app/client.conf').read_bytes();old=pid('client')
+        a=admin['client'];before=configs['client'].read_bytes();old=pid('client')
         a.apply(lambda text:text.replace('listen = 127.0.0.1:1','listen = 127.0.0.1:2'),409)
-        assert (case/'app/client.conf').read_bytes()==before;assert pid('client')==old
+        assert configs['client'].read_bytes()==before;assert pid('client')==old
+        if args.merged:
+            # Framework/admin settings cannot be applied by replacing only the
+            # proxy worker. Reject and restore the entire service file.
+            a.apply(lambda text:text.replace('admin_session_timeout = 1h','admin_session_timeout = 2h'),409)
+            assert configs['client'].read_bytes()==before;assert pid('client')==old
+            a.apply(lambda text:text.replace('master_prefork = 1','master_prefork = 2'),409)
+            assert configs['client'].read_bytes()==before;assert pid('client')==old
         for round_no,role in enumerate(['client','server'],5):
+            if args.merged:
+                cfg=admin[role].call('config')
+                admin[role].call('config',{'content':cfg['content'].replace('admin_session_timeout = 1h','admin_session_timeout = 2h'),'revision':cfg['revision'],'apply':False},'PUT')
             old=pid(role);ctl(role,'restart');eventually(lambda:admin[role].authenticated() and pid(role)!=old);eventually(lambda:pid_gone(old))
             eventually(lambda:(exchange(round_no,99) is not None))
             result['payload_bytes']+=duplex(round_no)
@@ -374,7 +399,7 @@ scan_subdir = 0
         eventually(lambda:(exchange(7,99) is not None))
         result['payload_bytes']+=duplex(7)
         if args.stress:
-            result['stress'] = stress(args, case, output, admin, addresses, relay, ctl, pid, pid_gone, peers, lock)
+            result['stress'] = stress(args, case, output, admin, addresses, relay, ctl, pid, pid_gone, peers, lock, configs)
         result.update(status='passed',web_apply_same_pid=True,framework_restart_new_pid=True,persistent_sessions=True,listener_edit_rollback=True,state_channel_stop=True)
     finally:
         for role in ['client','server']:
@@ -407,8 +432,9 @@ scan_subdir = 0
             assert 'WARNING: DATA RACE' not in path.read_text(),path
         result['ports_released']=True
         result['harness_threads_released']=True
-        for path in (case/'app').glob('*.metrics*'):
-            (output/path.name).write_bytes(path.read_bytes())
+        for config in configs.values():
+            for path in config.parent.glob(config.name+'.metrics*'):
+                (output/path.name).write_bytes(path.read_bytes())
         if args.stress:
             closed = {}
             for path in output.glob('*.metrics'):
@@ -430,6 +456,7 @@ def main():
     parser.add_argument('--client',required=True);parser.add_argument('--server',required=True)
     parser.add_argument('--master',default='/opt/soft/acl-master/libexec/acl_master');parser.add_argument('--ctl',default='/opt/soft/acl-master/bin/master_ctl')
     parser.add_argument('--output',required=True)
+    parser.add_argument('--merged', action='store_true', help='use one service .cf for proxy, management and framework settings');
     parser.add_argument('--stress',action='store_true');parser.add_argument('--concurrency',type=int,default=128);parser.add_argument('--rounds',type=int,default=6)
     args=parser.parse_args();results=[run(args,secure) for secure in [False,True]]
     print(json.dumps(results))

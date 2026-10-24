@@ -318,3 +318,22 @@ func TestSessionCleanupPreservesUnrelatedFiles(t *testing.T) {
 		t.Fatal("session cleaner deleted unrelated file", e)
 	}
 }
+
+func TestMergedFrameworkSecretsAreRedactedAndRestoredIndependently(t *testing.T) {
+	original := []byte("service test {\n master_args = -password argument-secret\n master_env = SGATE_KEY:environment-secret\n password = \"proxy-secret\"\n}\n")
+	redacted := redactConfig(original)
+	for _, secret := range []string{"argument-secret", "environment-secret", "proxy-secret"} {
+		if strings.Contains(redacted, secret) {
+			t.Fatal("merged service secret exposed")
+		}
+	}
+	restored, e := restoreSecret(redacted, original)
+	if e != nil || restored != string(original) {
+		t.Fatal("secret placeholders restored to wrong fields", e)
+	}
+	updated := strings.Replace(redacted, "password = \""+secretMarker+"\"", "password = new-proxy-secret", 1)
+	restored, e = restoreSecret(updated, original)
+	if e != nil || !strings.Contains(restored, "master_args = -password argument-secret") || !strings.Contains(restored, "password = new-proxy-secret") {
+		t.Fatal("independent secret edit failed", e)
+	}
+}

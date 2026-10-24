@@ -32,6 +32,13 @@ func Open(parent context.Context) (*Runtime, error) {
 	if master.Chroot || master.Unprivileged {
 		return nil, errors.New("sgate requires master_chroot=n and master_unpriv=n; run acl_master under the intended service account")
 	}
+	closed, err := closeInheritedSockets(master.SocketCount)
+	if err != nil {
+		return nil, err
+	}
+	if closed != 0 {
+		log.Printf("acl_master closed %d unrelated inherited sockets", closed)
+	}
 	// Prepare and GetListeners are the official go-service TCP template's
 	// configuration/descriptor API. Do not call its global Run/Wait monitor:
 	// sgate needs a joined, cancellable lifecycle and repeatable listener leases.

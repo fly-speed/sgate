@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sgate/internal/serviceconfig"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -21,10 +22,21 @@ func Parse(fs *flag.FlagSet, args []string) error {
 		return fmt.Errorf("unexpected positional arguments; use named flags")
 	}
 	if *path == "" {
-		return nil
+		if f := fs.Lookup("f"); f != nil && f.Value.String() != "" {
+			*path = f.Value.String()
+		} else {
+			return nil
+		}
 	}
 	explicit := make(map[string]bool)
 	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+	values, merged, err := serviceconfig.Read(*path)
+	if err != nil {
+		return err
+	}
+	if merged {
+		return applyService(fs, values, "", explicit)
+	}
 	f, err := os.Open(*path)
 	if err != nil {
 		return fmt.Errorf("read configuration: %w", err)
@@ -87,4 +99,44 @@ func configValue(value string) (string, error) {
 		return value[1 : len(value)-1], nil
 	}
 	return value, nil
+}
+
+// ParseSection reads management keys in the same service block, independently
+// of the proxy flags. Legacy standalone management files remain supported.
+func ParseSection(fs *flag.FlagSet, path, prefix string) error {
+	values, merged, err := serviceconfig.Read(path)
+	if err != nil {
+		return err
+	}
+	if !merged {
+		return Parse(fs, []string{"-config", path})
+	}
+	return applyService(fs, values, prefix, nil)
+}
+func applyService(fs *flag.FlagSet, values map[string]string, prefix string, explicit map[string]bool) error {
+	for key, value := range values {
+		name := key
+		if prefix != "" {
+			if !strings.HasPrefix(key, prefix) || key == "admin_enabled" {
+				continue
+			}
+			name = strings.ReplaceAll(strings.TrimPrefix(key, prefix), "_", "-")
+		} else {
+			if serviceconfig.FrameworkKey(key) || (strings.HasPrefix(key, "admin_") && key != "admin_enabled") {
+				continue
+			}
+			if key == "admin_enabled" {
+				name = "admin-enabled"
+			}
+		}
+		if name == "config" || fs.Lookup(name) == nil {
+			return fmt.Errorf("unknown or unsupported service option")
+		}
+		if !explicit[name] {
+			if err := fs.Set(name, value); err != nil {
+				return fmt.Errorf("invalid service option %q", name)
+			}
+		}
+	}
+	return nil
 }

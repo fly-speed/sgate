@@ -170,7 +170,7 @@ func TestManyPersistentSessionsExpireAcrossRestarts(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go func() { h.reap(ctx); close(done) }()
+	go func(handler *Handler) { handler.reap(ctx); close(done) }(h)
 	defer func() { cancel(); <-done }()
 	deadline := time.Now().Add(5 * time.Second)
 	for {

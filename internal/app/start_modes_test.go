@@ -23,7 +23,7 @@ func TestStandaloneStartModesBinaries(t *testing.T) {
 		t.Skip("set SGATE_ADMIN_CLIENT_BINARY and SGATE_ADMIN_SERVER_BINARY")
 	}
 	for _, secure := range []bool{false, true} {
-		for _, mode := range []string{"implicit-cli", "alone-cli", "alone-config"} {
+		for _, mode := range []string{"implicit-cli", "alone-cli", "alone-config", "alone-merged", "f-merged"} {
 			t.Run(fmt.Sprintf("tls=%t/%s", secure, mode), func(t *testing.T) {
 				dir := t.TempDir()
 				key := filepath.Join(dir, "test.key")
@@ -111,7 +111,7 @@ func TestStandaloneStartModesBinaries(t *testing.T) {
 							args = append(args, "-tls-ca", cert)
 						}
 					}
-					if mode == "alone-config" {
+					if mode == "alone-config" || strings.HasSuffix(mode, "merged") {
 						// Explicit CLI listen/max-streams override the file. Running 16 streams
 						// catches accidentally using the file's limit of one stream.
 						text := "listen = 127.0.0.1:1\nmax-streams = 1\n"
@@ -121,9 +121,16 @@ func TestStandaloneStartModesBinaries(t *testing.T) {
 							}
 							text += strings.TrimPrefix(args[i], "-") + " = " + strconv.Quote(args[i+1]) + "\n"
 						}
-						config := filepath.Join(dir, role+".conf")
+						if strings.HasSuffix(mode, "merged") {
+							text = "service standalone {\n master_service = 127.0.0.1|1\n master_args =\n" + text + "}\n"
+						}
+						config := filepath.Join(dir, role+".cf")
 						deploymentWrite(t, config, []byte(text))
-						args = []string{"-config", config, "-listen", addresses[role], "-max-streams", "64"}
+						option := "-config"
+						if mode == "f-merged" {
+							option = "-f"
+						}
+						args = []string{option, config, "-listen", addresses[role], "-max-streams", "64"}
 					}
 					if mode != "implicit-cli" {
 						args = append(args, "-alone")

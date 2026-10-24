@@ -24,3 +24,6 @@
 /conf/admin-*-sessions/
 /conf/admin-*-setup.token
 /conf/*.conf.bak
+
+# Backups of unified service configuration files
+/*.cf.bak

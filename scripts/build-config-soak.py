@@ -57,6 +57,7 @@ for role in ['client','server']:
  s=(repo/f'cmd/sgate-{role}/main.go').read_text()
  s=edit_once(s,'import (','import (\n "bytes"\n "encoding/json"\n "runtime"\n "runtime/debug"\n "os/exec"\n "strconv"\n "strings"')
  if a.managed:s=edit_once(s,'if aclservice.Enabled() {','if aclservice.Enabled() {\n stopMetrics:=configSoakMetrics()\n defer stopMetrics()')
+ if a.managed:s=edit_once(s,'if *adminConfig != "" {','if *adminConfig != "" {\n stopMetrics:=configSoakMetrics()\n defer stopMetrics()')
  if role=='client':s=edit_once(s,'listener, err := net.Listen', 'stopMetrics:=configSoakMetrics()\n defer stopMetrics()\n listener, err := net.Listen')
  else:s=edit_once(s,'defer proxy.Close()','stopMetrics:=configSoakMetrics()\n defer func(){proxy.Close();stopMetrics()}()')
  overlay(f'cmd/sgate-{role}/main.go',s+'\n'+metrics)

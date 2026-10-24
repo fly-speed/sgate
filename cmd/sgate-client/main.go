@@ -19,6 +19,7 @@ import (
 )
 
 func main() {
+	adminEnabled := flag.Bool("admin-enabled", false, "enable management configured in the same service .cf")
 	adminConfig := flag.String("admin-config", "", "separate Web management configuration (disabled when empty)")
 	listen := flag.String("listen", "127.0.0.1:9000", "local TCP listen address")
 	server := flag.String("server", "", "server WebSocket URL (required)")
@@ -39,6 +40,12 @@ func main() {
 	noiseMax := flag.Int("noise-max-bytes", 10*1024, "maximum random padding payload bytes (up to 16384)")
 	if err := cli.Parse(flag.CommandLine, os.Args[1:]); err != nil {
 		log.Fatal(err)
+	}
+	if *adminEnabled && *adminConfig == "" {
+		*adminConfig = flag.Lookup("config").Value.String()
+		if *adminConfig == "" {
+			log.Fatal("admin-enabled requires a configuration file")
+		}
 	}
 	if aclservice.Enabled() {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

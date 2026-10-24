@@ -8,16 +8,19 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"sgate/internal/aclservice"
 	"sgate/internal/admin"
 	"sgate/internal/cli"
+	"sgate/internal/serviceconfig"
 	"sgate/internal/tunnel"
 )
 
@@ -120,6 +123,7 @@ type controller struct {
 	overrides  []string
 	managed    *aclservice.Pool
 	wrapHTTP   func(net.Listener, http.Handler) http.Handler
+	controls   map[string]string
 }
 
 func Run(ctx context.Context, role string, fs *flag.FlagSet, args []string, adminPath string) error {
@@ -138,6 +142,11 @@ func RunACL(ctx context.Context, role string, fs *flag.FlagSet, args []string, a
 
 func run(ctx context.Context, role string, fs *flag.FlagSet, args []string, adminPath string, managed *aclservice.Pool, wrapHTTP func(net.Listener, http.Handler) http.Handler) error {
 	c := &controller{ctx: ctx, original: fs, args: append([]string(nil), args...), role: role, path: fs.Lookup("config").Value.String(), stats: tunnel.NewStats(), managed: managed, wrapHTTP: wrapHTTP}
+	var controlErr error
+	c.controls, controlErr = processSettings(c.path)
+	if controlErr != nil {
+		return controlErr
+	}
 	if c.path == "" && adminPath != "" {
 		return errors.New("Web management requires an application -config file")
 	}
@@ -219,6 +228,13 @@ func (c *controller) apply() error {
 	if c.managed != nil && next.listen != c.current.listen {
 		return errors.New("监听端口由 acl_master 管理；请修改 .cf 的 master_service 并通过 master_ctl 重启服务")
 	}
+	controls, e := processSettings(c.path)
+	if e != nil {
+		return e
+	}
+	if !maps.Equal(controls, c.controls) {
+		return errors.New("框架或管理界面配置已改变；请保存后重启整个进程，代理热重启不能应用这些配置")
+	}
 	if c.worker != nil {
 		if e = c.worker.stop(); errors.Is(e, errStopTimeout) {
 			c.lastError = e.Error()
@@ -244,6 +260,26 @@ func (c *controller) apply() error {
 	return nil
 }
 func (c *controller) load(candidate string) (definition, error) {
+	path := candidate
+	if path == "" {
+		path = c.path
+	}
+	if path != "" {
+		values, merged, e := serviceconfig.Read(path)
+		if e != nil {
+			return definition{}, e
+		}
+		if merged {
+			for key := range values {
+				if strings.HasPrefix(key, "admin_") {
+					if _, e := admin.LoadConfig(path); e != nil {
+						return definition{}, e
+					}
+					break
+				}
+			}
+		}
+	}
 	if candidate != "" {
 		check := cli.CloneFlags(c.original)
 		// Validate types even for a disk value hidden by a CLI override.
@@ -263,6 +299,23 @@ func (c *controller) load(candidate string) (definition, error) {
 	d.managed = c.managed
 	d.wrapHTTP = c.wrapHTTP
 	return d, e
+}
+
+func processSettings(path string) (map[string]string, error) {
+	if path == "" {
+		return nil, nil
+	}
+	values, merged, e := serviceconfig.Read(path)
+	if e != nil || !merged {
+		return nil, e
+	}
+	controls := make(map[string]string)
+	for key, value := range values {
+		if serviceconfig.FrameworkKey(key) || strings.HasPrefix(key, "admin_") {
+			controls[key] = value
+		}
+	}
+	return controls, nil
 }
 func build(role string, fs *flag.FlagSet, stats *tunnel.Stats) (definition, error) {
 	text := func(n string) string { return fs.Lookup(n).Value.String() }

@@ -297,14 +297,22 @@ func (h *Handler) changeAccount(w http.ResponseWriter, r *http.Request, s loginS
 	h.clearCookie(w, r)
 	reply(w, 200, map[string]bool{"login_required": true})
 }
-func passwordLine(line string) bool {
+func secretConfigKey(line string) string {
 	key, _, ok := strings.Cut(line, "=")
-	return ok && strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(key), "\uFEFF")) == "password"
+	if !ok {
+		return ""
+	}
+	key = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(key), "\uFEFF"))
+	switch key {
+	case "password", "master_args", "master_env":
+		return key
+	}
+	return ""
 }
 func redactConfig(b []byte) string {
 	lines := strings.Split(string(b), "\n")
 	for i, line := range lines {
-		if passwordLine(line) {
+		if secretConfigKey(line) != "" {
 			key, _, _ := strings.Cut(line, "=")
 			lines[i] = key + "= " + strconv.Quote(secretMarker)
 		}
@@ -312,21 +320,21 @@ func redactConfig(b []byte) string {
 	return strings.Join(lines, "\n")
 }
 func restoreSecret(content string, current []byte) (string, error) {
-	saved := ""
+	saved := make(map[string]string)
 	for _, line := range strings.Split(string(current), "\n") {
-		if passwordLine(line) {
-			saved = line
+		if key := secretConfigKey(line); key != "" {
+			saved[key] = line
 		}
 	}
 	lines := strings.Split(content, "\n")
 	for i, line := range lines {
-		if passwordLine(line) {
+		if key := secretConfigKey(line); key != "" {
 			_, value, _ := strings.Cut(line, "=")
 			if value = strings.TrimSpace(value); value == strconv.Quote(secretMarker) || value == secretMarker {
-				if saved == "" {
+				if saved[key] == "" {
 					return "", errors.New("没有可保留的密码，请填写代理密码")
 				}
-				lines[i] = saved
+				lines[i] = saved[key]
 			}
 		}
 	}
