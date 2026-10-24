@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"flag"
+	"fmt"
 	"net"
 
 	"sgate/internal/admin"
@@ -73,3 +74,22 @@ func (c *Client) Close() {
 	}
 }
 func (c *Client) Err() error { return c.controller.tcp.Err() }
+
+// 托管模式只使用框架继承的端口，不能悄悄遗漏映射或接入未配置的端口。
+func validateProxyListeners(routes []clientProxy, addresses []string) error {
+	want := make(map[string]bool, len(routes))
+	for _, route := range routes {
+		want[route.port] = true
+	}
+	for _, address := range addresses {
+		_, port, err := net.SplitHostPort(address)
+		if err != nil || !want[port] {
+			return fmt.Errorf("master_service listeners must match proxies listen ports")
+		}
+		delete(want, port)
+	}
+	if len(want) != 0 {
+		return fmt.Errorf("master_service is missing proxies listen ports")
+	}
+	return nil
+}

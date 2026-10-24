@@ -15,6 +15,7 @@ type clientOptions struct {
 	adminConfig      string
 	listen           string
 	server           string
+	proxies          string
 	addr             string
 	sendAddr         bool
 	keyFile          string
@@ -49,7 +50,8 @@ func parseClientOptions() (clientOptions, error) {
 		"separate Web management configuration (disabled when empty)",
 	)
 	flag.StringVar(&options.listen, "listen", "127.0.0.1:9000", "local TCP listen address")
-	flag.StringVar(&options.server, "server", "", "server WebSocket URL (required)")
+	flag.StringVar(&options.server, "server", "", "server WebSocket URL (required unless proxies is set)")
+	flag.StringVar(&options.proxies, "proxies", "", "JSON array of listen/server/addr mappings; empty uses single-proxy settings")
 	flag.BoolVar(
 		&options.sendAddr,
 		"send-addr",

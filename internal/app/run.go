@@ -132,6 +132,7 @@ func (c *controller) status() any {
 		"tcp_framework":             c.tcpFramework(),
 		"tcp_connections":           tcpConnections,
 		"tcp_closed_connections":    c.tcpClosed.Load(),
+		"proxy_count":               max(1, len(c.current.proxies)),
 		"management_shared":         c.sharedMode,
 		"management_path":           adminRoute,
 		"service_restart_available": owner == "acl_master" && c.servicePath != "",

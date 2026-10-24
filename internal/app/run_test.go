@@ -44,6 +44,7 @@ func appFlags(role string) *flag.FlagSet {
 	fs.Int("noise-min-bytes", 1024, "")
 	fs.Int("noise-max-bytes", 10240, "")
 	if role == "client" {
+		fs.String("proxies", "", "")
 		fs.String("server", "", "")
 		fs.String("addr", "", "")
 		fs.Bool("send-addr", true, "")

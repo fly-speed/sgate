@@ -16,6 +16,7 @@ import (
 type definition struct {
 	listen   string
 	client   *tunnel.ClientConfig
+	proxies  []clientProxy
 	server   *tunnel.ServerConfig
 	tls      *tls.Config
 	managed  *aclservice.Pool
@@ -35,6 +36,14 @@ type instance struct {
 }
 
 func (d definition) start(ctx context.Context, stats *tunnel.Stats) (*instance, error) {
+	if len(d.proxies) > 0 && d.tcp == nil {
+		return nil, errors.New("multi-proxy requires the go-service TCP lifecycle")
+	}
+	if len(d.proxies) > 0 && d.tcp.Managed() {
+		if err := validateProxyListeners(d.proxies, d.tcp.Addresses()); err != nil {
+			return nil, err
+		}
+	}
 	if d.service != nil {
 		return d.startService(stats)
 	}
@@ -52,7 +61,9 @@ func (d definition) start(ctx context.Context, stats *tunnel.Stats) (*instance, 
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	i := &instance{cancel: cancel, listener: l, done: make(chan struct{})}
-	if d.client != nil {
+	if len(d.proxies) > 0 {
+		go func() { i.err = runClientProxies(runCtx, l, d.proxies); close(i.done) }()
+	} else if d.client != nil {
 		c, e := tunnel.NewClient(*d.client)
 		if e != nil {
 			l.Close()

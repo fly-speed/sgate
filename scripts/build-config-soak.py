@@ -67,6 +67,7 @@ func ConfigSoakEndpoints() []map[string]any {
 func ConfigSoakCensus() map[string]int64 {
 	v := map[string]int64{
 		"sessions":       0,
+		"client_tunnels": 0,
 		"registered_servers": 0,
 		"streams":        0,
 		"pending_bytes":  0,
@@ -91,6 +92,7 @@ func ConfigSoakCensus() map[string]int64 {
 		state.mu.Lock()
 		defer state.mu.Unlock()
 		if state.current != nil {
+			v["client_tunnels"]++
 			v["sessions"]++
 			add(state.current)
 		}

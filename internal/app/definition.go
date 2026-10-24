@@ -32,6 +32,22 @@ func (v configValues) duration(name string) time.Duration {
 func build(role string, fs *flag.FlagSet, stats *tunnel.Stats) (definition, error) {
 	values := configValues{flags: fs}
 	d := definition{listen: values.text("listen")}
+	if role == "client" && fs.Lookup("proxies") != nil && strings.TrimSpace(values.text("proxies")) != "" {
+		secret, err := cli.LoadKey(values.text("key-file"))
+		if err != nil {
+			return d, err
+		}
+		d.proxies, err = values.multiClientConfigs(secret, values.options(stats))
+		if err != nil {
+			return d, err
+		}
+		addresses := make([]string, len(d.proxies))
+		for index, route := range d.proxies {
+			addresses[index] = route.Listen
+		}
+		d.listen = strings.Join(addresses, ",")
+		return d, nil
+	}
 	_, port, err := net.SplitHostPort(d.listen)
 	if err != nil {
 		return d, err
@@ -72,22 +88,26 @@ func (v configValues) clientConfig(secret []byte, options tunnel.Options) (*tunn
 	if err != nil {
 		return nil, err
 	}
-	config := tunnel.ClientConfig{
+	config := v.clientSettings(secret, options)
+	config.TLSConfig = tlsConfig
+	if _, err := tunnel.NewClient(config); err != nil {
+		return nil, err
+	}
+	return &config, nil
+}
+
+func (v configValues) clientSettings(secret []byte, options tunnel.Options) tunnel.ClientConfig {
+	return tunnel.ClientConfig{
 		Key:            secret,
 		Password:       v.text("password"),
 		URL:            v.text("server"),
 		Addr:           v.text("addr"),
 		OmitAddr:       v.text("send-addr") == "false",
-		TLSConfig:      tlsConfig,
 		ReconnectMin:   v.duration("reconnect-min"),
 		ReconnectMax:   v.duration("reconnect-max"),
 		OfflineTimeout: v.duration("offline-timeout"),
 		Options:        options,
 	}
-	if _, err := tunnel.NewClient(config); err != nil {
-		return nil, err
-	}
-	return &config, nil
 }
 
 func clientTLSConfig(caPath string) (*tls.Config, error) {

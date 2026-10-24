@@ -772,3 +772,15 @@ python3 -B scripts/diagnose-network-memory-parallel.py \
 客户端 TCP 入口统一使用本地扩展的 `go-service` 模板：`TcpServiceInit → AcceptHandler/CloseHandler → Run`，独立启动与 acl_master 托管共用生命周期。管理 HTTP/HTTPS 端口由独立协程监听；保存应用代理配置不会重建管理监听或清除登录会话。TCP 回调在应用流关闭后才返回，使框架连接计数覆盖完整连接生命周期，并保留 TCP 半关闭能力。独立模式支持端口热修改及失败回滚，托管模式的业务端口由 acl_master 持有，修改后需通过 master_ctl 重启。运行状态提供 `tcp_framework=go-service`、当前连接数 `tcp_connections` 和累计关闭连接数 `tcp_closed_connections`。
 
 `third_party/go-service` 基于 v1.1.2 增加可取消的运行上下文、等待退出和可重启代理工作实例；通过 go.mod 的本地 replace 使用，标准 vendor 由 `scripts/sync-go-vendor.py` 同步。参考示例 `vendor/go-service/examples/go-echod` 保持原样。
+
+客户端支持用一个进程合并多个 TCP 代理。在 `sgate-client.cf` 的 service 块中配置：
+
+```ini
+proxies = '[{"listen":"127.0.0.1:9001","server":"wss://gateway.example.com:8081/tunnel?addr=127.0.0.1:22"},{"listen":"127.0.0.1:9002","server":"wss://gateway.example.com:8081/tunnel?addr=backend.example.com:8088"}]'
+```
+
+`proxies` 留空时保留原 `listen/server/addr` 单代理行为；非空时使用数组中的监听地址和远程 URL，顶层 `listen/server/addr` 不参与映射。每项必填 `listen` 和 `server`，可选 `addr` 覆盖该项 URL 中的地址。每个本地端口必须唯一且不能为 0，最多 64 项。远程地址仍须在服务端 `allowed-targets` 中；未携带 addr 时使用服务端默认后端。所有映射共用顶层密钥、密码、CA、心跳、重连和随机白噪音设置；`send-addr=false` 对所有映射生效。每个映射拥有独立长连接、会话和有界重放缓存，`max-streams/buffer-bytes` 按映射分别限制，管理界面带宽为整个进程汇总。
+
+命令行 `-proxies '<JSON数组>'` 覆盖文件中的整个列表，`-proxies ''` 切回单代理设置。独立启动会由 go-service 同时监听所有端口；托管模式还需将 `master_service` 设为相同端口，例如 `127.0.0.1|9001,127.0.0.1|9002`。启动时逐项核对继承端口，缺失、多余或重复都拒绝启动。管理界面可保存并应用映射；应用会关闭原业务连接并重建各代理，登录会话保持有效。独立模式支持修改监听端口及绑定失败回滚；托管模式修改端口须保存 `.cf` 后通过 master_ctl 重启，原端口上的远程 URL/addr 修改可热应用。
+
+多代理集成回归脚本为 `scripts/test-client-multi-proxy.py`，需提供 `build-config-soak.py --managed --race` 生成的诊断二进制。覆盖独立/托管、WS/WSS、同一客户端进程三个监听、128 并发、随机白噪音、频繁断线、Web 配置映射热切换、失败回滚、连续重启及登录会话和资源释放。

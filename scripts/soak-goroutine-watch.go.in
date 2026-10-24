@@ -71,8 +71,10 @@ func configSoakWatch(config string) func() {
 				// The observer adds one goroutine to the original 15/16 baseline.
 				// A nonempty stream table explains normal high-concurrency growth.
 				idleLimit := 24
-				if census["attached"] > 1 {
-					idleLimit += 8 * int(census["attached"]-1)
+				// 多端口客户端拥有多个常驻隧道，其正常空闲协程也需计入。
+				activeTunnels := max(census["attached"], census["client_tunnels"])
+				if activeTunnels > 1 {
+					idleLimit += 8 * int(activeTunnels-1)
 				}
 				high := g > idleLimit && census["streams"] == 0 && census["pending_bytes"] == 0
 				reason := "idle goroutine count"
