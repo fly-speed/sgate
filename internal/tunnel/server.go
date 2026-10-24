@@ -197,8 +197,21 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	e.inUse = true
+	var resumeDeadline time.Time
+	if resume == "1" {
+		resumeDeadline = e.idle.Add(s.cfg.SessionTTL)
+	}
 	s.mu.Unlock()
-	defer func() { s.mu.Lock(); e.inUse = false; e.idle = time.Now(); s.mu.Unlock() }()
+	confirmed := false
+	defer func() {
+		s.mu.Lock()
+		e.inUse = false
+		// A failed upgrade or an abandoned resume must not renew an old session.
+		if confirmed {
+			e.idle = time.Now()
+		}
+		s.mu.Unlock()
+	}()
 	serverNonce := randomID()
 	headers := http.Header{}
 	headers.Set("X-Sgate-Nonce", serverNonce)
@@ -209,6 +222,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.cfg.Options.Logf("tunnel connected")
-	err = e.session.transport(ws, newCodec(s.cfg.Key, id, nonce, serverNonce, false))
+	err = e.session.transportConfirmed(ws, newCodec(s.cfg.Key, id, nonce, serverNonce, false), resumeDeadline, func() { confirmed = true })
 	s.cfg.Options.Logf("tunnel disconnected: %v", err)
 }

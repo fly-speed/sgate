@@ -14,7 +14,7 @@ stress:
 	SGATE_STRESS=1 SGATE_STRESS_REPORT="$(SGATE_STRESS_REPORT)" go test -run '^TestStressReconnectResources$$' -v -timeout 10m ./internal/tunnel
 
 weaknet:
-	go test -race -count=3 -run '^(TestWeakNetwork|TestHeartbeatNotStarved)' -v -timeout 3m ./internal/tunnel
+	go test -race -count=3 -run '^(TestWeakNetwork|TestNoiseWeakNetwork|TestHeartbeatNotStarved)' -v -timeout 8m ./internal/tunnel
 
 vet:
 	go vet ./...

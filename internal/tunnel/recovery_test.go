@@ -70,6 +70,11 @@ func newRecoveryFixture(t *testing.T, ttl, offline time.Duration, initialMode st
 
 func newRecoveryFixtureOptions(t *testing.T, ttl, offline time.Duration, initialMode string, options Options, configure ...func(*ClientConfig)) *recoveryFixture {
 	t.Helper()
+	return newRecoveryFixtureBackend(t, ttl, offline, initialMode, options, nil, configure...)
+}
+
+func newRecoveryFixtureBackend(t *testing.T, ttl, offline time.Duration, initialMode string, options Options, backend func(net.Conn), configure ...func(*ClientConfig)) *recoveryFixture {
+	t.Helper()
 	f := &recoveryFixture{t: t, done: make(chan error, 1)}
 	listener, e := net.Listen("tcp", "127.0.0.1:0")
 	if e != nil {
@@ -90,7 +95,11 @@ func newRecoveryFixtureOptions(t *testing.T, ttl, offline time.Duration, initial
 				defer f.backendWG.Done()
 				defer c.Close()
 				defer f.backendConns.Delete(c)
-				_, _ = io.Copy(c, readCounter{c, &f.backendBytes})
+				if backend != nil {
+					backend(c)
+				} else {
+					_, _ = io.Copy(c, readCounter{c, &f.backendBytes})
+				}
 			}()
 		}
 	}()
@@ -202,8 +211,11 @@ func (f *recoveryFixture) remoteSession() *session {
 func (f *recoveryFixture) attached() bool { return f.remoteSession() != nil }
 func (f *recoveryFixture) disconnect() {
 	f.blocked.Store(true)
+	client := f.clientSession()
+	var remotes []*session
 	f.server.mu.Lock()
 	for _, e := range f.server.sessions {
+		remotes = append(remotes, e.session)
 		e.session.mu.Lock()
 		if e.session.active != nil {
 			e.session.active.Close()
@@ -212,6 +224,12 @@ func (f *recoveryFixture) disconnect() {
 	}
 	f.server.mu.Unlock()
 	waitFor(f.t, "server detach", func() bool { return !f.attached() })
+	if recoveryNoiseEnabled(f.cfg.Options) {
+		assertRecoveryNoiseStopped(f.t, client)
+		for _, remote := range remotes {
+			assertRecoveryNoiseStopped(f.t, remote)
+		}
+	}
 }
 func (f *recoveryFixture) dial() net.Conn {
 	f.t.Helper()
@@ -224,6 +242,11 @@ func (f *recoveryFixture) dial() net.Conn {
 	return c
 }
 func sessionReleased(s *session) bool {
+	// transport returns only after its writer (and deferred timer.Stop) finishes.
+	if !s.transportMu.TryLock() {
+		return false
+	}
+	defer s.transportMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.closed && len(s.streams) == 0 && s.pending == nil && s.pendingBytes == 0 && s.active == nil
@@ -298,12 +321,24 @@ func (f *recoveryFixture) assertFreshConnection() {
 		}
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		return len(s.streams) == 0 && s.pending == nil && s.pendingBytes == 0
+		clean := len(s.streams) == 0 && s.pending == nil && s.pendingBytes == 0
+		client := f.clientSession()
+		client.mu.Lock()
+		clean = clean && len(client.streams) == 0 && client.pending == nil && client.pendingBytes == 0
+		client.mu.Unlock()
+		return clean
 	})
+	warmupRecoveryNoise(f.t, f)
 }
 
 func TestLongOutageReleasesStateBeforeNetworkReturns(t *testing.T) {
-	f := newRecoveryFixture(t, 500*time.Millisecond, 350*time.Millisecond, "")
+	testLongOutageReleasesStateBeforeNetworkReturns(t, testOptions(), "")
+}
+
+func testLongOutageReleasesStateBeforeNetworkReturns(t *testing.T, options Options, mode string) {
+	t.Helper()
+	f := newRecoveryFixtureOptions(t, 500*time.Millisecond, 350*time.Millisecond, mode, options)
+	warmupRecoveryNoise(t, f)
 	app := f.dial()
 	if e := exchange(app, []byte("baseline")); e != nil {
 		t.Fatal(e)
@@ -323,7 +358,13 @@ func TestLongOutageReleasesStateBeforeNetworkReturns(t *testing.T) {
 }
 
 func TestServerRestartDropsOldQueuesAndAcceptsFreshConnections(t *testing.T) {
-	f := newRecoveryFixture(t, time.Minute, 5*time.Second, "")
+	testServerRestartDropsOldQueuesAndAcceptsFreshConnections(t, testOptions(), "")
+}
+
+func testServerRestartDropsOldQueuesAndAcceptsFreshConnections(t *testing.T, options Options, mode string) {
+	t.Helper()
+	f := newRecoveryFixtureOptions(t, time.Minute, 5*time.Second, mode, options)
+	warmupRecoveryNoise(t, f)
 	app := f.dial()
 	if e := exchange(app, []byte("baseline")); e != nil {
 		t.Fatal(e)
@@ -353,7 +394,13 @@ func TestServerRestartDropsOldQueuesAndAcceptsFreshConnections(t *testing.T) {
 }
 
 func TestSessionExpiryWithFullBuffersReleasesOldConnections(t *testing.T) {
-	f := newRecoveryFixture(t, 200*time.Millisecond, 5*time.Second, "")
+	testSessionExpiryWithFullBuffersReleasesOldConnections(t, testOptions(), "")
+}
+
+func testSessionExpiryWithFullBuffersReleasesOldConnections(t *testing.T, options Options, mode string) {
+	t.Helper()
+	f := newRecoveryFixtureOptions(t, 200*time.Millisecond, 5*time.Second, mode, options)
+	warmupRecoveryNoise(t, f)
 	app := f.dial()
 	if e := exchange(app, []byte("baseline")); e != nil {
 		t.Fatal(e)
@@ -388,7 +435,13 @@ func TestStalledHandshakeCannotExtendOfflineRetention(t *testing.T) {
 }
 
 func TestRepeatedServerRestartsReleaseOldSessions(t *testing.T) {
-	f := newRecoveryFixture(t, time.Minute, 5*time.Second, "")
+	testRepeatedServerRestartsReleaseOldSessions(t, testOptions(), "")
+}
+
+func testRepeatedServerRestartsReleaseOldSessions(t *testing.T, options Options, mode string) {
+	t.Helper()
+	f := newRecoveryFixtureOptions(t, time.Minute, 5*time.Second, mode, options)
+	warmupRecoveryNoise(t, f)
 	base := runtime.NumGoroutine()
 	for i := 0; i < 5; i++ {
 		app := f.dial()
@@ -415,7 +468,13 @@ func TestLongRecoveryDefaultOfflineWindow(t *testing.T) {
 	if os.Getenv("SGATE_RECOVERY_LONG") != "1" {
 		t.Skip("set SGATE_RECOVERY_LONG=1 for the real two-minute outage test")
 	}
-	f := newRecoveryFixture(t, 2*time.Minute, 0, "")
+	testLongRecoveryDefaultOfflineWindow(t, testOptions(), "")
+}
+
+func testLongRecoveryDefaultOfflineWindow(t *testing.T, options Options, mode string) {
+	t.Helper()
+	f := newRecoveryFixtureOptions(t, 2*time.Minute, 0, mode, options)
+	warmupRecoveryNoise(t, f)
 	app := f.dial()
 	if e := exchange(app, []byte("baseline")); e != nil {
 		t.Fatal(e)
@@ -425,8 +484,17 @@ func TestLongRecoveryDefaultOfflineWindow(t *testing.T) {
 	start := time.Now()
 	f.disconnect()
 	f.fillQueues(app, client, remote)
+	clientNoise, remoteNoise := recoveryNoiseSent(client), recoveryNoiseSent(remote)
 	deadline := time.Now().Add(125 * time.Second)
+	logAt := time.Now().Add(30 * time.Second)
 	for !sessionReleased(client) || !sessionReleased(remote) {
+		if recoveryNoiseSent(client) != clientNoise || recoveryNoiseSent(remote) != remoteNoise {
+			t.Fatal("padding continued on detached transport")
+		}
+		if time.Now().After(logAt) {
+			t.Logf("offline %s: old padding writers stopped; waiting for retention expiry", time.Since(start).Round(time.Second))
+			logAt = time.Now().Add(30 * time.Second)
+		}
 		if time.Now().After(deadline) {
 			t.Fatal("default offline window failed to release state")
 		}

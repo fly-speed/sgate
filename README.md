@@ -74,6 +74,73 @@ openssl rand -hex 32 > sgate.key
 
 也可以在两端用 `SGATE_KEY` 环境变量传入 64 位十六进制密钥；指定 `-key-file` 时优先使用文件内容。
 
+### 应用配置文件
+
+两端均支持 `-config`，所有现有运行参数都可以写入配置文件，键名与命令行参数相同，省略前导 `-`。优先级为：**显式命令行参数 > 配置文件 > 内置默认值**。不指定 `-config` 时仍按原有命令行方式启动，不自动寻找配置文件。
+
+完整示例见 [客户端配置](conf/sgate-client.conf) 和 [服务端配置](conf/sgate-server.conf)。先修改密码、地址和密钥路径，再启动：
+
+```sh
+./bin/sgate-server -config conf/sgate-server.conf
+./bin/sgate-client -config conf/sgate-client.conf -listen 127.0.0.1:2901
+```
+
+配置文件为 UTF-8 文本，每行一个 `key = value`，支持空行、以 `#` 或 `;` 开头的整行注释。例如：
+
+```ini
+server = wss://gateway.example.com:8443/tunnel
+key-file = /opt/soft/sgate/conf/sgate.key
+password = 'replace-with-your-password'
+heartbeat = 20s
+heartbeat-timeout = 90s
+noise-interval = 0
+noise-interval-min = 1s
+noise-interval-max = 3s
+noise-min-bytes = 1024
+noise-max-bytes = 10240
+```
+
+时间沿用命令行格式（如 `250ms`、`3s`、`2m`），大小为整数、单位为字节。字符串可以不加引号；需要保留首尾空白时使用引号，单引号内容原样保留，双引号支持 `\"`、`\\` 等 Go 字符串转义。不支持行尾注释，值中的 `#`、`;` 和 `=` 都保留。未知键、重复键、文件语法错误、最终生效的参数值无效或文件读取失败会中止启动。命令行已覆盖的文件值不再进行类型转换。相对文件路径相对于进程工作目录解析。
+
+命令行覆盖按每个参数独立处理，显式 `0` 或空字符串也会生效。例如文件已开启随机间隔白噪音时，关闭发送使用 `-noise-interval-min 0 -noise-interval-max 0`；切换为固定间隔还需加上 `-noise-interval 1s`。固定间隔和随机范围仍须满足原有互斥校验。未提供有效 `key-file` 时继续使用 `SGATE_KEY` 环境变量。
+
+仓库中的 `.cf` 是 **acl-master 启动配置**，与本应用配置格式不同。现有 SSH、VPN 和 Web 启动配置已将原 `master_args` 参数迁移到下列文件，并用 `-config /opt/soft/sgate/conf/<文件名>` 加载：
+
+| acl-master 配置 | 对应应用配置 |
+| --- | --- |
+| `ssh-client.cf` | [conf/ssh-client.conf](conf/ssh-client.conf) |
+| `ssh-server.cf` | [conf/ssh-server.conf](conf/ssh-server.conf) |
+| `vpn-client.cf` | [conf/vpn-client.conf](conf/vpn-client.conf) |
+| `vpn-server.cf` | [conf/vpn-server.conf](conf/vpn-server.conf) |
+| `web-client.cf` | [conf/web-client.conf](conf/web-client.conf) |
+
+部署时安装支持 `-config` 的新版二进制，并将所需应用配置复制到 `/opt/soft/sgate/conf/`，例如 `install -m 600 conf/ssh-client.conf /opt/soft/sgate/conf/ssh-client.conf`，然后再重启对应 acl-master 服务。新文件沿用原来的监听地址、转发目标、密码和证书路径；**Web 客户端原本未配置密码，迁移后仍留空，启动前须填写与 Web 服务端一致的密码，或在 `master_args` 中追加 `-password`**。
+
+可以继续在 `master_args` 的 `-config` 后追加覆盖项，例如 `master_args = -config /opt/soft/sgate/conf/vpn-client.conf -listen 127.0.0.1:2901`。配置文件包含密码时，应仅允许部署用户读取。
+
+### 配置白噪音与重连回归
+
+可用实际二进制验证配置文件开启白噪音、命令行修改区间/大小、单端及双端关闭，覆盖 WS/WSS 和每场景三次断线重连：
+
+```sh
+mkdir -p artifacts/config-noise-reconnect
+go build -o artifacts/config-noise-reconnect/sgate-client ./cmd/sgate-client
+go build -o artifacts/config-noise-reconnect/sgate-server ./cmd/sgate-server
+SGATE_CONFIG_CLIENT_BINARY="$PWD/artifacts/config-noise-reconnect/sgate-client" \
+SGATE_CONFIG_SERVER_BINARY="$PWD/artifacts/config-noise-reconnect/sgate-server" \
+  go test -race ./internal/tunnel -run '^TestConfigBinaryNoiseReconnect$' -count=1 -v -timeout=4m
+```
+
+两条 `go build` 均加 `-race` 可验证竞态构建，使用独立输出文件并串行对照。回归包含加速间隔和真实 `1s`～`3s`、`1024`～`10240` 字节配置；本地观测中继使用临时密钥解密检查白噪音，不修改加密数据帧，WSS 两段均校验证书。中继分别处理其两段的控制帧，本回归不用于证明跨中继的端到端心跳时序。每次重连均要求启用的方向重新发送白噪音，关闭方向保持零发送；四条原应用流使用独立内容、序号、终止标记和 EOF 校验。缓存与定时器内部释放另由 `TestNoiseDirectionTimersReleaseOnExpiry` 及 `TestNoisePendingTimerReleasedOnExpiryAndShutdown` 检查，包含尚需一小时才会触发的定时器。
+
+配置白噪音的生命周期回归使用同一组二进制环境变量，将测试名改为 `^TestConfigBinaryNoiseLifecycle$`，并添加 `-parallel=6 -timeout=6m`。每档共 18 项：WS/WSS × 文件开启/CLI 修改/CLI 双端关闭 × 长断网/服务端进程重启/会话过期。长断网保持真实 `2m` 客户端和服务端保留期，持续阻断 125 秒，要求旧应用与后端连接在断网期间按原期限自然关闭；快速过期单独使用 `750ms` 服务端期限和 `30s` 客户端期限，不替代两分钟用例。
+
+生命周期用例在断网后从旧流两个方向各提供 2 MiB 未确认数据，恢复后使用不同内容的新流检查序号、双向数据、终止标记、EOF 和新会话的最终 ACK。到期及服务端重启会按设计中断旧流，未确认的旧数据不会混入新流。中继保留原 HTTP 错误状态及 `X-Sgate-*` 头，尤其不能将带鉴权证明的 410 响应改成 503。`TestConfigNoiseLifecycleResources` 以短窗口重复检查实际内部流表、重放队列及写协程释放，额外包含一至两小时的待触发白噪音定时器。
+
+`TestConfigBinaryNoiseWeakNetwork` 使用相同二进制环境变量和 `-parallel=6 -timeout=4m`，覆盖 WS/WSS × 文件开启（1～3 秒、1～10 KiB）/CLI 修改（100～300 毫秒、128～512 字节）/CLI 双端关闭。透明 TCP 中继原样转发 TLS、WebSocket 数据及控制帧，不代答 Ping/Pong。每例先在单向延迟 150±100 毫秒、15% 分段延迟重传（额外 200 毫秒）下运行 22 秒，超过 18 秒心跳超时；再分别阻断上行、下行 1 秒，要求均不误重连，最后逐向持续阻断直到自动重连并恢复。两条原应用连接持续发送独立的双向序号记录，校验内容、结束标记和 EOF，要求恢复后不新增后端连接。丢包模型保留 TCP 字节顺序，通过重传延迟模拟恢复，不代表真实内核丢包测试。
+
+`TestConfigNoiseWeakNetworkResources` 对匹配的有效参数状态检查私有流表、重放缓存、会话过期及传输写协程退出；额外在单向断网过期时检查 1～2 小时待触发定时器取消。该测试与 CLI 参数优先级测试、实际二进制参数及白噪音大小测试共同使用；它自身不调用配置解析器。中继的 `waitTimers` 是累计创建次数，不是活动定时器数量；释放依据是所有中继协程结束、队列清空及传输写协程退出。
+
 ### HTTP 请求头密码验证
 
 客户端在 HTTP/HTTPS WebSocket 握手请求中发送 `X-Sgate-Password: v1.<Base64URL密文>`。密码使用 `sgate.key` 所指定的 256 位密钥派生独立 AES-256-GCM 密钥后加密，每次握手和重连都生成新的随机 nonce。会话 ID、请求随机数、时间戳、恢复标志和请求 URI 参与认证，密文不能移到另一次握手中使用；请求签名及服务端响应证明也绑定该密文。
@@ -124,12 +191,17 @@ location /tunnel {
 
 | 参数 | 默认值 | 含义 |
 | --- | --- | --- |
+| `-config` | 无 | 应用配置文件；显式命令行参数优先于文件值 |
 | `-key-file` | 无 | 密钥文件；未指定时读取 `SGATE_KEY` |
 | `-password` | 必填 | 连接验证密码，两端保持一致，1～1024 字节 |
 | `-max-streams` | `128` | 每个会话允许的 TCP 流数 |
 | `-buffer-bytes` | `4194304` | 每个方向未确认帧的缓存上限，至少 `16409` 字节 |
 | `-heartbeat` | `20s` | WebSocket 心跳间隔 |
 | `-heartbeat-timeout` | `0` | 接收空闲超时；`0` 表示心跳间隔的三倍，默认 `60s` |
+| `-noise-interval` | `0` | 随机填充发送间隔，如 `1s`；`0` 禁止本端发送 |
+| `-noise-interval-min` / `-noise-interval-max` | `0` | 随机等待时间的上下限，如 `1s` / `3s`；须同时设置，且不能与非零 `-noise-interval` 混用 |
+| `-noise-min-bytes` | `1024` | 随机填充负载最小字节数 |
+| `-noise-max-bytes` | `10240` | 随机填充负载最大字节数，最高 `16384` |
 
 服务端参数：
 
@@ -153,6 +225,29 @@ location /tunnel {
 | `-offline-timeout` | `2m` | 客户端持续离线时保留应用连接和未确认数据的时限 |
 | `-tls-ca` | 无 | 额外信任的 PEM CA 证书 |
 
+## 随机流量填充
+
+客户端和服务端都支持周期性发送随机内容、随机大小的加密填充帧。例如在需要发送填充的一端增加：
+
+```sh
+-noise-interval 1s -noise-min-bytes 1024 -noise-max-bytes 10240
+```
+
+这表示每秒调度一次填充，负载大小在 1～10 KiB 间均匀随机选择（包含上下限）。也可使用 `500ms` 等 Go 时间格式；大小参数使用整数，单位为字节，必须满足 `1 <= min <= max <= 16384`。两端独立配置，可以单端发送，也可以双端发送；关闭发送的一端仍能接收并丢弃填充。使用 acl-master 的 `.cf` 配置时，将这些参数追加到该服务的 `master_args` 中。
+
+如需发送间隔也随机变化，改用以下参数：
+
+```sh
+-noise-interval-min 1s -noise-interval-max 3s \
+  -noise-min-bytes 1024 -noise-max-bytes 10240
+```
+
+连接建立后，以及每次填充发送完成后，均在 1～3 秒范围内独立、均匀随机选择下一次等待时间（纳秒精度，包含上下限），包大小也每次独立随机生成。间隔上下限须满足 `0 < min <= max`，相等时等效于固定等待。范围参数须成对设置，并移除原有的非零 `-noise-interval`；不设置固定间隔或范围参数时仍默认关闭。网络拥塞可能延长实际间隔，积压的周期不会补发。
+
+填充与应用数据一样封装为 AES-GCM 加密的 WebSocket 二进制消息，接收端解密校验后直接丢弃，不转发给应用，不占用可靠帧序号、应用连接或重传缓存。即使没有应用连接，只要 WebSocket 已建立也会发送。应用数据和心跳仍会调度；网络拥塞或写阻塞会推迟填充，错过的周期不会积压补发。传输断开后计时器停止，重连后重新选择等待时间，不重放旧填充。两端需升级到支持填充帧的版本后再开启，旧版本无法识别此帧类型。
+
+大小指随机负载，不包含 25 字节协议头、24 字节加密开销以及 WebSocket、TLS、TCP/IP 的开销；WebSocket 消息也不对应固定数量或大小的网络数据包。每秒发送 1～10 KiB 的平均额外负载约为每方向 5.5 KiB/s，服务端按每个在线会话分别产生。填充会消耗带宽，无法保证隐藏协议或抵抗流量分析，实际业务的时序和大小仍可能被观察。
+
 ## 断线恢复的边界
 
 “应用无感”指短暂的 WebSocket 中断期间，两端保留原有 TCP 套接字，并在恢复后继续按序传输，不要求应用重新连接。中断时应用读写可能暂时阻塞。
@@ -171,7 +266,7 @@ location /tunnel {
 
 ## 协议与实现
 
-每个 WebSocket 二进制消息包含一个加密帧。明文头为 `op(1) | seq(8) | ack(8) | stream(8)`，使用大端编码，数据块最多 16 KiB。操作包括 `ACK`、`OPEN`、`DATA`、`FIN`、`RESET`。每个方向使用独立、跨重连连续的可靠帧序号，纯 ACK 不占可靠序号；重新连接后重传未确认帧，接收方根据序号去重。
+每个 WebSocket 二进制消息包含一个加密帧。明文头为 `op(1) | seq(8) | ack(8) | stream(8)`，使用大端编码，数据块最多 16 KiB。操作包括 `ACK`、`OPEN`、`DATA`、`FIN`、`RESET`、`NOISE`。每个方向使用独立、跨重连连续的可靠帧序号，纯 ACK 和填充不占可靠序号；重新连接后重传未确认帧，接收方根据序号去重。`NOISE` 的 `seq`、`ack`、`stream` 必须为零，负载为 1～16384 字节，仍参与当前传输的加密计数器校验。
 
 加密层每次传输从计数器 1 开始，计数器构造 GCM nonce，并严格检查顺序。会话 ID、双方随机数及方向参与派生加密密钥，因此不同传输不会重复使用同一密钥与 nonce。握手签名绑定协议版本、会话 ID、随机数、时间戳、恢复标志及请求 URI。
 
@@ -184,6 +279,20 @@ SGATE_RECOVERY_LONG=1 go test -race \
   -run '^TestLongRecoveryDefaultOfflineWindow$' -v -timeout 3m ./internal/tunnel
 ```
 
+随机填充开启后的恢复回归：
+
+```sh
+go test -race -count=3 \
+  -run '^(TestNoiseRecoveryScenarios|TestNoisePendingTimerReleasedOnExpiryAndShutdown)$' \
+  -v -timeout 1m ./internal/tunnel
+
+# HTTPS 下真实默认两分钟断网，填充间隔 1～3 秒、负载 1～10 KiB
+SGATE_RECOVERY_LONG=1 go test -race \
+  -run '^TestNoiseLongRecoveryDefaultOfflineWindow$' -v -timeout 3m ./internal/tunnel
+```
+
+覆盖 HTTP/HTTPS 的双向随机填充、断网期间双向缓存满、服务实例同端口重启、连续五次重启、服务端先过期及客户端离线过期。恢复后校验新连接的完整数据、EOF 和后端字节总数，确认旧缓存没有混入新连接，并确认新的填充仍能发送。断开时等待旧传输及其写协程退出，验证停止填充定时器的清理路径已完成；长断网期间旧会话的填充计数保持不变。额外将首次填充等待设为 1～2 小时，确认过期与关闭无需等待定时器到期。每个场景清理后检查协程和文件描述符回落。
+
 同一流的读取与写入失败可能并发上报，RESET 按流去重，避免重复重置挤满控制队列并终止整个会话。
 
 ## 资源压力测试
@@ -194,6 +303,15 @@ make stress
 # 持续三分钟，跨过两分钟的握手防重放缓存保留窗口
 SGATE_STRESS_DURATION=3m GOMAXPROCS=4 make stress
 
+# 双向开启随机填充，验证并发与断线时的资源释放
+SGATE_STRESS_NOISE_INTERVAL=5ms make stress
+
+# 随机等待、随机负载、上下行独立随机数据；持续三分钟
+SGATE_STRESS_DUPLEX=1 SGATE_STRESS_DURATION=3m \
+  SGATE_STRESS_NOISE_INTERVAL_MIN=1ms SGATE_STRESS_NOISE_INTERVAL_MAX=5ms \
+  SGATE_STRESS_NOISE_MIN_BYTES=1024 SGATE_STRESS_NOISE_MAX_BYTES=10240 \
+  GOMAXPROCS=4 make stress
+
 # 为压力场景开启竞态检测
 SGATE_STRESS=1 GOMAXPROCS=4 go test -race \
   -run '^TestStressReconnectResources$' -v -timeout 10m ./internal/tunnel
@@ -202,6 +320,12 @@ SGATE_STRESS=1 GOMAXPROCS=4 go test -race \
 默认使用 4 个客户端，每端 64 路 TCP 流，共 256 路并发连接，重复 12 轮；每次交换 128 KiB 数据，每 30 ms 注入一次传输断线，模拟 10 ms 网络不可用。每轮校验完整回传数据和 EOF，然后确认连接及未确认队列已释放。设置持续时间后，同一批连接反复交换数据直至该轮时间结束，再半关闭和周转连接。
 
 可通过 `SGATE_STRESS_CLIENTS`、`SGATE_STRESS_STREAMS`、`SGATE_STRESS_ROUNDS`、`SGATE_STRESS_BYTES` 和 `SGATE_STRESS_DURATION` 调整负载。`make stress` 默认写入 `artifacts/stress.json`，可用 `SGATE_STRESS_REPORT` 指定报告路径；直接调用 `go test` 时也需显式设置该变量才保存 JSON。
+
+`SGATE_STRESS_DUPLEX=1` 让每条连接两端独立发送不同的伪随机字节流，以记录序号、逐字节比较、结束标记及 EOF 检测丢失、重复、损坏和尾部截断，并分别核对上下行发送与接收总数。报告的 `verified_upload_bytes` / `verified_download_bytes` 记录该模式的数据量；默认回显模式仍使用 `verified_bytes_per_direction`。测试同时检查客户端和服务端的流与重传缓存，并记录双方实际发送、接收的填充帧数；填充允许在掉线时丢弃，因此不要求填充计数相等。
+
+独立双向模式默认给压测器控制的 socket 设置 16 KiB 收发缓冲，并在每条发送流的记录之间等待 2 秒；可通过 `SGATE_STRESS_SOCKET_BUFFER`（`0` 恢复系统默认）和 `SGATE_STRESS_RECORD_INTERVAL` 调整。所有代理与应用角色在同一台机器运行，会放大本机内核缓冲压力；不限制突发速率时，256 路、128 KiB 双向突发可能先耗尽 macOS 的网络缓冲，产生与代理实现无关的系统丢包和超时。测试保留并发数、单条记录大小和断线频率，用有界缓冲与发送速率区分代理行为和本机容量限制，不更改系统参数。macOS 报告记录全系统网络内存申请失败累计计数 `network_memory_denied`（不可用时为 `-1`），应比较采样差值；该值也可能受其他进程影响。长时间不推进时会在报告旁保存 `.stacks` 协程诊断文件。
+
+随机等待范围通过 `SGATE_STRESS_NOISE_INTERVAL_MIN` / `SGATE_STRESS_NOISE_INTERVAL_MAX` 设置，负载范围通过 `SGATE_STRESS_NOISE_MIN_BYTES` / `SGATE_STRESS_NOISE_MAX_BYTES` 设置。`SGATE_STRESS_CHURN_INTERVAL` 和 `SGATE_STRESS_OFFLINE_DURATION` 可覆盖默认的 `30ms` / `10ms`。例如测试真实的 1～3 秒随机等待时，将断线间隔设为 `4s`，使传输有机会真正发送填充；每 `30ms` 重置传输会不断重启首次等待，无法覆盖这种配置的填充发送行为。
 
 报告记录活跃期和空闲期的堆内存、栈、协程、实际文件描述符、TCP 连接数、会话数、重传缓存和鉴权随机数缓存数量；空闲采样执行 GC，并记录 RSS。macOS 的文件描述符计数使用 `lsof`，RSS 使用 `ps`。Go 运行时保留的页和竞态检测器的影子内存会计入 RSS；通过多轮空闲堆和 RSS 趋势及连接、协程回落情况判断是否持续增长。防重放缓存按两分钟窗口保留，关闭服务端时清空。测试会断言每轮资源回落，并检查最终关闭后的连接及协程释放。
 
@@ -214,3 +338,220 @@ make weaknet
 使用本机有界 TCP 中继注入单向 150ms 延迟、±100ms 抖动和 15% 分段重传等待（200ms），并验证空闲心跳、并发随机数据、慢速分段接收、双方向短时阻塞、单向长断网后的重连和会话过期释放。中继以每段最多 512 字节、有界队列调度，保持 TCP 字节顺序；丢包用延迟重传来模拟，不会把删除 TCP 流字节误当作 IP 丢包，也不修改系统网卡或内核网络规则。
 
 每轮校验随机数据逐字节一致、后端收取字节总数和半关闭后的 EOF；在保留窗口内继续使用同一应用 TCP 连接，超过窗口则释放旧连接和重传缓存，恢复后新连接正常通信。上行中断时，下行已送达的字节可能仍在应用的 TCP 接收缓冲中，测试先读取这一合法前缀，再确认 EOF 或连接重置。清理阶段检查中继连接、排队字节、应用连接、会话缓存和协程均正常释放。
+
+`make weaknet` 同时执行开启随机白噪音的 HTTP/HTTPS 场景，填充大小为 1～10 KiB。密集测试使用 100～200ms 随机间隔；慢速分段测试使用 300～600ms，避免填充本身超过模拟链路容量；独立双向测试以每方向约 40 KiB/s 的应用输入配合 200～400ms 填充间隔，另有真实 1～3 秒间隔测试，以及 1～3ms 密集填充下的繁忙写队列心跳测试。健康连接断言没有重连，双向独立数据流使用不同随机种子、连续序号、结束标记和 EOF 检查丢失、重复及尾部截断；短时单向阻塞保持连接，较长阻塞触发重连并复用原应用连接，超过保留窗口则释放旧状态。测试确认弱网期间两端确实收到填充，并在关闭后等待传输协程退出，以验证其白噪音定时器和心跳定时器已经停止，同时检查文件描述符和协程回落。TLS 慢速分段场景使用 1 秒心跳超时，以覆盖完整 TLS 记录的接收时间。
+
+仅运行白噪音弱网场景：
+
+```sh
+go test -race -count=3 -run '^TestNoiseWeakNetwork' -v -timeout 6m ./internal/tunnel
+```
+
+### 综合长时间弱网压力测试
+
+下面将 4 个客户端、每客户端 64 条应用 TCP 连接与双向独立数据流、每 4 秒断线、随机白噪音及弱网叠加，运行六轮、至少十分钟的应用负载：
+
+```sh
+SGATE_STRESS=1 SGATE_STRESS_DUPLEX=1 SGATE_STRESS_WEAKNET=1 \
+SGATE_STRESS_CLIENTS=4 SGATE_STRESS_STREAMS=64 SGATE_STRESS_ROUNDS=6 \
+SGATE_STRESS_DURATION=10m SGATE_STRESS_BYTES=1024 \
+SGATE_STRESS_CHURN_INTERVAL=4s SGATE_STRESS_OFFLINE_DURATION=100ms \
+SGATE_STRESS_NOISE_INTERVAL_MIN=200ms SGATE_STRESS_NOISE_INTERVAL_MAX=600ms \
+SGATE_STRESS_REPORT="$PWD/artifacts/noise-combined-long.json" \
+go test -run '^TestStressReconnectResources$' -v -count=1 -timeout 15m ./internal/tunnel
+```
+
+弱网默认值为单向 150ms 延迟、±100ms 抖动、15% 模拟分段丢包后的 200ms 重传等待。可用 `SGATE_STRESS_WEAK_DELAY`、`SGATE_STRESS_WEAK_JITTER`、`SGATE_STRESS_WEAK_LOSS_PERCENT`、`SGATE_STRESS_WEAK_RETRANSMIT` 覆盖。中继保持 TCP 字节有序，未注入真实 IP 丢包。双向模式默认每条连接每两秒发送一个记录，此处使用 1 KiB 记录，控制叠加填充后的输入速率。
+
+JSON 报告增加中继连接、排队字节、累计接入和模拟重传次数，以及空闲/关闭时传输写协程数量。每轮关闭应用连接后检查两端流和重传缓存归零、旧中继连接释放、协程与描述符回落；最终等待两端传输退出，以确认其白噪音定时器与心跳定时器停止，检查所有中继连接及排队数据归零。堆采样包含测试自身保存的报告数组；该数组随采样点增加，分析时结合 RSS、代理状态和关闭后的结果判断泄漏。可增加 `-race` 做竞态验证；竞态检测器的 RSS 应单独比较。
+
+开启 `SGATE_STRESS_TLS=1` 后使用 HTTPS/WSS，并信任测试服务端证书、验证地址和证书链；不会跳过证书校验。`SGATE_STRESS_LIFECYCLE=1` 要求双向独立模式和至少两轮，在轮次之间交替注入服务端实例重启、会话过期，最后一轮始终验证恢复后的正常数据流。例如：
+
+```sh
+SGATE_STRESS=1 SGATE_STRESS_DUPLEX=1 SGATE_STRESS_TLS=1 \
+SGATE_STRESS_WEAKNET=1 SGATE_STRESS_LIFECYCLE=1 \
+SGATE_STRESS_CLIENTS=4 SGATE_STRESS_STREAMS=64 SGATE_STRESS_ROUNDS=6 \
+SGATE_STRESS_DURATION=10m SGATE_STRESS_BYTES=1024 \
+SGATE_STRESS_CHURN_INTERVAL=6s SGATE_STRESS_OFFLINE_DURATION=100ms \
+SGATE_STRESS_NOISE_INTERVAL_MIN=300ms SGATE_STRESS_NOISE_INTERVAL_MAX=700ms \
+SGATE_STRESS_REPORT="$PWD/artifacts/wss-combined-long.json" \
+go test -run '^TestStressReconnectResources$' -v -count=1 -timeout 16m ./internal/tunnel
+```
+
+六轮包含三次重启和两次过期。每个故障阶段另建同等数量的应用连接，阻塞网络并填满两端每个会话的重传缓存，再停止带活跃写协程的服务端，或等待测试保留时间（10 秒）过期。重启会关闭旧 HTTPS 监听器，在原地址用相同证书建立全新的服务端实例。过期时确认服务端先释放旧会话，客户端在收到带认证的会话失效响应前仍保留缓存，响应后清理旧状态。每个阶段等待所有旧应用连接和传输退出，检查其定时器停止，再验证新会话连接。报告的 `intentionally_interrupted_streams` 单独统计这些预期终止的旧流，正常数据流的完整校验字节数不包含它们；旧流使用不同种子的伪随机数据，已送达的数据必须是正确前缀；反例测试覆盖缺字节、重复字节和超长数据，实际故障阶段也拒绝错误前缀及读超时。后续轮次使用新的种子及序号，检查旧缓存没有串入新流。总耗时还包含过期等待、TLS 重连和清理时间；可增加 `-race` 单独运行竞态压力测试。
+
+### 默认两分钟窗口的 WSS 断网测试
+
+`SGATE_STRESS_DEFAULT_RETENTION=1` 不传入服务端保留时间和客户端离线超时的覆盖值，使用两端默认的两分钟。下面在弱网、256 条应用连接、1～3 秒随机间隔和默认 1～10 KiB 填充下，断网 110 秒后恢复：
+
+```sh
+SGATE_STRESS=1 SGATE_STRESS_DUPLEX=1 SGATE_STRESS_TLS=1 SGATE_STRESS_WEAKNET=1 \
+SGATE_STRESS_DEFAULT_RETENTION=1 SGATE_STRESS_RETENTION_OUTAGE=110s \
+SGATE_STRESS_CLIENTS=4 SGATE_STRESS_STREAMS=64 SGATE_STRESS_ROUNDS=1 \
+SGATE_STRESS_BYTES=1024 SGATE_STRESS_DURATION=20s SGATE_STRESS_CHURN_INTERVAL=6s \
+SGATE_STRESS_NOISE_INTERVAL_MIN=1s SGATE_STRESS_NOISE_INTERVAL_MAX=3s \
+SGATE_STRESS_REPORT="$PWD/artifacts/wss-default-retention-resume.json" \
+go test -race -run '^TestStressReconnectResources$' -v -count=1 -timeout 5m ./internal/tunnel
+```
+
+测试确认断网期间两端每个会话均曾填满重传队列、缓存不超限、白噪音停止发送，恢复后使用原客户端会话、服务端会话和应用连接，双向独立数据的序号、内容、结束标记和 EOF 全部一致。应用及后端的读写截止时间额外包含计划断网时长，计划内断网也不会触发无进展诊断。JSON 的 `retention_outage` 记录特殊断网时长，`retained_session_continuity` 记录会话身份检查结果。
+
+过期后的清理及新连接测试使用下面的组合：
+
+```sh
+SGATE_STRESS=1 SGATE_STRESS_DUPLEX=1 SGATE_STRESS_TLS=1 SGATE_STRESS_WEAKNET=1 \
+SGATE_STRESS_DEFAULT_RETENTION=1 SGATE_STRESS_LIFECYCLE=1 \
+SGATE_STRESS_CLIENTS=4 SGATE_STRESS_STREAMS=64 SGATE_STRESS_ROUNDS=2 \
+SGATE_STRESS_BYTES=1024 SGATE_STRESS_DURATION=24s SGATE_STRESS_CHURN_INTERVAL=1m \
+SGATE_STRESS_NOISE_INTERVAL_MIN=1s SGATE_STRESS_NOISE_INTERVAL_MAX=3s \
+SGATE_STRESS_REPORT="$PWD/artifacts/wss-default-retention-expiry.json" \
+go test -race -run '^TestStressReconnectResources$' -v -count=1 -timeout 5m ./internal/tunnel
+```
+
+默认窗口模式的生命周期阶段只注入会话过期，阻断网络直至两端所有旧会话和应用连接释放，再恢复网络。客户端自身两分钟超时与服务端回收可能先后发生，不要求二者固定顺序；检查没有提前过期，并在约两分钟后及时释放旧缓存、连接及传输定时器。`expiry-offline-expired` 快照在网络恢复之前记录结果。第二轮用新的独立数据流验证新会话，故障阶段的 256 条旧流仍单独记录为预期终止，不计入完整传输字节数。
+
+### 119 / 120 / 121 秒临界恢复
+
+`SGATE_STRESS_BOUNDARY_OUTAGE` 与 WSS、默认保留窗口、双向独立模式和生命周期模式一起使用，在第一轮正常流之后建立同等数量的旧流、填满双向缓存，再按指定时长恢复网络：
+
+```sh
+for seconds in 119 120 121; do
+  SGATE_STRESS=1 SGATE_STRESS_DUPLEX=1 SGATE_STRESS_TLS=1 SGATE_STRESS_WEAKNET=1 \
+  SGATE_STRESS_DEFAULT_RETENTION=1 SGATE_STRESS_LIFECYCLE=1 \
+  SGATE_STRESS_BOUNDARY_OUTAGE="${seconds}s" \
+  SGATE_STRESS_CLIENTS=4 SGATE_STRESS_STREAMS=64 SGATE_STRESS_ROUNDS=2 \
+  SGATE_STRESS_BYTES=1024 SGATE_STRESS_DURATION=24s SGATE_STRESS_CHURN_INTERVAL=1m \
+  SGATE_STRESS_WEAK_DELAY=75ms SGATE_STRESS_WEAK_JITTER=50ms \
+  SGATE_STRESS_WEAK_LOSS_PERCENT=15 SGATE_STRESS_WEAK_RETRANSMIT=100ms \
+  SGATE_STRESS_NOISE_INTERVAL_MIN=1s SGATE_STRESS_NOISE_INTERVAL_MAX=3s \
+  SGATE_STRESS_REPORT="$PWD/artifacts/wss-boundary-${seconds}.json" \
+  go test -race -run '^TestStressReconnectResources$' -v -count=1 -timeout 6m ./internal/tunnel
+done
+```
+
+计时从阻断网络并关闭旧传输开始，实际恢复时间和所有旧流解决后的时间分别记录在 `boundary_restore_milliseconds`、`boundary_resolve_milliseconds`。恢复网络之后仍需完成 TLS/HTTP 握手，因此不会假定 119 秒必然续接、120 秒必然过期。每个客户端单独分类：续接成功须保留原会话，全部旧流双向完整、半关闭及 EOF 正确；过期须释放两端旧会话、缓存、连接和传输定时器，已送达数据只能是正确前缀。任何一侧过期后留下另一侧孤立缓存、后端连接，或保留多余服务端会话，都会失败。第二轮正常流验证新旧流没有串流。报告分别记录 `boundary_resumed_sessions`、`boundary_expired_sessions`、`boundary_complete_old_streams` 和 `boundary_interrupted_old_streams`。
+
+并发数据校验使用保留完整 64 位种子的 PCG 字节流，种子包含轮次、客户端和流编号。反例覆盖旧生成器截取高位种子后发生的跨客户端数据碰撞，并确认分段读取不会改变字节流。
+
+服务端以客户端发来的首个有效加密帧确认续接。升级失败、升级后立即放弃或始终未确认的连接不会刷新旧会话的保留起点；未确认续接的读取及 Ping/Pong 进度也受原保留期限约束。收到有效确认后，连接按正常心跳运行，断开时才开始新的保留窗口。`TestResumeConfirmationControlsRetention` 覆盖放弃、静默和正常确认三种情况。
+
+
+补充未确认重连的真实两分钟压力测试：在上述默认窗口、WSS、弱网、双向及生命周期配置下，去掉 `SGATE_STRESS_BOUNDARY_OUTAGE`，分别设置 `SGATE_STRESS_UNCONFIRMED=tls-timeout`、`abandoned`、`silent`，使用 64 个客户端、每客户端 4 条流、两轮、24 秒正常负载和六分钟测试超时。前两种在断网开始、中点和原期限前一秒各发起一批探测；静默模式保持升级后的连接，其中一半只读取服务端白噪音并回复 WebSocket Pong，不发送加密协议帧。所有旧会话的保留起点必须始终不变，原期限到达后必须释放两端旧流、缓存和传输定时器，再恢复正常客户端验证新连接。报告记录真实握手超时数、放弃升级数、静默升级数、收到的白噪音数和 `unconfirmed_release_milliseconds`。仅作快速预检时，可设 `SGATE_STRESS_UNCONFIRMED_TTL=6s` 同时缩短测试两端的期限；正式默认窗口测试不设置此项。
+
+
+### 持续控制帧与缓慢不完整分片
+
+在上一节的未确认重连测试配置下，分别设置 `SGATE_STRESS_UNCONFIRMED=control` 和 `SGATE_STRESS_UNCONFIRMED=fragmented`，使用 64 个客户端、每个 4 条流、两轮正常负载和默认两分钟保留时间。`control` 每 250 毫秒主动发送 Ping、Pong，并读取白噪音及服务端回复；`fragmented` 每 250 毫秒发送一个带掩码的 8 字节 WebSocket 分片，首片为二进制，后续为 continuation，全部不带 FIN。片段来自有效加密消息，但始终缺少后续密文和认证标签，不构成完整确认。两种模式均保持读取、回复服务端 Ping；提前退出探测会导致测试失败。
+
+测试逐一核对旧会话的保留起点不变、缓存不超限、原期限后释放旧连接和传输定时器，并验证恢复后的新会话及独立双向数据。报告增加 `unconfirmed_control_sent`、`unconfirmed_pongs_received`、`unconfirmed_fragments_sent`、`unconfirmed_partial_bytes`。`TestResumeConfirmationControlsRetention` 同时包含这两种短窗口回归，完整压力测试不设置 `SGATE_STRESS_UNCONFIRMED_TTL`。
+
+
+### 串行排查 macOS 网络内存计数
+
+`netstat -m` 的 `requests for memory denied` 是系统全局的累计网络内存分配失败计数，不能直接作为某个 sgate 进程的泄漏或应用数据丢失计数。先编译普通和竞态测试二进制，再串行比较相同负载，避免将编译及其他压力测试的开销混在一起：
+
+```sh
+mkdir -p artifacts
+GOMAXPROCS=4 go test -c -o artifacts/network-memory-plain.test ./internal/tunnel
+GOMAXPROCS=4 go test -race -c -o artifacts/network-memory-race.test ./internal/tunnel
+python3 scripts/diagnose-network-memory.py
+```
+
+脚本依次运行持续 Ping/Pong、缓慢不完整分片各自不带和带 `-race` 的四组 WSS 测试，每组 64 个会话、256 条应用流、真实两分钟保留窗口、1～3 秒随机白噪音及模拟弱网；本脚本不并行运行压力测试，也不停止系统现有应用。每组前后各留出 10 秒观测，运行期间每秒记录 `netstat -mmm` 原始输出、每类网络池失败计数、实际占用及已分配容量、测试进程 PID/RSS，并保存阶段资源和完整数据校验结果。输出位于 `artifacts/network-memory-serial/`，可用 `--output`、`--cooldown` 修改目录和前后观测时长。脚本总耗时约 11 分钟。
+
+应比较每组计数增量、实际占用是否回落，以及 Go 堆、协程、描述符、连接、重放缓存和传输定时器是否释放。已分配但空闲的内核池容量、短期 TCP TIME_WAIT 和竞态检测器的 RSS 开销需要单独解释。采样器将有效输出中省略的零失败计数记为 0；平台不支持、读取失败或无法识别输出仍记为不可用。
+
+
+### 两组压力测试并行时的 mbuf 事件诊断
+
+```sh
+GOMAXPROCS=4 go test -c -o artifacts/network-memory-parallel-plain.test ./internal/tunnel
+GOMAXPROCS=4 go test -race -c -o artifacts/network-memory-parallel-race.test ./internal/tunnel
+python3 scripts/diagnose-network-memory-parallel.py
+```
+
+脚本先并行运行两组普通构建，再并行运行两组竞态构建；两种构建之间串行切换。一组持续 Ping/Pong，另一组缓慢发送不完整加密分片，默认错开 2 秒启动。每个进程仍为 64 个会话、4 条流/会话、默认两分钟保留窗口、随机白噪音和相同弱网配置。`--streams 8` 可将两组总应用流数从 512 增至 1024；`--start-offset 0` 可使启动更接近同步。可用 `--output` 指定独立报告目录，避免覆盖其他测试。
+
+每 100 毫秒采集系统全局及各类 mbuf 失败计数，每秒采集指定测试 PID 的 RSS、TCP 描述符/状态、发送和接收队列，以及与已知测试监听端口相关的系统 TCP 状态。`SGATE_STRESS_LIVE_REPORT` 启用原子覆盖的实时阶段快照，包含 Go 堆、协程、连接及双向缓存；断网阶段每秒更新一次。计数变化会保存前后 mbuf 原始输出、最近及即时进程状态、阶段快照、`vm_stat`，并在首个事件保存各测试进程的 `vmmap` 摘要。网络计数、进程状态和 Go 快照并非同一时刻的原子读取，应按各自时间戳关联；不能把采样值当作瞬时峰值。观察器本身也有开销，所列测试 RSS 不包含观察器进程。
+
+每种构建结束后继续观察 35 秒，核对旧流过期、恢复后的完整独立双向数据、连接/重放缓存/传输定时器释放，以及内核网络簇占用和测试相关 TIME_WAIT 是否回落。报告位于 `artifacts/network-memory-parallel/`；系统计数始终是全局值，脚本保留现有应用和系统配置。
+
+观察器的空启动快照与缺失实时监测回归可单独运行：`python3 -B -m unittest discover -s scripts -p 'test_*.py'`。已有目录的汇总会保留未重跑的构建结果，因此可用 `--variants race` 继续尚未完成的竞态对照。
+
+四组并行对照使用独立报告目录，可运行：
+
+```sh
+python3 -B scripts/diagnose-network-memory-parallel.py \
+  --processes 4 --streams 8 --start-offset 0 \
+  --socket-buffer 65536 --churn-interval 4s \
+  --reconnect-min 250ms --reconnect-max 10s
+```
+
+普通和竞态构建各运行四个进程，构建之间串行切换；每档共 256 个 WSS 会话、2,048 条应用流，仍使用真实两分钟保留窗口、随机白噪音和弱网。两个控制帧场景和两个不完整分片场景使用独立名称及文件，分别验证数据与清理结果。默认输出为 `artifacts/network-memory-parallel-4/`，不会覆盖两组测试记录；继续其中的竞态档时保留相同参数并添加 `--variants race`。首个 mbuf 事件的可选 `vmmap` 采集失败或超时会单独记录，不中断压力测试。
+
+四组诊断可用 `--socket-buffer` 对照测试套接字缓冲（默认 16384，`0` 使用系统默认值），不会修改系统参数或生产程序配置。上述命令用 64 KiB 缓冲及每 4 秒断线重现更高的内核池压力；16 KiB 档需单独报告，不能将其他档的通过结果套用。`--retention-seconds 45` 仅用于缩短故障定位，正式两分钟测试应省略。`--trace` 会额外保存未确认探测连接映射、转发计数，以及断网约 20 秒时的协程栈和 TCP 快照；诊断会增加采样开销。
+
+观察脚本会等待同一档的所有进程完成并保留各进程退出码；某一档失败后仍运行另一构建档，最终以非零退出码及 `failures.json` 报告失败，不把其余测试提前终止或将失败标记为通过。
+
+四组命令显式使用生产默认的 250ms～10s 重连退避；可用 `--reconnect-min 5ms --reconnect-max 25ms` 重现原压力器的激进重试档，并使用独立输出目录。压力器建立全部后端流和等待应用侧关闭通知使用 20 秒预算；超过 5 秒的关闭通知会额外保存应用端地址、TCP 表和协程栈。会话本身的原到期截止及缓存上限断言未放宽，报告分别记录 `unconfirmed_release_milliseconds` 和 `unconfirmed_application_release_milliseconds`，区分代理释放与应用侧观察到关闭的时刻。
+
+纯 TCP 关闭控制（不经过 TLS/WebSocket/代理）可用 `SGATE_STRESS_SOCKET_CLOSE=1 GOMAXPROCS=4 go test ./internal/tunnel -run "^TestStressDirectTCPShutdown$" -count=1 -v` 单独运行，并另加 `-race` 对照。默认先建立 1,024 对连接，再发送大量未被读取的数据，随后关闭对端，检查 5 秒内是否全部收到 EOF 或复位；`SGATE_STRESS_SOCKET_CLOSE_COUNT` 和 `SGATE_STRESS_SOCKET_CLOSE_BUFFER` 可调整连接数及缓冲。该控制会产生较高内核队列压力，不与代理对照混跑。
+
+八组并行对照可使用：
+
+```sh
+python3 -B scripts/diagnose-network-memory-parallel.py \
+  --processes 8 --streams 8 --start-offset 0 \
+  --socket-buffer 65536 --churn-interval 4s \
+  --reconnect-min 250ms --reconnect-max 10s \
+  --output artifacts/network-memory-parallel-8-defaults
+```
+
+每档共 512 个 WSS 会话、4,096 条并发应用流，四组持续 Ping/Pong、四组不完整加密分片，保留真实两分钟窗口、随机白噪音和弱网。两种构建串行运行，结束后各继续观察 35 秒；每组独立保留数据校验、清理断言及退出码。八组默认输出目录为 `artifacts/network-memory-parallel-8/`，不会覆盖四组记录。可选 `vmmap` 现在后台并行采集，并记录实际开始/完成时刻，避免八次串行检查阻塞 mbuf 观察循环；全局池计数与事件现场仍按实际采样时间解释。
+
+未确认重连探测的握手失败会使用该档配置的重连退避重试，所有尝试共用旧会话原始截止时间；超过截止仍未覆盖全部会话会失败。升级成功后的提前断开仍会失败，不会通过重试掩盖。探测控制帧、原始分片和 Ping 回复复用通道配置的写预算，避免 Gorilla 默认一秒回复预算在竞态与弱网压力下造成误报。`unconfirmed_upgrade_retries` 记录握手重试次数，`unconfirmed_probe_write_timeout` 记录实际探测写预算；探测计数在覆盖断言之前保存，因此失败报告也保留实际计数。生产程序的超时、协议和会话保留时间不变。
+
+十六组并行对照可使用：
+
+```sh
+python3 -B scripts/diagnose-network-memory-parallel.py \
+  --processes 16 --streams 8 --start-offset 0 \
+  --socket-buffer 65536 --churn-interval 4s \
+  --reconnect-min 250ms --reconnect-max 10s \
+  --output artifacts/network-memory-parallel-16-defaults
+```
+
+每档共 1,024 个 WSS 会话、8,192 条应用流，八组控制帧探测和八组不完整加密分片探测；两档串行运行，各自保留 16 份日志、报告、退出码及结束后 35 秒观察数据。默认目录为 `artifacts/network-memory-parallel-16/`。连接指标为测试进程持有的 TCP 描述符合计（包含本机两端及中继），内存为这些进程的 RSS 采样合计；mbuf 拒绝计数属于系统累计值，应结合事件现场、实际池占用与负载结束后的变化判断。
+
+单机十六组、每会话八流可能先触及临时端口容量，表现为 `can't assign requested address` 或建连超时，此时不能算完整性测试通过。保留失败目录，再用 `--streams 4 --output artifacts/network-memory-parallel-16-capacity-control` 跑独立容量对照：仍为十六组和 1,024 个会话，共 4,096 条应用流，其余参数保持一致。报告应分别标明两档负载及结果，不把容量对照通过等同于八流档通过。
+
+`--clients` 可设置每组会话数，默认仍为 64。进一步隔离会话规模可使用 `--clients 32 --streams 8 --output artifacts/network-memory-parallel-16-512sessions`，合计 512 个会话、4,096 条应用流，其余参数沿用上面的命令。不同会话数不得复用同一个输出目录；释放时刻超过观察器原定范围时，失败消息会记录实际毫秒值及允许范围。
+
+未确认重连使用独立的原截止定时器强制关闭传输，避免 Ping 回复等待 WebSocket 写锁时越过读超时，延迟旧会话释放。有效加密帧确认与到期通过原子状态竞争：确认成功会停止该定时器，到期胜出则拒绝确认；传输退出也停止定时器。阻塞写回归验证原读超时无法中断的场景，确认后跨越原截止的回归验证健康连接继续工作。
+
+十六组、每组 64 会话、每会话 8 流的单机完整规模对照可使用：
+
+```sh
+python3 -B scripts/diagnose-network-memory-parallel.py \
+  --processes 16 --clients 64 --streams 8 --start-offset 0 \
+  --backend-host ::1 --server-host ::1 --cohort-settle 35s --synchronize-load --tunnel-log \
+  --socket-buffer 16384 --churn-interval 4s \
+  --reconnect-min 250ms --reconnect-max 10s \
+  --output artifacts/network-memory-parallel-16-fullscale/final
+```
+
+该配置保留每批 1,024 个 WSS 会话及 8,192 条同时活动的应用流，将测试服务端 HTTP 和后端监听分到 IPv6 回环，客户端及中继入口仍用 IPv4。两批应用连接之间等待 35 秒回收上一批的内核 `TIME_WAIT`；等待只发生在完整批次结束后、下一批开始前，不插入批内断线或两分钟旧会话保留窗口。报告保存 `backend_host`、`server_host`、`cohort_settle`，不同配置不能混用输出目录。观察器统计两种回环地址的临时端口数量及状态，注明所计数范围，并在首次失败时保留 TCP 表、系统内存现场。后端拨号失败会记录实际错误，正常会话取消不额外报错。
+
+数据负载时长从全部后端流就绪后开始，避免较慢的建连吞掉传输时间或断线注入次数。`load_windows` 保存每轮就绪时刻、发送截止和完整流数；近同步启动时，观察器要求所有进程每轮的完整负载窗口存在共同交集，`full_load_overlap_seconds` 记录交集长度。批间回收等待不能替代这个满并发检查。
+
+完整规模命令使用夹具默认的 16KiB 套接字缓冲。限制同时应用于应用端、接受的代理端以及代理主动拨出的后端端点；后者在所有流条目就绪后、发送负载之前设置。`backend_sockets_bound` 检查两个正常批次和一个过期批次均被覆盖。用 64KiB 做单独容量对照时，8,192 流的未读双向负载可能先耗尽本机 mbuf，表现为 `socket: no buffer space available`，即使两种地址族的临时端口尚未用满；应与端口分配失败分开记录，不能将其称为 Go 堆泄漏或将失败档记为完整性通过。
+
+传输的 Ping 处理器只提交有界待回复 Pong，不同步等待 WebSocket 写锁；由原有写协程发送，避免数据写受压时读协程停止处理 ACK，造成双向阻塞。待回复队列只保留最新负载，符合 [RFC 6455 §5.5.3](https://www.rfc-editor.org/rfc/rfc6455.html#section-5.5.3)，不进入可靠重放队列。定向回归先阻塞数据写，再发 Ping 和有效加密 ACK，要求写仍阻塞时 ACK 已释放缓存，并在写恢复后收到原样 Pong。
+
+弱网夹具只合并发送时刻已到的相邻分段，不越过未来分段；存在发送间隔限制时不合并。无谓的已过期计时等待被跳过，`relay_coalesced_packets`、`relay_writes`、`relay_wait_timers` 记录实际执行。基线要等客户端、服务端及全部传输写协程就绪；过期前缀校验仍检查每个收到的字节，但不额外合成未收到的尾部。
+
+纯系统端口对照可单独运行 `python3 -B scripts/diagnose-port-capacity.py --output artifacts/tcp-port-capacity.json`，不要与其他压力档混跑。它不加载 sgate、不发应用数据，逐步持有 IPv4 TCP 连接，检查新 IPv4 目标与 IPv6 的分配结果，并保存 mbuf 前后差值的原始表。只提高诊断进程自身的 FD 软限额，不修改系统临时端口或网络内存设置。
+
+保持十六组、每组 64 会话和 8 流的内存容量对照可将上述完整规模命令的 `--socket-buffer` 改为 `8192`，并使用独立目录 `artifacts/network-memory-parallel-16-fullscale/bounded-8k`。该值仅约束测试端点缓冲，不改变生产配置、会话队列或并发规模，也不保证消除系统 mbuf 压力；尤其未约束的传输端点仍使用系统默认缓冲。16 KiB 与 8 KiB 档必须分别报告，不能据其中一档推定另一档通过。
+
+传输退出错误同时保留写端原始错误和读端错误，避免写超时关闭套接字后只看到“连接已关闭”。未确认探测失败记录中继首个关闭原因、方向及转发字节数，默认不启用逐包日志。压力测试失败路径也在清理后采样并保存 `closed` 资源状态；退出码仍为失败，清理成功不能替代完整性通过。

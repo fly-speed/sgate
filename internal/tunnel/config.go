@@ -14,10 +14,29 @@ type Options struct {
 	WriteTimeout     time.Duration
 	Heartbeat        time.Duration
 	HeartbeatTimeout time.Duration
+	NoiseInterval    time.Duration
+	NoiseIntervalMin time.Duration
+	NoiseIntervalMax time.Duration
+	NoiseMinBytes    int
+	NoiseMaxBytes    int
 	Logf             func(string, ...any)
 }
 
 func (o Options) defaults() (Options, error) {
+	if o.NoiseIntervalMin != 0 || o.NoiseIntervalMax != 0 {
+		if o.NoiseInterval != 0 || o.NoiseIntervalMin <= 0 || o.NoiseIntervalMax < o.NoiseIntervalMin {
+			return o, errors.New("noise interval range requires 0 < min <= max and cannot be combined with noise-interval")
+		}
+	}
+	if o.NoiseMinBytes == 0 {
+		o.NoiseMinBytes = 1024
+	}
+	if o.NoiseMaxBytes == 0 {
+		o.NoiseMaxBytes = 10 * 1024
+	}
+	if o.NoiseInterval < 0 || o.NoiseMinBytes < 1 || o.NoiseMaxBytes < o.NoiseMinBytes || o.NoiseMaxBytes > chunkSize {
+		return o, errors.New("invalid noise options: interval must be nonnegative and 1 <= min <= max <= 16384 bytes")
+	}
 	if o.BufferBytes == 0 {
 		o.BufferBytes = 4 * 1024 * 1024
 	}

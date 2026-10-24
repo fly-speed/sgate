@@ -135,6 +135,18 @@ func TestUnauthenticatedGoneDoesNotDiscardSession(t *testing.T) {
 }
 
 func TestRepeatedDisconnectDuringIndependentBidirectionalTraffic(t *testing.T) {
+	testIndependentBidirectionalTraffic(t, testOptions())
+}
+
+func TestNoiseIndependentBidirectionalTraffic(t *testing.T) {
+	opts := testOptions()
+	opts.NoiseIntervalMin = time.Millisecond
+	opts.NoiseIntervalMax = 5 * time.Millisecond
+	testIndependentBidirectionalTraffic(t, opts)
+}
+
+func testIndependentBidirectionalTraffic(t *testing.T, opts Options) {
+	t.Helper()
 	upload := make([]byte, 512*1024)
 	download := make([]byte, 768*1024)
 	_, _ = rand.Read(upload)
@@ -154,7 +166,7 @@ func TestRepeatedDisconnectDuringIndependentBidirectionalTraffic(t *testing.T) {
 		}
 		return nil
 	}
-	f := newFixtureWithBackend(t, 2*time.Minute, func(c net.Conn) {
+	f := newFixtureWithOptions(t, 2*time.Minute, func(c net.Conn) {
 		sent := make(chan error, 1)
 		go func() { sent <- pacedWrite(c, download) }()
 		got, err := io.ReadAll(c)
@@ -168,7 +180,7 @@ func TestRepeatedDisconnectDuringIndependentBidirectionalTraffic(t *testing.T) {
 			err = e
 		}
 		backendDone <- err
-	})
+	}, opts, opts)
 	c := f.dial(t)
 	waitFor(t, "backend", func() bool { return f.accepted.Load() == 1 })
 	sent := make(chan error, 1)

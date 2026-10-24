@@ -55,6 +55,11 @@ func newFixture(t *testing.T, ttl time.Duration) *fixture {
 
 func newFixtureWithBackend(t *testing.T, ttl time.Duration, handle func(net.Conn)) *fixture {
 	t.Helper()
+	return newFixtureWithOptions(t, ttl, handle, testOptions(), testOptions())
+}
+
+func newFixtureWithOptions(t *testing.T, ttl time.Duration, handle func(net.Conn), clientOpts, serverOpts Options) *fixture {
+	t.Helper()
 	f := &fixture{}
 	var err error
 	f.backend, err = net.Listen("tcp", "127.0.0.1:0")
@@ -98,7 +103,7 @@ func newFixtureWithBackend(t *testing.T, ttl time.Duration, handle func(net.Conn
 		}
 	}()
 	key := bytes.Repeat([]byte{8}, 32)
-	f.server, err = NewServer(ServerConfig{Password: testPassword, Key: key, Target: f.backend.Addr().String(), SessionTTL: ttl, Options: testOptions()})
+	f.server, err = NewServer(ServerConfig{Password: testPassword, Key: key, Target: f.backend.Addr().String(), SessionTTL: ttl, Options: serverOpts})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +118,7 @@ func newFixtureWithBackend(t *testing.T, ttl time.Duration, handle func(net.Conn
 	if err != nil {
 		t.Fatal(err)
 	}
-	client, err := NewClient(ClientConfig{Password: testPassword, Key: key, URL: "ws" + strings.TrimPrefix(f.http.URL, "http") + "/tunnel", ReconnectMin: 10 * time.Millisecond, ReconnectMax: 30 * time.Millisecond, Options: testOptions()})
+	client, err := NewClient(ClientConfig{Password: testPassword, Key: key, URL: "ws" + strings.TrimPrefix(f.http.URL, "http") + "/tunnel", ReconnectMin: 10 * time.Millisecond, ReconnectMax: 30 * time.Millisecond, Options: clientOpts})
 	if err != nil {
 		t.Fatal(err)
 	}
