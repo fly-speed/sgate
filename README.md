@@ -199,6 +199,27 @@ go build -mod=mod -o bin/sgate-client ./cmd/sgate-client
 go test -mod=mod -race ./...
 ```
 
+安装到默认目录 `/opt/soft/sgate`：
+
+```sh
+make build
+sudo make install-files   # 使用已编译的程序安装，不在 root 下重新编译
+# 也可直接 sudo make install，完成编译和安装。
+```
+
+安装内容为 `sbin/sgate-client`、`sbin/sgate-server`，`bin/` 下四份 SSH 启停脚本，`conf/` 下七份 `.cf` 配置和 `sgate.key`，以及 `web/admin/` 独立管理页面；同时创建 `logs/`、`var/`，保留程序及框架许可证。安装不启动服务，也不自动注册到 acl_master。
+
+初次安装会将配置内的程序、日志、管理页面、账号和会话路径调整到安装目录，地址、密码、证书及业务参数保持原值。再次安装保留已有 `.cf`、密钥和登录状态，新版模板写入 `.cf.dist`，仅更新程序、页面及脚本。新装配置和密钥权限为 `0600`；使用其他运行账号时，应为该账号设置配置、日志和运行目录的所有权。开发机 `conf/` 中的管理员账号、会话和初始化令牌不会被打包。
+
+若源码目录存在 `sgate.key`，仅在目标密钥缺失时安装它；否则生成 32 字节随机密钥。部署两端时需使用同一份密钥。示例中的外部证书和 acl_master 需另行配置。
+
+```sh
+make install PREFIX="$HOME/sgate"          # 自定义实际运行目录
+make install DESTDIR=/tmp/sgate-package    # 暂存到 /tmp/sgate-package/opt/soft/sgate
+```
+
+`DESTDIR` 用于打包，写入配置的仍是 `PREFIX` 对应的运行路径。安装后的独立启动命令为 `/opt/soft/sgate/sbin/sgate-server -alone -f /opt/soft/sgate/conf/sgate-server.cf`，客户端同理；请先在配置中填写部署所需的密码和地址。四份 SSH 启停脚本调用外部 `master_ctl`，读取安装目录 `conf/` 内对应配置，可用 `MASTER_CTL` 环境变量指定控制程序。
+
 分离界面的部署回归使用实际构建的两端程序，测试不同工作目录、HTTP/HTTPS、界面路径、文件权限恢复和配置应用。先运行 `make build`，再执行：
 
 ```sh

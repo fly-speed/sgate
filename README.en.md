@@ -131,6 +131,14 @@ Override `GO`, `BINDIR`, `BUILD_FLAGS`, `LDFLAGS` or `TEST_FLAGS` as needed. `ma
 
 For an offline build, first run `make vendor-sync` on a connected machine (requires Python 3), copy the complete generated vendor directory with the source, then run `GOPROXY=off make build MOD=vendor`. Synchronize again after changing local framework sources.
 
+Install to `/opt/soft/sgate` with `make build` followed by `sudo make install-files`, or use `sudo make install` to build and install together. Override `PREFIX` for another runtime location; `DESTDIR` stages a package without changing the runtime paths written to configuration.
+
+Programs go in `sbin/`, the four SSH control scripts in `bin/`, seven service configurations and the shared key in `conf/`, and management assets in `web/admin/`. The installer also creates `logs/` and `var/` and copies the program/framework licenses. New configurations have their installation paths relocated while preserving application settings. Existing configurations, keys and login state are retained; updated templates are installed as `.cf.dist`. Newly installed configurations and keys use mode `0600`. Set appropriate directory ownership when using a separate service account.
+
+Local administrator accounts, sessions and setup tokens are not copied. An existing source `sgate.key` is copied only when the destination has no key; otherwise a new 32-byte random key is generated. Both endpoints must use the same key. External certificates and acl_master must be configured separately. Installation does not start or register services. Installed SSH scripts read their corresponding configuration in `conf/` and support a `MASTER_CTL` override.
+
+For standalone startup, use `/opt/soft/sgate/sbin/sgate-server -alone -f /opt/soft/sgate/conf/sgate-server.cf` (and the client equivalent) after configuring addresses and passwords.
+
 ## Run
 
 Generate a random shared key and securely copy the same key file to both endpoints:

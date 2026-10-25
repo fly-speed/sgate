@@ -1,6 +1,6 @@
 # 默认编译两端；首次构建由 Go 自动下载缺少的模块，无需 Python 或 vendor。
 .DEFAULT_GOAL := build
-.PHONY: all help check deps build client server test framework-test vendor-sync stress weaknet vet clean
+.PHONY: all help check deps build client server install install-files test framework-test vendor-sync stress weaknet vet clean
 
 ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 GO ?= go
@@ -9,6 +9,8 @@ BINDIR ?= bin
 BUILD_FLAGS ?= -trimpath
 LDFLAGS ?=
 TEST_FLAGS ?=
+PREFIX ?= /opt/soft/sgate
+DESTDIR ?=
 
 # 显式使用模块模式，避免旧 vendor 副本覆盖 third_party 中的框架扩展。
 # 离线构建可先 make vendor-sync，再设置 MOD=vendor。
@@ -24,6 +26,8 @@ help:
 	  'make / make build    编译客户端和服务端到 bin/' \
 	  'make client          仅编译客户端' \
 	  'make server          仅编译服务端' \
+	  'make install         编译并安装到 /opt/soft/sgate（通常需要安装目录写权限）' \
+	  'make install-files   仅安装已编译文件，保留现有配置和密钥' \
 	  'make deps            预下载 go.mod 锁定的模块' \
 	  'make test            框架及项目竞态测试（需要 C 编译器）' \
 	  'make framework-test  测试两份本地框架扩展' \
@@ -32,7 +36,7 @@ help:
 	  'make stress          重连与资源压力测试' \
 	  'make weaknet         弱网竞态测试' \
 	  'make clean           删除本 Makefile 生成的两个程序' \
-	  '可覆盖：GO、BINDIR、BUILD_FLAGS、LDFLAGS、TEST_FLAGS、MOD；交叉编译使用 GOOS/GOARCH/CGO_ENABLED。'
+	  '可覆盖：GO、BINDIR、PREFIX、DESTDIR、BUILD_FLAGS、LDFLAGS、TEST_FLAGS、MOD；交叉编译使用 GOOS/GOARCH/CGO_ENABLED。'
 
 check:
 	@command -v "$(GO)" >/dev/null 2>&1 || { printf '%s\n' '错误：找不到 Go，请安装 Go 1.23 或以上版本，或设置 GO。' >&2; exit 1; }
@@ -55,6 +59,14 @@ client: check
 server: check
 	mkdir -p "$(OUTPUT_DIR)"
 	$(GO_CMD) build -mod=$(MOD) $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -o "$(OUTPUT_DIR)/sgate-server" ./cmd/sgate-server
+
+# install-files 可在普通用户编译后通过 sudo 执行，无需 root 再次编译或下载依赖。
+# DESTDIR 仅用于暂存打包；写入配置的运行路径始终使用 PREFIX。
+install: build
+	sh "$(ROOT)/scripts/install.sh" "$(ROOT)" "$(OUTPUT_DIR)" "$(PREFIX)" "$(DESTDIR)"
+
+install-files:
+	sh "$(ROOT)/scripts/install.sh" "$(ROOT)" "$(OUTPUT_DIR)" "$(PREFIX)" "$(DESTDIR)"
 
 # vendor 不包含依赖自身的测试文件，因此框架测试始终读取 third_party。
 framework-test: check
