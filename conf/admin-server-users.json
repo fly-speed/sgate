@@ -1,0 +1,6 @@
+{
+  "username": "admin",
+  "salt": "63bb6c93353352fc488e85ca4ba48197",
+  "password_hash": "506a6dbcbc3ddbd79a5461a1344463236012a00dec5a90be85815c011dac661e",
+  "iterations": 600000
+}
