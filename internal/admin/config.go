@@ -113,6 +113,8 @@ type View struct {
 	Stats               *tunnel.Stats
 	Validate            func(path string) error
 	Apply               func() error
+	ApplyLive           func([]string) error
+	LiveFields          []string
 	Runtime             func() any
 	RestartService      func(control, socket string, expectedPID int) error
 }

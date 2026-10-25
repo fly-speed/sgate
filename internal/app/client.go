@@ -44,6 +44,13 @@ func (c *Client) Listen() string { return c.initial.listen }
 func (c *Client) Configure(service TCPService) error {
 	controller := c.controller
 	controller.tcp, controller.ctx = service, service.Context()
+	if service.Managed() {
+		settings, err := processSettings(controller.servicePath)
+		if err != nil {
+			return err
+		}
+		controller.serviceListen = settings["master_service"]
+	}
 	next := c.initial
 	next.tcp = service
 	controller.current = next

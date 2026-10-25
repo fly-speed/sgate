@@ -17,7 +17,7 @@ import (
 func TestNoiseValidation(t *testing.T) {
 	for _, opts := range []Options{
 		{NoiseInterval: -1}, {NoiseMinBytes: -1},
-		{NoiseMinBytes: 100, NoiseMaxBytes: 99}, {NoiseMaxBytes: chunkSize + 1},
+		{NoiseMinBytes: 100, NoiseMaxBytes: 99}, {NoiseMaxBytes: maxNoiseBytes + 1},
 		{NoiseIntervalMin: time.Second}, {NoiseIntervalMax: time.Second},
 		{NoiseIntervalMin: -1, NoiseIntervalMax: time.Second},
 		{NoiseIntervalMin: 3 * time.Second, NoiseIntervalMax: time.Second},
@@ -163,7 +163,7 @@ func TestNoiseWireSizesAndWriterShutdown(t *testing.T) {
 }
 
 func TestNoiseDiscardAndReconnect(t *testing.T) {
-	for _, mode := range []string{"client", "server", "both", "random-both"} {
+	for _, mode := range []string{"client", "server", "both", "random-both", "large-both"} {
 		t.Run(mode, func(t *testing.T) {
 			clientOpts, serverOpts := testOptions(), testOptions()
 			if mode != "server" {
@@ -176,6 +176,11 @@ func TestNoiseDiscardAndReconnect(t *testing.T) {
 				clientOpts.NoiseInterval, serverOpts.NoiseInterval = 0, 0
 				clientOpts.NoiseIntervalMin, serverOpts.NoiseIntervalMin = time.Millisecond, time.Millisecond
 				clientOpts.NoiseIntervalMax, serverOpts.NoiseIntervalMax = 5*time.Millisecond, 5*time.Millisecond
+			}
+			if mode == "large-both" {
+				clientOpts.NoiseInterval, serverOpts.NoiseInterval = 20*time.Millisecond, 20*time.Millisecond
+				clientOpts.NoiseMinBytes, clientOpts.NoiseMaxBytes = maxNoiseBytes, maxNoiseBytes
+				serverOpts.NoiseMinBytes, serverOpts.NoiseMaxBytes = maxNoiseBytes, maxNoiseBytes
 			}
 			f := newFixtureWithOptions(t, time.Minute, nil, clientOpts, serverOpts)
 			time.Sleep(30 * time.Millisecond)

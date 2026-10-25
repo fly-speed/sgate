@@ -88,20 +88,13 @@ class Case(multi.Case):
         return rows
 
     def replace_routes(self, routes, status=200):
-        def edit(text):
-            return (
-                "\n".join(
-                    (
-                        "proxies = '" + json.dumps(routes) + "'"
-                        if line.strip().startswith("proxies =")
-                        else line
-                    )
-                    for line in text.splitlines()
-                )
-                + "\n"
-            )
-
-        self.client_admin.apply(edit, status=status)
+        config = self.client_admin.call("config")
+        self.client_admin.call(
+            "config",
+            {"fields": {}, "proxies": routes, "revision": config["revision"], "apply": True},
+            "PUT",
+            status=status,
+        )
         if status == 200:
             self.applies += 1
         self.client_admin.authenticated()

@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -142,5 +143,58 @@ func TestTCPFrameworkRestartAuthorization(t *testing.T) {
 	}
 	if err = c.restartService("", "", os.Getpid()); err == nil || !strings.Contains(err.Error(), "仅 acl_master") {
 		t.Fatalf("standalone restart allowed: %v", err)
+	}
+}
+
+func TestTCPPortChangeRecreatesFrameworkListeners(t *testing.T) {
+	for _, failStop := range []bool{false, true} {
+		t.Run(fmt.Sprint("fail-stop-", failStop), func(t *testing.T) {
+			dir := t.TempDir()
+			service := filepath.Join(dir, "client ; ' literal.cf")
+			if err := os.WriteFile(service, []byte("service client {\nmaster_service = 127.0.0.1|9002\n}\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			control := filepath.Join(dir, "control ; ' literal")
+			// 每次记录精确参数；stop 失败时不得继续 start。
+			script := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$0.args\"\n"
+			if failStop {
+				script += "exit 7\n"
+			}
+			if err := os.WriteFile(control, []byte(script), 0700); err != nil {
+				t.Fatal(err)
+			}
+			old := exec.Command("/bin/sleep", "0.2")
+			if err := old.Start(); err != nil {
+				t.Fatal(err)
+			}
+			reaped := make(chan struct{})
+			go func() { _ = old.Wait(); close(reaped) }()
+			command := exec.Command("/bin/sh", rebindArguments(control, "/test/socket ' ; literal", service, old.Process.Pid)...)
+			if err := command.Run(); (err != nil) != failStop {
+				t.Fatalf("stop result: %v", err)
+			}
+			if !failStop {
+				select {
+				case <-reaped:
+				default:
+					t.Fatal("start ran before old process was reaped")
+				}
+			}
+			<-reaped
+			base := "-f\n" + service + "\n-t\n30\n-s\n/test/socket ' ; literal\n-a\n"
+			want := base + "stop\n"
+			if !failStop {
+				want += base + "start\n"
+			}
+			deadline := time.Now().Add(3 * time.Second)
+			for time.Now().Before(deadline) {
+				b, _ := os.ReadFile(control + ".args")
+				if string(b) == want {
+					return
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			t.Fatal("listener replacement did not preserve arguments or stop/start ordering")
+		})
 	}
 }

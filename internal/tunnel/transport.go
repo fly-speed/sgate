@@ -18,7 +18,7 @@ func (s *session) transport(ws *websocket.Conn, crypt *codec) error {
 
 // A resumed peer must confirm the authenticated channel before its original
 // retention deadline. A WebSocket upgrade alone may race a client's timeout.
-func (s *session) transportConfirmed(ws *websocket.Conn, crypt *codec, resumeDeadline time.Time, onConfirmed func()) error {
+func (s *session) transportConfirmed(ws *websocket.Conn, crypt *codec, resumeDeadline time.Time, onConfirmed func()) (transportErr error) {
 	s.transportMu.Lock()
 	defer s.transportMu.Unlock()
 	s.mu.Lock()
@@ -28,9 +28,13 @@ func (s *session) transportConfirmed(ws *websocket.Conn, crypt *codec, resumeDea
 		return errSessionClosed
 	}
 	s.active = ws
+	s.peerWindow = crypt.peerWindow
 	s.signalLocked()
 	s.mu.Unlock()
 	defer func() {
+		if s.opts.Stats != nil {
+			s.opts.Stats.recordDisconnect(transportErr)
+		}
 		ws.Close()
 		s.mu.Lock()
 		s.active = nil
@@ -50,12 +54,14 @@ func (s *session) transportConfirmed(ws *websocket.Conn, crypt *codec, resumeDea
 	})
 	done := make(chan struct{})
 	writerDone := make(chan error, 1)
+	writerStopped := make(chan struct{})
 	go func() {
 		err := s.writeTransport(ws, crypt, done, pongs)
 		ws.Close()
+		close(writerStopped)
 		writerDone <- err
 	}()
-	err := s.readTransport(ws, crypt, touch, confirm)
+	err := s.readTransport(ws, crypt, touch, confirm, writerStopped)
 	close(done)
 	ws.Close()
 	if writerErr := <-writerDone; writerErr != nil {
@@ -114,20 +120,55 @@ func queueLatestPong(pongs chan string, data string) {
 }
 
 func (s *session) writeTransport(ws *websocket.Conn, crypt *codec, done <-chan struct{}, pongs <-chan string) error {
+	if s.opts.Stats != nil {
+		unregister := s.opts.Stats.registerNoiseTransport(s)
+		defer unregister()
+	}
+
 	ticker := time.NewTicker(s.opts.Heartbeat)
 	defer ticker.Stop()
+	// 一个写协程仅持有一个噪音定时器；关闭发送时停止，不遗留待发大包。
+	noiseTimer := time.NewTimer(time.Hour)
+	defer noiseTimer.Stop()
+	noiseTimer.Stop()
 	var noiseTicks <-chan time.Time
-	var noiseTimer *time.Timer
-	delay, err := s.opts.noiseDelay()
-	if err != nil {
+	options, changed := s.opts.liveSnapshot()
+	resetNoise := func() error {
+		noiseTimer.Stop()
+		select {
+		case <-noiseTimer.C:
+		default:
+		}
+		noiseTicks = nil
+		delay, err := options.noiseDelay()
+		if err != nil {
+			return err
+		}
+		if delay > 0 {
+			noiseTimer.Reset(delay)
+			noiseTicks = noiseTimer.C
+		}
+		return nil
+	}
+	if err := resetNoise(); err != nil {
 		return err
 	}
-	if delay > 0 {
-		noiseTimer = time.NewTimer(delay)
-		defer noiseTimer.Stop()
-		noiseTicks = noiseTimer.C
-	}
 	noiseDue := false
+	noiseRemaining := 0
+	refreshNoise := func() error {
+		next, nextChanged := s.opts.liveSnapshot()
+		timingChanged := options.NoiseInterval != next.NoiseInterval ||
+			options.NoiseIntervalMin != next.NoiseIntervalMin ||
+			options.NoiseIntervalMax != next.NoiseIntervalMax || !options.sameNoisePolicy(next)
+		options, changed = next, nextChanged
+		// 大小修改用于下一批噪音；重连参数不影响当前传输的噪音时钟。
+		// 只有启停、间隔或场景策略变化才重新计时，避免无关保存饿死噪音发送。
+		if !timingChanged {
+			return nil
+		}
+		noiseDue, noiseRemaining = false, 0
+		return resetNoise()
+	}
 	var sent uint64
 	lastAck := ^uint64(0) // Send a resume ACK even when neither side has pending data.
 	for {
@@ -136,6 +177,13 @@ func (s *session) writeTransport(ws *websocket.Conn, crypt *codec, done <-chan s
 			return nil
 		case <-s.ctx.Done():
 			return s.ctx.Err()
+		default:
+		}
+		select {
+		case <-changed:
+			if err := refreshNoise(); err != nil {
+				return err
+			}
 		default:
 		}
 		due, err := s.pollControl(ws, pongs, noiseTicks, ticker.C)
@@ -159,17 +207,42 @@ func (s *session) writeTransport(ws *websocket.Conn, crypt *codec, done <-chan s
 					return err
 				}
 				if found {
+					if next.op == opData {
+						if s.opts.Stats != nil {
+							s.opts.Stats.businessTX.Add(uint64(len(next.data)))
+						}
+						s.noteBusiness()
+					}
 					sent = next.seq
 				}
 				lastAck = ack
 			}
-			if noiseDue {
-				if err := s.writeNoise(ws, crypt); err != nil {
+			// 每个小块前重新判定，流量恢复或最后一条业务流关闭时停止禁用场景的余量。
+			if noiseDue && !s.noiseAllowed(options, time.Now()) {
+				noiseDue, noiseRemaining = false, 0
+				if err := resetNoise(); err != nil {
 					return err
+				}
+			}
+			if noiseDue {
+				if noiseRemaining == 0 {
+					noiseRemaining, err = options.noiseSize()
+					if err != nil {
+						return err
+					}
+				}
+				size := min(noiseRemaining, chunkSize)
+				if err := s.writeNoise(ws, crypt, size); err != nil {
+					return err
+				}
+				noiseRemaining -= size
+				// 每块之间返回循环，处理业务、ACK、Ping/Pong 和取消。
+				if noiseRemaining > 0 {
+					continue
 				}
 				noiseDue = false
 				// Start a fresh wait after sending; never accumulate overdue padding.
-				delay, err := s.opts.noiseDelay()
+				delay, err := options.noiseDelay()
 				if err != nil {
 					return err
 				}
@@ -191,6 +264,10 @@ func (s *session) writeTransport(ws *websocket.Conn, crypt *codec, done <-chan s
 		case <-s.ctx.Done():
 			return s.ctx.Err()
 		case <-ch:
+		case <-changed:
+			if err := refreshNoise(); err != nil {
+				return err
+			}
 		case data := <-pongs:
 			if err := s.writeControl(ws, websocket.PongMessage, []byte(data)); err != nil {
 				return err
@@ -205,8 +282,13 @@ func (s *session) writeTransport(ws *websocket.Conn, crypt *codec, done <-chan s
 	}
 }
 
-// readTransport 先校验并处理 ACK，再按序交付应用帧；重复帧只唤醒 ACK，不重复写入业务 TCP。
-func (s *session) readTransport(ws *websocket.Conn, crypt *codec, touch, confirm func() error) error {
+// readTransport 先处理ACK，再将可靠帧按序放入有界队列；噪音就地丢弃，不交给业务TCP。
+func (s *session) readTransport(
+	ws *websocket.Conn,
+	crypt *codec,
+	touch, confirm func() error,
+	stopped <-chan struct{},
+) error {
 	for {
 		// Local TCP work and a large, slowly arriving frame must not consume the
 		// next read's idle budget. Refresh on each payload read, not just per message.
@@ -222,11 +304,21 @@ func (s *session) readTransport(ws *websocket.Conn, crypt *codec, touch, confirm
 		if err != nil {
 			return err
 		}
+		// 按实际认证解密后的线帧负载计数，重放也计入；管理及控制流量不算业务。
+		if f.op == opData {
+			if s.opts.Stats != nil {
+				s.opts.Stats.businessRX.Add(uint64(len(f.data)))
+			}
+			s.noteBusiness()
+		}
 		if f.op == opNoise {
 			if err := confirm(); err != nil {
 				return err
 			}
 			// Padding belongs only to this transport, never to reliable streams.
+			if s.opts.Stats != nil {
+				s.opts.Stats.noiseRX.Add(uint64(len(f.data)))
+			}
 			s.mu.Lock()
 			s.noiseReceived++
 			s.mu.Unlock()
@@ -241,24 +333,8 @@ func (s *session) readTransport(ws *websocket.Conn, crypt *codec, touch, confirm
 		if f.op == opAck {
 			continue
 		}
-		s.mu.Lock()
-		received := s.received
-		s.mu.Unlock()
-		if f.seq > received+1 {
-			return errors.New("gap in received sequence")
-		}
-		if f.seq == received+1 {
-			if err = s.apply(f); err != nil {
-				return err
-			}
-			s.mu.Lock()
-			s.received = f.seq
-			s.signalLocked()
-			s.mu.Unlock()
-		} else {
-			s.mu.Lock()
-			s.signalLocked()
-			s.mu.Unlock()
+		if err := s.queueIncoming(f, stopped); err != nil {
+			return err
 		}
 	}
 }
@@ -322,7 +398,16 @@ func transportConfirmation(
 func (s *session) nextOutgoing(sent uint64) (ack uint64, next frame, found bool, changed <-chan struct{}, closed bool) {
 	s.mu.Lock()
 	ack = s.received
+	inFlight := 0
 	for _, f := range s.pending {
+		cost := frameHeader + len(f.data)
+		if f.seq <= sent {
+			inFlight += cost
+			continue
+		}
+		if s.peerWindow > 0 && inFlight+cost > s.peerWindow {
+			break
+		}
 		if f.seq > sent {
 			next = f
 			found = true

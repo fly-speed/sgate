@@ -58,6 +58,7 @@ class Backend:
         self.lock = threading.Lock()
         self.peers, self.threads, self.errors = set(), [], []
         self.records = 0
+        self.identities = set()
         self.acceptor = threading.Thread(target=self.accept)
         self.acceptor.start()
 
@@ -78,6 +79,9 @@ class Backend:
     def stream(self, connection):
         sender = None
         count = None
+        wave = index = None
+        sequence = -1
+        stage = "hello"
         stopped = threading.Event()
         errors = []
         try:
@@ -90,6 +94,15 @@ class Backend:
                 wave,
                 index,
             )
+            if count and getattr(self, "strict_identities", False):
+                with self.lock:
+                    identity = (wave, index)
+                    assert identity not in self.identities, (
+                        "duplicate backend stream",
+                        self.marker,
+                        identity,
+                    )
+                    self.identities.add(identity)
             if count == 0:
                 connection.sendall(payload("down", self.marker, wave, index, 0))
                 assert (
@@ -97,9 +110,20 @@ class Backend:
                 ), "held connection received unexpected upstream data"
                 return
 
+            # 在线配置压力测试先完成128路屏障，避免屏障期间预发整段下行，
+            # 将尚未开始消费的测试流量积压在系统 socket 缓存中。
+            first = 0
+            if getattr(self, "defer_downstream", False):
+                connection.sendall(payload("down", self.marker, wave, index, 0))
+                stage = "first-upstream"
+                assert receive(connection, SIZE) == payload("up", self.marker, wave, index, 0)
+                with self.lock:
+                    self.records += 1
+                first = 1
+
             def send():
                 try:
-                    for sequence in range(count):
+                    for sequence in range(first, count):
                         if stopped.is_set():
                             return
                         connection.sendall(payload("down", self.marker, wave, index, sequence))
@@ -110,23 +134,31 @@ class Backend:
 
             sender = threading.Thread(target=send)
             sender.start()
-            for sequence in range(count):
+            stage = "upstream"
+            for sequence in range(first, count):
                 assert receive(connection, SIZE) == payload(
                     "up", self.marker, wave, index, sequence
                 ), ("upstream loss/duplicate/cross-stream", self.marker, wave, index, sequence)
                 with self.lock:
                     self.records += 1
+            stage = "up-end"
             assert receive(connection, SIZE) == payload("up-end", self.marker, wave, index, count)
             sender.join(35)
             assert not sender.is_alive() and not errors, ("downstream sender", errors)
         except (OSError, EOFError) as error:
             if count != 0 and not self.done.is_set():
                 with self.lock:
-                    self.errors.append(repr(error))
+                    self.errors.append(
+                        f"{error!r}; backend={self.marker}, wave={wave}, index={index}, "
+                        f"stage={stage}, sequence={sequence}, count={count}"
+                    )
         except BaseException as error:
             if not self.done.is_set():
                 with self.lock:
-                    self.errors.append(repr(error))
+                    self.errors.append(
+                        f"{error!r}; backend={self.marker}, wave={wave}, index={index}, "
+                        f"stage={stage}, sequence={sequence}, count={count}"
+                    )
         finally:
             stopped.set()
             with contextlib.suppress(OSError):

@@ -44,6 +44,7 @@ type controller struct {
 	shared         *sharedServer
 	sharedMode     bool
 	servicePath    string
+	serviceListen  string // 启动时框架持有的 master_service，不能随在线保存改变。
 	restartPending bool
 }
 
@@ -120,6 +121,7 @@ func (c *controller) status() any {
 		adminRoute = managementPath
 	}
 	return map[string]any{
+		"noise":                     c.current.noiseStatus(),
 		"generation":                c.generation,
 		"running":                   running,
 		"last_error":                last,
@@ -201,6 +203,11 @@ func (c *controller) load(candidate string) (definition, error) {
 			return definition{}, e
 		}
 		if merged {
+			if candidate != "" && values["master_args"] != "" {
+				if err := c.validateMasterArgs(candidate, values["master_args"]); err != nil {
+					return definition{}, err
+				}
+			}
 			for key := range values {
 				if strings.HasPrefix(key, "admin_") {
 					loadAdmin := admin.LoadConfig

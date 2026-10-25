@@ -42,7 +42,12 @@ s = edit_once(
     "state := &clientSessions{}\n configSoakClients.Store(c, state)\n defer configSoakClients.Delete(c)\n return c.run(ctx, listener, state)",
 )
 s = edit_once(s, '"sync"', '"sync"\n "sync/atomic"')
+s = edit_once(s, "timer := time.NewTimer(delay)", "timer := time.NewTimer(delay)\n configSoakReconnectTimers.Add(1)")
+s = edit_once(s, "if retryNow {", "configSoakReconnectTimers.Add(-1)\n if retryNow {")
 s += r"""
+var configSoakNoiseTimers atomic.Int64
+var configSoakHeartbeatTimers atomic.Int64
+var configSoakReconnectTimers atomic.Int64
 var configSoakClients sync.Map
 var configSoakServers sync.Map
 var configSoakNextServerID atomic.Uint64
@@ -75,6 +80,9 @@ func ConfigSoakCensus() map[string]int64 {
 		"attached":       0,
 		"noise_sent":     0,
 		"noise_received": 0,
+        "noise_timers": configSoakNoiseTimers.Load(),
+        "heartbeat_timers": configSoakHeartbeatTimers.Load(),
+        "reconnect_timers": configSoakReconnectTimers.Load(),
 	}
 	add := func(s *session) {
 		s.mu.Lock()
@@ -124,6 +132,13 @@ func ConfigSoakCensus() map[string]int64 {
 }
 """
 overlay("internal/tunnel/client.go", s)
+
+# 直接记录代理拥有的定时器对象；计数减少前原 Stop defer 已执行。
+# 这些观察变量只存在于诊断 overlay，不进入生产程序。
+s = (repo / "internal/tunnel/transport.go").read_text()
+s = edit_once(s, "defer ticker.Stop()", "configSoakHeartbeatTimers.Add(1)\n defer configSoakHeartbeatTimers.Add(-1)\n defer ticker.Stop()")
+s = edit_once(s, "defer noiseTimer.Stop()", "configSoakNoiseTimers.Add(1)\n defer configSoakNoiseTimers.Add(-1)\n defer noiseTimer.Stop()")
+overlay("internal/tunnel/transport.go", s)
 s = edit_once(
     (repo / "internal/tunnel/server.go").read_text(),
     "go s.reap()",

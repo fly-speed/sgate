@@ -11,6 +11,9 @@ import (
 // Each call independently chooses the next wait, including the initial wait
 // after connecting. Equal bounds also support a fixed interval.
 func (o Options) noiseDelay() (time.Duration, error) {
+	if o.NoiseSuppressTraffic && o.NoiseSuppressIdle && o.NoiseSuppressEmpty {
+		return 0, nil
+	}
 	min, max := o.NoiseIntervalMin, o.NoiseIntervalMax
 	if min == 0 && max == 0 {
 		return o.NoiseInterval, nil
@@ -27,18 +30,27 @@ func (o Options) noiseDelay() (time.Duration, error) {
 
 // Noise uses the transport's encryption counter, but no reliable sequence or
 // replay buffer. A lost padding frame is never retained or retransmitted.
-func (s *session) writeNoise(ws *websocket.Conn, crypt *codec) error {
-	n, err := rand.Int(rand.Reader, big.NewInt(int64(s.opts.NoiseMaxBytes-s.opts.NoiseMinBytes+1)))
+func (o Options) noiseSize() (int, error) {
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(o.NoiseMaxBytes-o.NoiseMinBytes+1)))
 	if err != nil {
-		return err
+		return 0, err
 	}
-	data := make([]byte, s.opts.NoiseMinBytes+int(n.Int64()))
+	return o.NoiseMinBytes + int(n.Int64()), nil
+}
+
+// 每块不超过业务帧大小。噪音总量再大也不分配整块大内存。
+func (s *session) writeNoise(ws *websocket.Conn, crypt *codec, size int) error {
+	data := make([]byte, size)
+	// 每次发送都重新用密码学随机数填满负载；随机源失败时返回错误，不发送零值填充。
 	if _, err := rand.Read(data); err != nil {
 		return err
 	}
 	_ = ws.SetWriteDeadline(time.Now().Add(s.opts.WriteTimeout))
 	if err := ws.WriteMessage(websocket.BinaryMessage, crypt.seal((frame{op: opNoise, data: data}).encode())); err != nil {
 		return err
+	}
+	if s.opts.Stats != nil {
+		s.opts.Stats.noiseTX.Add(uint64(size))
 	}
 	s.mu.Lock()
 	s.noiseSent++

@@ -7,7 +7,11 @@ import (
 	"time"
 )
 
+// 单次噪音总量上限；传输仍使用有界的小帧，避免大包阻塞控制帧。
+const maxNoiseBytes = 10 * 1024 * 1024
+
 type Options struct {
+	Live             *LiveSettings // 可选的进程内热参数，生命周期随代理实例。
 	Stats            *Stats
 	BufferBytes      int
 	MaxStreams       int
@@ -15,15 +19,27 @@ type Options struct {
 	WriteTimeout     time.Duration
 	Heartbeat        time.Duration
 	HeartbeatTimeout time.Duration
-	NoiseInterval    time.Duration
-	NoiseIntervalMin time.Duration
-	NoiseIntervalMax time.Duration
-	NoiseMinBytes    int
-	NoiseMaxBytes    int
-	Logf             func(string, ...any)
+	// 使用禁止标志，保持直接构造 Options 的零值与旧版本行为一致。
+	NoiseSuppressTraffic bool
+	NoiseSuppressIdle    bool
+	NoiseSuppressEmpty   bool
+	NoiseIdleAfter       time.Duration
+	NoiseInterval        time.Duration
+	NoiseIntervalMin     time.Duration
+	NoiseIntervalMax     time.Duration
+	NoiseMinBytes        int
+	NoiseMaxBytes        int
+	Logf                 func(string, ...any)
 }
 
 func (o Options) defaults() (Options, error) {
+	if o.NoiseIdleAfter < 0 {
+		return o, errors.New("noise-idle-after must be nonnegative")
+	}
+	if o.NoiseIdleAfter == 0 {
+		o.NoiseIdleAfter = time.Second
+	}
+
 	if o.NoiseIntervalMin != 0 || o.NoiseIntervalMax != 0 {
 		if o.NoiseInterval != 0 || o.NoiseIntervalMin <= 0 || o.NoiseIntervalMax < o.NoiseIntervalMin {
 			return o, errors.New(("noise interval range requires 0 < min <= max and cannot be combined with " +
@@ -37,8 +53,8 @@ func (o Options) defaults() (Options, error) {
 		o.NoiseMaxBytes = 10 * 1024
 	}
 	if o.NoiseInterval < 0 || o.NoiseMinBytes < 1 || o.NoiseMaxBytes < o.NoiseMinBytes ||
-		o.NoiseMaxBytes > chunkSize {
-		return o, errors.New(("invalid noise options: interval must be nonnegative and 1 <= min <= max <= 16384 " +
+		o.NoiseMaxBytes > maxNoiseBytes {
+		return o, errors.New(("invalid noise options: interval must be nonnegative and 1 <= min <= max <= 10485760 " +
 			"bytes"))
 	}
 	if o.BufferBytes == 0 {

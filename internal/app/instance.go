@@ -26,6 +26,7 @@ type definition struct {
 	shared   *sharedServer
 }
 type instance struct {
+	live     *tunnel.LiveSettings
 	cancel   context.CancelFunc
 	listener net.Listener
 	server   *tunnel.Server
@@ -36,6 +37,11 @@ type instance struct {
 }
 
 func (d definition) start(ctx context.Context, stats *tunnel.Stats) (*instance, error) {
+	live, err := tunnel.NewLiveSettings(d.liveConfig())
+	if err != nil {
+		return nil, err
+	}
+	d = d.withLiveSettings(live)
 	if len(d.proxies) > 0 && d.tcp == nil {
 		return nil, errors.New("multi-proxy requires the go-service TCP lifecycle")
 	}
@@ -45,7 +51,11 @@ func (d definition) start(ctx context.Context, stats *tunnel.Stats) (*instance, 
 		}
 	}
 	if d.service != nil {
-		return d.startService(stats)
+		i, err := d.startService(stats)
+		if i != nil {
+			i.live = live
+		}
+		return i, err
 	}
 	var l net.Listener
 	var e error
@@ -60,7 +70,7 @@ func (d definition) start(ctx context.Context, stats *tunnel.Stats) (*instance, 
 		return nil, e
 	}
 	runCtx, cancel := context.WithCancel(ctx)
-	i := &instance{cancel: cancel, listener: l, done: make(chan struct{})}
+	i := &instance{live: live, cancel: cancel, listener: l, done: make(chan struct{})}
 	if len(d.proxies) > 0 {
 		go func() { i.err = runClientProxies(runCtx, l, d.proxies); close(i.done) }()
 	} else if d.client != nil {

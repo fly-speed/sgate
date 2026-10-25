@@ -80,6 +80,11 @@ func (c *controller) replaceShared(next definition) error {
 	if e := validateShared(next, c.service.Addresses()); e != nil {
 		return e
 	}
+	live, e := tunnel.NewLiveSettings(next.liveConfig())
+	if e != nil {
+		return e
+	}
+	next = next.withLiveSettings(live)
 	proxy, e := tunnel.NewServer(*next.server)
 	if e != nil {
 		return e
@@ -99,6 +104,7 @@ func (c *controller) replaceShared(next definition) error {
 		old.Close()
 	}
 	c.worker.server = proxy
+	c.worker.live = live
 	c.current = next
 	c.generation++
 	c.lastError = ""

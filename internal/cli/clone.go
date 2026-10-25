@@ -16,6 +16,14 @@ func CloneFlags(original *flag.FlagSet) *flag.FlagSet {
 		if f.Name == "config" {
 			return
 		}
+		if _, ok := f.Value.(*byteSizeValue); ok {
+			v, err := ParseByteSize(f.DefValue)
+			if err != nil {
+				panic(err)
+			}
+			ByteSizeVar(fs, new(int), f.Name, v, f.Usage)
+			return
+		}
 		switch f.Value.(flag.Getter).Get().(type) {
 		case string:
 			fs.String(f.Name, f.DefValue, f.Usage)

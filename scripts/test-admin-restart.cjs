@@ -22,6 +22,7 @@ async function page() {
       querySelectorAll: () => [],
     },
     window: { addEventListener() {} },
+    URL,
     AbortController,
     setTimeout: (fn, ms) => setTimeout(fn, ms === 1000 ? 0 : ms),
     clearTimeout,

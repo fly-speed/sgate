@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strconv"
 	"time"
 )
 
@@ -31,9 +32,23 @@ func (c *controller) restartService(control, socket string, expectedPID int) err
 	if socket != "" {
 		args = append(args, "-s", socket)
 	}
+	program := control
+	if c.tcp != nil {
+		settings, err := processSettings(c.servicePath)
+		if err != nil {
+			return err
+		}
+		if settings["master_service"] != c.serviceListen {
+			// acl_master restart 保留原监听描述符。端口集合改变时必须先
+			// stop 再 start，让框架重新打开端口；子进程独立存活至操作结束。
+			// 所有路径通过位置参数传入，不能拼入 shell 程序文本。
+			program = "/bin/sh"
+			args = rebindArguments(control, socket, c.servicePath, os.Getpid())
+		}
+	}
 	// 独立于代理上下文，允许 master_ctl 在旧代理退出后完成管理请求。
-	commandCtx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	cmd := exec.CommandContext(commandCtx, control, args...)
+	commandCtx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
+	cmd := exec.CommandContext(commandCtx, program, args...)
 	cmd.WaitDelay = time.Second
 	// master_ctl 不能随当前代理退出而取消，也不能同步等待，否则自重启会互相等待。
 	if err := detachRestart(cmd); err != nil {
@@ -51,6 +66,25 @@ func (c *controller) restartService(control, socket string, expectedPID int) err
 		c.waitRestart(cmd, 30*time.Second)
 	}()
 	return nil
+}
+
+func rebindArguments(control, socket, path string, oldPID int) []string {
+	// stop 只确认请求已受理；旧进程退出前仍持有监听 socket。
+	// 等待其被框架回收后才能 start，否则会出现部分端口绑定失败。
+	args := []string{"-c", `control=$1; old=$2; shift 2
+"$control" "$@" -a stop || exit $?
+attempt=0
+while kill -0 "$old" 2>/dev/null; do
+  attempt=$((attempt+1))
+  [ "$attempt" -le 300 ] || exit 1
+  sleep 0.1
+done
+exec "$control" "$@" -a start`,
+		"sgate-rebind", control, strconv.Itoa(oldPID), "-f", path, "-t", "30"}
+	if socket != "" {
+		args = append(args, "-s", socket)
+	}
+	return args
 }
 
 func (c *controller) waitRestart(cmd *exec.Cmd, timeout time.Duration) {

@@ -166,7 +166,7 @@ func New(c Config, v View) (*Handler, error) {
 	path, _ := filepath.Abs(c.UsersFile)
 	h.cookie = "sgate_admin_" + digest([]byte(path + c.Listen))[:12]
 	if b, e := regularRead(v.AppConfigPath, 1<<20); e == nil {
-		h.startupRevision = digest(b)
+		h.startupRevision = h.restartDigest(b)
 	} else {
 		return nil, e
 	}

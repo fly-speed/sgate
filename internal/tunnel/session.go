@@ -75,12 +75,17 @@ type stream struct {
 // session 保存跨 WebSocket 重连保留的状态，不能与单次传输的生命周期混用。
 // mu 保护序列号、业务流和重放缓存；transportMu 保证同一会话只有一个传输读者。
 type session struct {
+	lastBusiness                           time.Time // Protected by mu; monotonic application activity, not control traffic.
 	ctx                                    context.Context
 	cancel                                 context.CancelFunc
 	target                                 string
 	opts                                   Options
 	mu                                     sync.Mutex
 	changed                                chan struct{}
+	incoming                               []frame
+	incomingBytes                          int
+	accepted                               uint64
+	peerWindow                             int // 0 表示旧版未协商；非零时限制未确认的线帧总量。
 	resets                                 chan uint64
 	pending                                []frame
 	pendingBytes                           int
@@ -103,6 +108,10 @@ func newSession(parent context.Context, target string, opts Options) *session {
 		resets:  make(chan uint64, opts.MaxStreams),
 		streams: make(map[uint64]*stream),
 	}
+	if opts.Stats != nil {
+		opts.Stats.registerSession(s)
+	}
+	go s.deliverIncoming()
 	go func() {
 		defer s.close()
 		for {
@@ -129,6 +138,9 @@ func (s *session) close() {
 		return
 	}
 	s.closed = true
+	if s.opts.Stats != nil {
+		s.opts.Stats.unregisterSession(s)
+	}
 	s.cancel()
 	if s.active != nil {
 		// TLS Close can wait for an in-flight writer before closing the socket.
@@ -145,6 +157,8 @@ func (s *session) close() {
 	s.streams = make(map[uint64]*stream)
 	s.pending = nil
 	s.pendingBytes = 0
+	s.incoming = nil
+	s.incomingBytes = 0
 	s.signalLocked()
 }
 func (s *session) enqueue(op byte, id uint64, data []byte) error {
@@ -169,6 +183,9 @@ func (s *session) enqueueStream(op byte, id uint64, data []byte, st *stream) err
 			s.next++
 			s.pending = append(s.pending, frame{op: op, seq: s.next, stream: id, data: append([]byte(nil), data...)})
 			s.pendingBytes += cost
+			if op == opData {
+				s.lastBusiness = time.Now()
+			}
 			s.signalLocked()
 			s.mu.Unlock()
 			return nil
@@ -272,6 +289,9 @@ func (s *session) addLocal(c net.Conn) error {
 	s.nextStream++
 	id := s.nextStream
 	st := &stream{conn: c}
+	if len(s.streams) == 0 {
+		s.lastBusiness = time.Time{}
+	}
 	s.streams[id] = st
 	s.mu.Unlock()
 	if err := s.enqueueStream(opOpen, id, nil, st); err != nil {
@@ -313,6 +333,9 @@ func (s *session) apply(f frame) error {
 			return errSessionClosed
 		}
 		st := &stream{conn: c}
+		if len(s.streams) == 0 {
+			s.lastBusiness = time.Time{}
+		}
 		s.streams[f.stream] = st
 		s.mu.Unlock()
 		go s.readStream(f.stream, st)
@@ -329,7 +352,10 @@ func (s *session) apply(f frame) error {
 		if st.writeEnded {
 			return errors.New("data after FIN")
 		}
-		_ = st.conn.SetWriteDeadline(time.Now().Add(s.opts.WriteTimeout))
+		s.noteBusiness()
+		// 业务应用可长时间暂停读取；会话关闭会关闭 TCP 并中断此写入。
+		// WriteTimeout 仅约束隧道网络写入，不能把正常业务背压当作断线。
+		_ = st.conn.SetWriteDeadline(time.Time{})
 		data := f.data
 		for len(data) > 0 {
 			n, err := st.conn.Write(data)

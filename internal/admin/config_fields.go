@@ -10,11 +10,14 @@ import (
 
 // configField 是表单视图；保存时仅替换修改项，保留原文件的注释和布局。
 type configField struct {
-	Key         string `json:"key"`
-	Value       string `json:"value"`
-	Description string `json:"description"`
-	Secret      bool   `json:"secret"`
-	Group       string `json:"group"`
+	Key         string         `json:"key"`
+	Value       string         `json:"value"`
+	Description string         `json:"description"`
+	Secret      bool           `json:"secret"`
+	Group       string         `json:"group"`
+	Kind        string         `json:"kind,omitempty"`
+	Validation  configRule     `json:"validation"`
+	Mappings    []proxyMapping `json:"mappings,omitempty"`
 }
 
 // fieldValue 分离值和行尾注释。旧式配置的未加引号值允许包含 #。
@@ -92,7 +95,7 @@ func configFields(content string) ([]configField, error) {
 		} else if strings.HasPrefix(key, "admin_") || key == "admin-config" || key == "admin-enabled" {
 			group = "Web 管理"
 		}
-		fields = append(fields, configField{key, value, description, secretConfigKey(line) != "", group})
+		fields = append(fields, configField{Key: key, Value: value, Description: description, Secret: secretConfigKey(line) != "", Group: group, Validation: ruleForConfig(key)})
 		description = ""
 	}
 	return fields, nil
@@ -110,6 +113,11 @@ func updateConfigFields(current []byte, edits map[string]string) (string, error)
 	for key, value := range edits {
 		if _, ok := known[key]; !ok {
 			return "", errors.New("配置项已不存在，请重新加载")
+		}
+		if value != secretMarker {
+			if err := validateConfigEdit(key, value); err != nil {
+				return "", errors.New(key + "：" + err.Error())
+			}
 		}
 		if strings.ContainsAny(value, "\r\n\x00") {
 			return "", errors.New("配置值不能包含换行或空字符")
@@ -136,6 +144,10 @@ func updateConfigFields(current []byte, edits map[string]string) (string, error)
 			return "", err
 		}
 		encoded := strconv.Quote(value)
+		// JSON 自带双引号；优先用单引号包裹，避免反复转义撑破模板的行长限制。
+		if key == "proxies" && !strings.Contains(value, "'") {
+			encoded = "'" + value + "'"
+		}
 		// 框架本身不使用应用层的引号解码，框架参数继续按原模板格式写入。
 		if serviceconfig.FrameworkKey(key) {
 			if strings.Contains(value, "#") || value != strings.TrimSpace(value) {

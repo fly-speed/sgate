@@ -57,6 +57,7 @@ func freshTimestamp(value string) bool {
 }
 
 type codec struct {
+	peerWindow     int
 	tx, rx         cipher.AEAD
 	sent, received uint64
 }

@@ -775,3 +775,139 @@ footer {
     gap: 20px;
   }
 }
+
+.proxy-editor {
+  border-top: 1px solid #eaf0f2;
+  padding: 18px 0;
+}
+.proxy-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.proxy-mapping {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(220px, 1.5fr) minmax(180px, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid #dce5e8;
+  border-radius: 10px;
+  background: #f8fafb;
+}
+.proxy-mapping label {
+  margin: 0;
+  min-width: 0;
+  font-size: 12px;
+}
+.proxy-mapping input {
+  width: 100%;
+  min-width: 0;
+  margin: 8px 0 0;
+}
+.proxy-remove {
+  margin-bottom: 1px;
+}
+@media (max-width: 1000px) {
+  .proxy-mapping {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+@media (max-width: 680px) {
+  .proxy-mapping {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.config-editor {
+  min-width: 0;
+}
+.config-editor input,
+.config-editor select {
+  width: 100%;
+}
+.config-row .config-error,
+.proxy-mapping .config-error {
+  display: block;
+  color: var(--red, #c53030);
+  margin-top: 6px;
+}
+.config-error[hidden] {
+  display: none;
+}
+.config-row [aria-invalid="true"],
+.proxy-mapping [aria-invalid="true"] {
+  border-color: #c53030;
+}
+
+.live-badge {
+  display: inline-block;
+  color: var(--green, #187a60);
+  background: #e7f6ef;
+  border-radius: 4px;
+  padding: 3px 6px;
+  margin: 6px 0 0;
+  font-size: 11px;
+}
+
+/* 单独查看小流量，避免 MiB/s 峰值将白噪音或后台业务压在零轴上。 */
+.chart-header {
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.chart-header select {
+  width: auto;
+  max-width: 100%;
+  margin-left: auto;
+  padding: 6px 10px;
+}
+.traffic-observation {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.traffic-plot {
+  position: relative;
+}
+.traffic-tooltip {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  min-width: 175px;
+  max-width: calc(100% - 16px);
+  padding: 10px 12px;
+  border: 1px solid #dce7e3;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 4px 18px #163c3020;
+  color: var(--ink, #20313b);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.traffic-tooltip[hidden] {
+  display: none;
+}
+.traffic-tooltip > strong,
+.traffic-tooltip > span,
+.traffic-tooltip > small {
+  display: block;
+}
+.traffic-tooltip > span {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.traffic-tooltip b {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.traffic-tooltip .rx-dot {
+  margin-left: 0;
+}
+.traffic-tooltip small {
+  color: var(--muted);
+  font-size: 10px;
+}

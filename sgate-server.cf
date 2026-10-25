@@ -1,0 +1,144 @@
+# 通用示例；部署前填写密码，并按需修改地址。默认不自动启动。
+service sgate-server {
+    # 是否禁止 acl_master 自动启动此服务；yes 禁用，no 启用，不影响手动独立启动。
+    master_disable = yes
+    # acl_master 服务类型；sock 表示由框架管理监听套接字。
+    master_type = sock
+    # acl_master 托管监听地址，格式为 IP|端口；省略 IP 表示监听所有网卡。
+    master_service = |8081
+    # 是否启用 SO_REUSEPORT；no 表示由 acl_master 持有监听并向子进程传递套接字。
+    master_reuseport = no
+    # 服务子进程数上限；当前配置使用单进程维护隧道会话。
+    master_maxproc = 1
+    # 预先启动的子进程数，不得超过 master_maxproc。
+    master_prefork = 1
+    # 子进程是否向 acl_master 报告忙闲状态；0 关闭。
+    master_status_notify = 0
+    # 是否以框架配置的非特权身份运行；n 不切换身份，y 启用。
+    master_unpriv = n
+    # 是否启用 chroot 目录隔离；n 关闭，y 启用。
+    master_chroot = n
+    # 框架停止或重启服务时是否采用发送 SIGTERM 的方式；false 使用框架原有停止流程。
+    master_stop_kill = false
+    # 当 master_stop_kill 启用时，是否等待旧子进程退出。
+    master_stop_wait = true
+    # 是否使用框架的私有套接字目录；n 使用公共目录，y 使用私有目录。
+    master_private = n
+    # acl_master 启动的服务可执行文件绝对路径。
+    master_command = /opt/soft/sgate/sbin/sgate-server
+    # 附加命令行覆盖项，通常留空；框架自动传入 -f <本文件>。
+    master_args =
+    # acl_master 启动服务子进程时使用的工作目录；业务相对路径以此目录解析。
+    master_home = /opt/soft/sgate/var
+
+
+# 框架监控、通知及日志：通用示例默认关闭资源监控，日志按安装目录配置。
+    # 是否采集子进程文件描述符；通用示例保持框架默认关闭。
+    master_check_fds = false
+    # 是否采集子进程内存；通用示例保持框架默认关闭。
+    master_check_mem = false
+    # 是否采集子进程 CPU；通用示例保持框架默认关闭。
+    master_check_cpu = false
+    # 是否采集子进程 I/O；通用示例保持框架默认关闭。
+    master_check_io = false
+    # 是否检查子进程资源限制；通用示例保持框架默认关闭。
+    master_check_limit = false
+    # 子进程异常通知服务地址；no 使用框架默认的监控套接字。
+    master_notify_addr = no
+    # 异常通知邮件接收者；no 表示不指定邮件接收者。
+    master_notify_recipients = no
+    # 服务版本标识；none 保留框架未指定版本时的默认值。
+    master_version = none
+    # 定时唤醒周期，单位秒；仅 trigger 服务使用，sock 服务保持 -。
+    master_wakeup = -
+    # 服务日志文件路径；部署时确保日志目录存在且运行用户可写。
+    master_log = /opt/soft/sgate/logs/sgate-server.log
+    # acl_master 托管时的标准输出重定向文件路径。
+    master_stdout = /opt/soft/sgate/logs/sgate-server-stdout.log
+    # acl_master 托管时的标准错误重定向文件路径。
+    master_stderr = /opt/soft/sgate/logs/sgate-server-stderr.log
+
+# 代理配置：使用服务模板读取，命令行同名参数优先。
+    # UTF-8 应用配置；参数优先级：命令行显式参数 > 本文件 > 内置默认值。
+    # 业务相对路径以进程工作目录为基准。
+    # 独立启动时的代理监听地址；服务端 HTTP 管理仅允许回环地址，对外开放管理须配置 TLS。
+    listen = :8081
+    # 服务端固定转发的后端 TCP 地址，格式为主机:端口。
+    target = 127.0.0.1:9001
+    # 客户端 addr 可选后端的允许列表，逗号分隔且按完整 host:port 精确匹配；支持 IP 或域名。
+    # 留空禁止客户端选择后端；未传 addr 时仍使用上面的 target。示例：127.0.0.1:8088,example.com:443
+    allowed-targets = "127.0.0.1:8080"
+    # WebSocket 隧道路径，须与客户端 server URL 的路径一致；管理入口另为 /admin/。
+    path = /tunnel
+    # 两端共享加密密钥文件；相对路径按进程工作目录解析。
+    key-file = sgate.key
+    # 代理连接验证密码，客户端与服务端必须一致；与 Web 管理账号密码独立。
+    password = 'replace-with-your-password'
+    # HTTPS/WSS 服务证书 PEM 文件，须与 tls-key 同时设置；两项留空使用 HTTP/WS。
+    tls-cert =
+    # HTTPS/WSS 服务证书私钥 PEM 文件，须与 tls-cert 同时设置。
+    tls-key =
+    # 服务端保留已断开隧道会话的期限，到期释放旧应用连接和重放缓存。
+    session-ttl = 2m
+    # 服务端允许保留的隧道会话数量上限。
+    max-sessions = 128
+    # 每个隧道会话允许同时存在的 TCP 应用连接数上限。
+    max-streams = 128
+    # 每会话、每方向未确认数据缓存上限，单位字节；达到上限后通过背压等待。
+    buffer-bytes = 4194304
+    # WebSocket 心跳发送间隔，支持 ms、s、m 等时间单位。
+    heartbeat = 20s
+    # 接收空闲超时；0 按 heartbeat 的三倍计算，自定义值须满足程序超时校验。
+    heartbeat-timeout = 0
+    # 固定白噪音发送间隔；0 且随机间隔上下限均为 0 时不主动发送。
+    noise-interval = 0
+    # 将随机间隔上下限分别设为 1s、3s，即启用每隔 1～3 秒随机发送。
+    # 随机白噪音发送间隔下限，与上限同时设为正值启用，例如 1s；此时固定间隔须为 0。
+    noise-interval-min = "100ms"
+    # 随机白噪音发送间隔上限，例如 3s；不得小于 noise-interval-min。
+    noise-interval-max = "1000ms"
+    # 每次随机白噪音负载的最小字节数，至少为 1。
+    noise-min-bytes = "1M"
+    # 每次随机白噪音负载的最大字节数，不小于下限且不超过 10M（10485760 字节），支持 K/M 后缀。
+    noise-max-bytes = "10M"
+    # 业务传输中是否混入白噪音；true 保留原行为，false 在双向业务活跃时暂停。
+    noise-traffic = "false"
+    # 有业务连接但双向无数据时是否发送；沿用上面的固定或随机间隔与大小。
+    noise-idle = "true"
+    # 无业务连接但隧道在线时是否发送；true 发送，false 暂停，不影响心跳。
+    noise-empty = "false"
+    # 连续无双向业务数据达到此时间算空闲；单位 ms/s/m/h，0 使用 1s，新建无流量连接直接视为空闲。
+    noise-idle-after = 1s
+
+
+    # 可选的独立管理配置文件；非空时使用该文件并启用管理界面。
+    # 留空则通过 admin_enabled 或 -admin-enabled 开启本 .cf 中的管理配置。
+    admin-config =
+
+# Web 管理配置：默认关闭；命令行 -admin-enabled 可开启。
+# 账号和持久化会话仍是独立数据文件，下面的相对路径以本 .cf 所在目录为基准。
+    # 是否启用 Web 管理，默认关闭；命令行 -admin-enabled 可覆盖
+    admin_enabled = false
+    # 外部 HTML/CSS/JS 目录，相对本 .cf 解析；也可使用绝对路径
+    admin_web_dir = web/admin
+    # 服务端管理入口为代理端口的 /admin/，不再单独监听；此值仅保留旧登录 Cookie 身份。
+    admin_listen = 127.0.0.1:9082
+    # 独立管理员账号文件（哈希存储），相对本 .cf 解析
+    admin_users_file = conf/admin-server-users.json
+    # 持久化登录会话目录，相对本 .cf 解析
+    admin_session_dir = conf/admin-server-sessions
+    # 登录会话固定有效期，进程重启后继续有效
+    admin_session_timeout = 12h
+    # 最多保存的管理登录会话数
+    admin_max_sessions = 128
+    # 首次创建管理员账号时使用的一次性令牌文件
+    admin_setup_token_file = conf/admin-server-setup.token
+    # 服务端管理页面复用代理的 tls-cert/tls-key；以下旧管理证书参数不再使用。
+    admin_tls_cert =
+    # 旧管理私钥参数，仅保留兼容
+    admin_tls_key =
+    # acl_master 控制程序路径，用于界面“重启服务”；默认使用安装目录下的 master_ctl。
+    admin_master_ctl = /opt/soft/acl-master/bin/master_ctl
+    # acl_master 管理套接字路径；留空使用 master_ctl 的默认设置，可填绝对路径显式指定。
+    admin_master_socket =
+}

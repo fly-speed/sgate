@@ -12,21 +12,39 @@ import (
 // With shared server management, bytes and connections on that HTTP/TLS
 // listener also include management traffic.
 type Stats struct {
-	tx, rx  atomic.Uint64
-	active  atomic.Int64
-	started time.Time
+	mu                     sync.Mutex
+	noiseSessions          map[*session]int
+	sessions               map[*session]struct{}
+	disconnects            uint64
+	lastDisconnect         string
+	lastDisconnectTime     int64
+	businessTX, businessRX atomic.Uint64
+	tx, rx                 atomic.Uint64
+	noiseTX, noiseRX       atomic.Uint64
+	active                 atomic.Int64
+	started                time.Time
 }
+
+// BusinessTX/RX 是实际加密帧中的业务负载，包含重放，不代表应用重复交付。
+// NoiseActivity 是采样时刻的状态；Permitted 表示策略允许，不保证该秒有噪音帧。
 type TrafficSnapshot struct {
-	TX          uint64 `json:"tx_bytes"`
-	RX          uint64 `json:"rx_bytes"`
-	Connections int64  `json:"connections"`
-	Time        int64  `json:"time_ms"`
-	Uptime      int64  `json:"uptime_seconds"`
+	BusinessTX    uint64                `json:"business_tx_bytes"`
+	BusinessRX    uint64                `json:"business_rx_bytes"`
+	NoiseActivity NoiseActivitySnapshot `json:"noise_activity"`
+	NoiseTX       uint64                `json:"noise_tx_bytes"`
+	NoiseRX       uint64                `json:"noise_rx_bytes"`
+	TX            uint64                `json:"tx_bytes"`
+	RX            uint64                `json:"rx_bytes"`
+	Connections   int64                 `json:"connections"`
+	Time          int64                 `json:"time_ms"`
+	Uptime        int64                 `json:"uptime_seconds"`
 }
 
 func NewStats() *Stats { return &Stats{started: time.Now()} }
 func (s *Stats) Snapshot() TrafficSnapshot {
 	return TrafficSnapshot{
+		BusinessTX: s.businessTX.Load(), BusinessRX: s.businessRX.Load(), NoiseActivity: s.noiseActivity(),
+		NoiseTX: s.noiseTX.Load(), NoiseRX: s.noiseRX.Load(),
 		TX:          s.tx.Load(),
 		RX:          s.rx.Load(),
 		Connections: s.active.Load(),

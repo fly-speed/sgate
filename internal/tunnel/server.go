@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -178,7 +179,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	serverNonce := randomID()
 	headers := http.Header{}
 	headers.Set("X-Sgate-Nonce", serverNonce)
-	headers.Set("X-Sgate-Auth", mac(s.cfg.Key, protocol, "server", id, nonce, serverNonce, ts, credential))
+	window := ""
+	if request.peerWindow > 0 {
+		window = strconv.Itoa(s.cfg.Options.BufferBytes)
+		headers.Set(receiveWindowHeader, window)
+	}
+	headers.Set("X-Sgate-Auth", windowMAC(s.cfg.Key, window, protocol, "server", id, nonce, serverNonce, ts, credential))
 	upgrader := websocket.Upgrader{
 		HandshakeTimeout: s.cfg.Options.DialTimeout,
 		ReadBufferSize:   chunkSize,
@@ -189,9 +195,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.cfg.Options.Logf("tunnel connected")
+	crypt := newCodec(s.cfg.Key, id, nonce, serverNonce, false)
+	crypt.peerWindow = request.peerWindow
 	err = entry.session.transportConfirmed(
 		ws,
-		newCodec(s.cfg.Key, id, nonce, serverNonce, false),
+		crypt,
 		resumeDeadline,
 		func() { confirmed = true },
 	)
@@ -202,6 +210,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type tunnelRequest struct {
 	id, nonce, timestamp, resume, credential string
 	target                                   string
+	peerWindow                               int
 }
 
 func (s *Server) authenticateRequest(r *http.Request) (tunnelRequest, bool) {
@@ -221,7 +230,18 @@ func (s *Server) authenticateRequest(r *http.Request) (tunnelRequest, bool) {
 		!verifyPassword(s.cfg.Key, s.cfg.Password, credential, id, nonce, ts, resume, r.URL.RequestURI()) {
 		return tunnelRequest{}, false
 	}
-	return tunnelRequest{id: id, nonce: nonce, timestamp: ts, resume: resume, credential: credential}, true
+	request := tunnelRequest{id: id, nonce: nonce, timestamp: ts, resume: resume, credential: credential}
+	if values, ok := r.URL.Query()[receiveWindowQuery]; ok {
+		if len(values) != 1 {
+			return tunnelRequest{}, false
+		}
+		var err error
+		request.peerWindow, err = parseReceiveWindow(values[0])
+		if err != nil {
+			return tunnelRequest{}, false
+		}
+	}
+	return request, true
 }
 
 // acquireSession 在同一把锁下检查过期、nonce 重放和占用状态。

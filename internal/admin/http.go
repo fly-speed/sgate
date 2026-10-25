@@ -222,7 +222,7 @@ func (h *Handler) applyProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	b, e := regularRead(h.view.AppConfigPath, 1<<20)
 	if e == nil {
-		h.startupRevision = digest(b)
+		h.startupRevision = h.restartDigest(b)
 	}
 	reply(w, 200, map[string]any{"applied": true})
 }
@@ -454,11 +454,34 @@ func (h *Handler) getConfig(w http.ResponseWriter) {
 		problem(w, 500, "无法生成配置表单："+e.Error())
 		return
 	}
+	for i := range fields {
+		for _, key := range h.view.LiveFields {
+			if key == fields[i].Key && h.view.ApplyLive != nil {
+				fields[i].Validation.Live = true
+			}
+		}
+		if fields[i].Key == "master_args" {
+			fields[i].Validation.Options = argumentOptions(h.view.Role)
+		}
+	}
+	if h.view.Role == "client" {
+		for i := range fields {
+			if fields[i].Key != "proxies" {
+				continue
+			}
+			fields[i].Mappings, e = proxyMappings(fields[i].Value)
+			if e != nil {
+				problem(w, 500, e.Error())
+				return
+			}
+			fields[i].Kind, fields[i].Value = "proxies", ""
+		}
+	}
 	v := map[string]any{
 		"fields":               fields,
 		"content":              redactConfig(b),
 		"revision":             digest(b),
-		"requires_restart":     digest(b) != h.startupRevision,
+		"requires_restart":     h.restartDigest(b) != h.startupRevision,
 		"path":                 h.view.AppConfigPath,
 		"role":                 h.view.Role,
 		"password_placeholder": secretMarker,
@@ -472,6 +495,7 @@ func (h *Handler) putConfig(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Content  string            `json:"content"`
 		Fields   map[string]string `json:"fields"`
+		Proxies  *[]proxyMapping   `json:"proxies"`
 		Revision string            `json:"revision"`
 		Apply    bool              `json:"apply"`
 	}
@@ -496,12 +520,20 @@ func (h *Handler) putConfig(w http.ResponseWriter, r *http.Request) {
 		problem(w, 409, "配置已被其他操作修改，请重新加载后再编辑")
 		return
 	}
-	if input.Fields != nil {
+	if input.Fields != nil || input.Proxies != nil {
 		if input.Content != "" {
 			problem(w, 400, "不能同时提交表单和文件内容")
 			return
 		}
-		input.Content, e = updateConfigFields(current, input.Fields)
+		if input.Proxies != nil {
+			if h.view.Role != "client" {
+				problem(w, 400, "只有客户端支持代理映射")
+				return
+			}
+			input.Content, e = updateMappingFields(current, input.Fields, *input.Proxies)
+		} else {
+			input.Content, e = updateConfigFields(current, input.Fields)
+		}
 		if e != nil {
 			problem(w, 400, e.Error())
 			return
@@ -554,26 +586,39 @@ func (h *Handler) commitConfig(w http.ResponseWriter, current []byte, content st
 		problem(w, 500, "配置保存失败")
 		return
 	}
-	if apply {
+	live := h.changedLiveFields(current, content)
+	requiresRestart := h.restartDigest([]byte(content)) != h.startupRevision
+	// 有非热参数待应用时保持原重启流程，否则不触碰现有隧道和业务连接。
+	restart := apply && (h.view.ApplyLive == nil || requiresRestart || len(live) == 0)
+	if restart {
 		if h.view.Apply == nil {
-			problem(w, 503, "配置已保存，但代理重启不可用")
-			return
+			e = errors.New("代理重启不可用")
+		} else {
+			e = h.view.Apply()
 		}
-		if e = h.view.Apply(); e != nil {
-			if restoreErr := atomicFile(h.view.AppConfigPath, current); restoreErr != nil {
-				problem(w, 500, "重启失败，且无法恢复配置文件："+e.Error())
-				return
-			}
-			problem(w, 409, e.Error())
-			return
-		}
-		h.startupRevision = digest([]byte(content))
+	} else if len(live) > 0 {
+		e = h.view.ApplyLive(live)
 	}
-	reply(
-		w,
-		200,
-		map[string]any{"revision": digest([]byte(content)), "requires_restart": !apply, "applied": apply},
-	)
+	if e != nil {
+		if restoreErr := atomicFile(h.view.AppConfigPath, current); restoreErr != nil {
+			problem(w, 500, "应用失败，且无法恢复配置文件："+e.Error())
+			return
+		}
+		problem(w, 409, e.Error())
+		return
+	}
+	if restart {
+		h.startupRevision = h.restartDigest([]byte(content))
+		requiresRestart = false
+	}
+	result := map[string]any{
+		"revision": digest([]byte(content)), "requires_restart": requiresRestart,
+		"applied": restart, "live_applied": live,
+	}
+	if h.view.Runtime != nil {
+		result["runtime"] = h.view.Runtime()
+	}
+	reply(w, 200, result)
 }
 
 func exclusiveFile(path string, data []byte) error {

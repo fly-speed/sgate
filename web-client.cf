@@ -129,8 +129,16 @@ service web-client {
     noise-interval-max = 0
     # 每次白噪音随机负载的最小字节数，默认 1024。
     noise-min-bytes = 1024
-    # 每次白噪音随机负载的最大字节数，默认 10240；允许范围为 1～16384。
+    # 每次白噪音随机负载的最大字节数，默认 10240；允许范围为 1～10M（10485760 字节），支持 K/M 后缀。
     noise-max-bytes = 10240
+    # 业务传输中是否混入白噪音；true 保留原行为，false 在双向业务活跃时暂停。
+    noise-traffic = true
+    # 有业务连接但双向无数据时是否发送；沿用上面的固定或随机间隔与大小。
+    noise-idle = true
+    # 无业务连接但隧道在线时是否发送；true 发送，false 暂停，不影响心跳。
+    noise-empty = true
+    # 连续无双向业务数据达到此时间算空闲；单位 ms/s/m/h，0 使用 1s，新建无流量连接直接视为空闲。
+    noise-idle-after = 1s
 
     # 可选的独立管理配置文件；非空时使用该文件并启用管理界面。
     # 留空则通过 admin_enabled 或 -admin-enabled 开启本 .cf 中的管理配置。

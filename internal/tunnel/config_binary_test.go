@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,6 +28,7 @@ import (
 // observer forwards encrypted frames unchanged; its independent codecs only
 // inspect noise sizes and cumulative ACKs using disposable test credentials.
 type configNoiseObserver struct {
+	onFrame      func(direction int, sessionID string, f frame)
 	mu           sync.Mutex
 	pairs        map[*websocket.Conn]*websocket.Conn
 	blocked      atomic.Bool
@@ -59,8 +61,15 @@ func (o *configNoiseObserver) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 			headers[k] = v
 		}
 	}
+	// 原始查询串属于认证内容，不能在观测中继中丢弃窗口或后端地址。
+	target, err := url.Parse(o.target)
+	if err != nil {
+		http.Error(w, "invalid observer upstream", 500)
+		return
+	}
+	target.RawQuery, target.ForceQuery = r.URL.RawQuery, r.URL.ForceQuery
 	up, response, err := (&websocket.Dialer{TLSClientConfig: o.tlsConfig, HandshakeTimeout: time.Second}).Dial(
-		o.target,
+		target.String(),
 		headers,
 	)
 	if err != nil {
@@ -165,6 +174,9 @@ func (o *configNoiseObserver) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 }
 
 func (o *configNoiseObserver) observe(direction, generation int, sessionID string, f frame) {
+	if o.onFrame != nil {
+		o.onFrame(direction, sessionID, f)
+	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if f.op == opNoise {

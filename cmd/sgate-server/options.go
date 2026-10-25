@@ -28,8 +28,9 @@ func parseOptions(args []string) (string, error) {
 	flag.Duration("noise-interval", 0, "random padding interval (0 disables sending)")
 	flag.Duration("noise-interval-min", 0, "minimum random padding wait (requires noise-interval-max)")
 	flag.Duration("noise-interval-max", 0, "maximum random padding wait (requires noise-interval-min)")
-	flag.Int("noise-min-bytes", 1024, "minimum random padding payload bytes")
-	flag.Int("noise-max-bytes", 10*1024, "maximum random padding payload bytes (up to 16384)")
+	cli.ByteSizeVar(flag.CommandLine, new(int), "noise-min-bytes", 1024, "minimum random padding bytes (supports K/M)")
+	cli.ByteSizeVar(flag.CommandLine, new(int), "noise-max-bytes", 10*1024, "maximum random padding bytes per burst (up to 10M; supports K/M)")
+	cli.NoisePolicyFlags(flag.CommandLine)
 	if err := cli.Parse(flag.CommandLine, args); err != nil {
 		return "", err
 	}

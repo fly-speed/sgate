@@ -20,6 +20,10 @@ import (
 type configValues struct{ flags *flag.FlagSet }
 
 func (v configValues) text(name string) string { return v.flags.Lookup(name).Value.String() }
+func (v configValues) boolean(name string) bool {
+	value, _ := strconv.ParseBool(v.text(name))
+	return value
+}
 func (v configValues) integer(name string) int {
 	value, _ := strconv.Atoi(v.text(name))
 	return value
@@ -70,16 +74,20 @@ func build(role string, fs *flag.FlagSet, stats *tunnel.Stats) (definition, erro
 
 func (v configValues) options(stats *tunnel.Stats) tunnel.Options {
 	return tunnel.Options{
-		Stats:            stats,
-		BufferBytes:      v.integer("buffer-bytes"),
-		MaxStreams:       v.integer("max-streams"),
-		Heartbeat:        v.duration("heartbeat"),
-		HeartbeatTimeout: v.duration("heartbeat-timeout"),
-		NoiseInterval:    v.duration("noise-interval"),
-		NoiseIntervalMin: v.duration("noise-interval-min"),
-		NoiseIntervalMax: v.duration("noise-interval-max"),
-		NoiseMinBytes:    v.integer("noise-min-bytes"),
-		NoiseMaxBytes:    v.integer("noise-max-bytes"),
+		Stats:                stats,
+		BufferBytes:          v.integer("buffer-bytes"),
+		MaxStreams:           v.integer("max-streams"),
+		Heartbeat:            v.duration("heartbeat"),
+		HeartbeatTimeout:     v.duration("heartbeat-timeout"),
+		NoiseSuppressTraffic: !v.boolean("noise-traffic"),
+		NoiseSuppressIdle:    !v.boolean("noise-idle"),
+		NoiseSuppressEmpty:   !v.boolean("noise-empty"),
+		NoiseIdleAfter:       v.duration("noise-idle-after"),
+		NoiseInterval:        v.duration("noise-interval"),
+		NoiseIntervalMin:     v.duration("noise-interval-min"),
+		NoiseIntervalMax:     v.duration("noise-interval-max"),
+		NoiseMinBytes:        v.integer("noise-min-bytes"),
+		NoiseMaxBytes:        v.integer("noise-max-bytes"),
 	}
 }
 

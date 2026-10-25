@@ -279,7 +279,7 @@ func sessionReleased(s *session) bool {
 	defer s.transportMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.closed && len(s.streams) == 0 && s.pending == nil && s.pendingBytes == 0 && s.active == nil
+	return s.closed && len(s.streams) == 0 && s.pending == nil && s.pendingBytes == 0 && s.incoming == nil && s.incomingBytes == 0 && s.active == nil
 }
 func assertReleased(t *testing.T, what string, s *session) {
 	t.Helper()

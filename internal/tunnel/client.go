@@ -77,6 +77,9 @@ func (c *Client) dial(ctx context.Context, id string, resume bool) (*websocket.C
 		r = "1"
 	}
 	u, _ := url.Parse(c.cfg.URL)
+	query := u.Query()
+	query.Set(receiveWindowQuery, strconv.Itoa(c.cfg.Options.BufferBytes))
+	u.RawQuery = query.Encode()
 	headers, err := requestHeaders(c.cfg.Key, c.cfg.Password, id, nonce, ts, r, u.RequestURI())
 	if err != nil {
 		return nil, nil, 0, err
@@ -97,7 +100,7 @@ func (c *Client) dial(ctx context.Context, id string, resume bool) (*websocket.C
 			return stats.Conn(conn), nil
 		}
 	}
-	ws, response, err := d.DialContext(ctx, c.cfg.URL, headers)
+	ws, response, err := d.DialContext(ctx, u.String(), headers)
 	if err != nil {
 		status := 0
 		if response != nil {
@@ -115,12 +118,21 @@ func (c *Client) dial(ctx context.Context, id string, resume bool) (*websocket.C
 		return nil, nil, status, err
 	}
 	serverNonce := response.Header.Get("X-Sgate-Nonce")
-	expected := mac(c.cfg.Key, protocol, "server", id, nonce, serverNonce, ts, headers.Get(passwordHeader))
+	window := response.Header.Get(receiveWindowHeader)
+	expected := windowMAC(c.cfg.Key, window, protocol, "server", id, nonce, serverNonce, ts, headers.Get(passwordHeader))
 	if !validID(serverNonce) || !hmac.Equal([]byte(expected), []byte(response.Header.Get("X-Sgate-Auth"))) {
 		ws.Close()
 		return nil, nil, 0, errors.New("server authentication failed")
 	}
-	return ws, newCodec(c.cfg.Key, id, nonce, serverNonce, true), http.StatusSwitchingProtocols, nil
+	crypt := newCodec(c.cfg.Key, id, nonce, serverNonce, true)
+	if window != "" {
+		crypt.peerWindow, err = parseReceiveWindow(window)
+		if err != nil {
+			ws.Close()
+			return nil, nil, 0, err
+		}
+	}
+	return ws, crypt, http.StatusSwitchingProtocols, nil
 }
 
 // Run owns listener until ctx is canceled. Existing TCP streams survive transport
@@ -211,7 +223,8 @@ func (c *Client) reconnect(ctx context.Context, state *clientSessions) {
 	mu := &state.mu
 	id := randomID()
 	resume := false
-	backoff := c.cfg.ReconnectMin
+	minimum, _, _ := c.reconnectSettings()
+	backoff := minimum
 	offlineSince := time.Now()
 	for ctx.Err() == nil {
 		state.current.mu.Lock()
@@ -228,7 +241,8 @@ func (c *Client) reconnect(ctx context.Context, state *clientSessions) {
 			mu.Unlock()
 			id, resume = randomID(), false
 			offlineSince = time.Now()
-			backoff = c.cfg.ReconnectMin
+			minimum, _, _ = c.reconnectSettings()
+			backoff = minimum
 			if expired {
 				c.cfg.Options.Logf("offline timeout; existing TCP connections and replay buffer released")
 			}
@@ -245,14 +259,16 @@ func (c *Client) reconnect(ctx context.Context, state *clientSessions) {
 			mu.Unlock()
 			id = randomID()
 			resume = false
-			backoff = c.cfg.ReconnectMin
+			minimum, _, _ = c.reconnectSettings()
+			backoff = minimum
 			offlineSince = time.Now()
 			c.cfg.Options.Logf("server session lost; existing TCP connections closed")
 			continue
 		}
 		if err == nil {
 			resume = true
-			backoff = c.cfg.ReconnectMin
+			minimum, _, _ = c.reconnectSettings()
+			backoff = minimum
 			c.cfg.Options.Logf("tunnel connected")
 			err = state.current.transport(ws, crypt)
 			offlineSince = time.Now()
@@ -260,21 +276,51 @@ func (c *Client) reconnect(ctx context.Context, state *clientSessions) {
 		if ctx.Err() != nil {
 			break
 		}
+		minimum, maximum, changed := c.reconnectSettings()
+		backoff = max(minimum, min(backoff, maximum))
 		delay := backoff/2 + time.Duration(rand.Int64N(int64(backoff/2)+1))
 		if remaining := time.Until(offlineSince.Add(c.cfg.OfflineTimeout)); delay > remaining {
 			delay = max(remaining, 0)
 		}
 		c.cfg.Options.Logf("tunnel unavailable: %v; retry in %s", err, delay)
 		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-		case <-timer.C:
+		// 噪音更新不改变重连退避，只有退避参数变化才唤醒当前等待。
+		retryNow := false
+	waitRetry:
+		for {
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				break waitRetry
+			case <-timer.C:
+				break waitRetry
+			case <-changed:
+				nextMin, nextMax, nextChanged := c.reconnectSettings()
+				changed = nextChanged
+				if nextMin != minimum || nextMax != maximum {
+					timer.Stop()
+					backoff = nextMin
+					retryNow = true
+					break waitRetry
+				}
+			}
 		}
-		if backoff < c.cfg.ReconnectMax/2 {
+		if retryNow {
+			continue
+		}
+		if backoff < maximum/2 {
 			backoff *= 2
 		} else {
-			backoff = c.cfg.ReconnectMax
+			backoff = maximum
 		}
 	}
+}
+
+// 重连等待监听同一份热参数；当前会话的离线保留期限不变。
+func (c *Client) reconnectSettings() (time.Duration, time.Duration, <-chan struct{}) {
+	if c.cfg.Options.Live == nil {
+		return c.cfg.ReconnectMin, c.cfg.ReconnectMax, nil
+	}
+	v, changed := c.cfg.Options.Live.Snapshot()
+	return v.ReconnectMin, v.ReconnectMax, changed
 }
