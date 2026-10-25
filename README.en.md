@@ -114,12 +114,22 @@ Framework and management settings require a full process restart: Web save-only 
 
 ## Build
 
-Requires Go 1.23 or newer.
+Requires Go 1.23 or newer and Make. Normal builds need neither Python, a C compiler nor acl_master; race tests require a C compiler.
 
 ```sh
 make build
+make client                       # client only
+make server                       # server only
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 make build BINDIR=dist/linux-amd64
 make test
+make help
 ```
+
+The default build explicitly uses module mode and downloads missing dependencies according to `go.mod` and `go.sum`. Set `GOPROXY` for your network, or run `make deps` to prefetch dependencies. Both `third_party/gin-service/` and `third_party/go-service/` contain required local lifecycle extensions and must be committed and cloned with the project. Upstream releases cannot replace them. An existing `vendor/` is not required and will not override these sources.
+
+Override `GO`, `BINDIR`, `BUILD_FLAGS`, `LDFLAGS` or `TEST_FLAGS` as needed. `make framework-test` tests both local framework modules. `make -f /absolute/path/to/sgate/Makefile build` also works from another directory; relative output directories are resolved against the project root. `make clean` removes only the two generated programs.
+
+For an offline build, first run `make vendor-sync` on a connected machine (requires Python 3), copy the complete generated vendor directory with the source, then run `GOPROXY=off make build MOD=vendor`. Synchronize again after changing local framework sources.
 
 ## Run
 

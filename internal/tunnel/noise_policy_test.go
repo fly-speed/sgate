@@ -64,8 +64,10 @@ func TestNoisePolicyLiveWire(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					s, peer, crypt := noiseWirePair(t, tlsMode, clientWriter, Options{Live: live})
-					var noise, data atomic.Int64
+					stats := NewStats()
+					s, peer, crypt := noiseWirePair(t, tlsMode, clientWriter, Options{Live: live, Stats: stats})
+					var noise, noiseBytes, data atomic.Int64
+					minBytes, maxBytes := value.NoiseMinBytes, value.NoiseMaxBytes
 					readerDone := make(chan error, 1)
 					go func() {
 						for {
@@ -85,6 +87,15 @@ func TestNoisePolicyLiveWire(t *testing.T) {
 								return
 							}
 							if f.op == opNoise {
+								if len(f.data) < minBytes || len(f.data) > maxBytes {
+									readerDone <- fmt.Errorf("noise size outside configured bounds: %d", len(f.data))
+									return
+								}
+								if bytes.Count(f.data, f.data[:1]) == len(f.data) {
+									readerDone <- fmt.Errorf("noise contains only fixed byte %02x", f.data[0])
+									return
+								}
+								noiseBytes.Add(int64(len(f.data)))
 								noise.Add(1)
 							}
 							if f.op == opData {
@@ -171,6 +182,9 @@ func TestNoisePolicyLiveWire(t *testing.T) {
 					value.NoiseIntervalMax = 0
 					update()
 					stopped("global interval disabled")
+					if got, want := stats.Snapshot().NoiseTX, uint64(noiseBytes.Load()); got != want {
+						t.Fatalf("noise statistics differ from decrypted wire bytes: got=%d want=%d", got, want)
+					}
 					t.Logf("actual wire noise=%d business=%d", noise.Load(), data.Load())
 				})
 			}

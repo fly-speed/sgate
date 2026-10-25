@@ -166,21 +166,37 @@ make vendor-sync
 
 通过 Web 调用 master_ctl 的故障回归可在具备本机 acl_master 的环境运行 `scripts/test-acl-master.py`，在诊断二进制参数后加入 `--mode managed --merged --stress --management-stress --web-service-restart --restart-failure-checks --tls both --concurrency 128 --rounds 3 --output artifacts/web-restart-failures`。测试仅操作隔离实例，分别检查两端控制命令缺失、没有执行权限、私有管理套接字不可用、命令阻塞至真实 45 秒期限，以及每次 32 路并发点击和跨进程延迟请求；故障阶段保持 128 条业务流和管理探测，之后叠加传输断线、配置应用与连续重启。页面异步流程可使用 `node --test scripts/test-admin-restart.cjs` 验证。
 
-需要 Go 1.23 或以上版本。
+需要 Go 1.23 或以上版本和 Make。普通编译无需 Python、C 编译器或 acl_master；竞态测试需要 C 编译器。
 
 ```sh
-go mod download
 make build
-make test
 ```
 
-或手动构建：
+首次构建会按 `go.mod` / `go.sum` 下载缺少的模块；也可以先执行 `make deps`。请按本机网络环境设置 `GOPROXY`，例如 `GOPROXY=https://proxy.golang.org,direct make build`。默认显式使用模块模式，避免已有但过期的 `vendor/` 覆盖本地框架扩展。
+
+`third_party/gin-service/` 和 `third_party/go-service/` 是包含生命周期扩展的必要源码，必须与项目一起提交、拉取；不能用上游同名模块或参考示例替代。`vendor/` 不属于普通构建的前提条件。
+
+```sh
+make client                       # 仅编译客户端
+make server                       # 仅编译服务端
+make -j2 build                    # 并行编译两端
+make build BINDIR=dist/bin         # 自定义输出目录
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 make build BINDIR=dist/linux-amd64
+make framework-test               # 同时测试两份本地框架扩展
+make test
+make vet
+make help
+```
+
+可通过 `GO` 指定 Go 程序，通过 `BUILD_FLAGS`、`LDFLAGS` 指定编译参数，通过 `TEST_FLAGS` 缩小测试范围。可从其它目录执行 `make -f /绝对路径/sgate/Makefile build`；相对 `BINDIR` 始终以项目目录为基准。`make clean` 只删除这两个输出程序，保留配置、密钥、运行数据及其它工具。
+
+离线部署前，在可联网机器执行 `make vendor-sync`（需要 Python 3），将生成的完整 `vendor/` 随源码复制到目标机器，使用 `GOPROXY=off make build MOD=vendor`；修改本地框架后需要重新同步。或手动构建：
 
 ```sh
 mkdir -p bin
-go build -o bin/sgate-server ./cmd/sgate-server
-go build -o bin/sgate-client ./cmd/sgate-client
-go test -race ./...
+go build -mod=mod -o bin/sgate-server ./cmd/sgate-server
+go build -mod=mod -o bin/sgate-client ./cmd/sgate-client
+go test -mod=mod -race ./...
 ```
 
 分离界面的部署回归使用实际构建的两端程序，测试不同工作目录、HTTP/HTTPS、界面路径、文件权限恢复和配置应用。先运行 `make build`，再执行：

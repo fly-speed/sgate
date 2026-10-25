@@ -12,7 +12,12 @@ env.update(GOFLAGS="-mod=mod")
 env.setdefault("GOPROXY", "off")
 with tempfile.TemporaryDirectory(prefix="sgate-vendor-") as temp:
     stage = pathlib.Path(temp) / "vendor"
-    subprocess.run(["go", "mod", "vendor", "-o", str(stage)], cwd=root, env=env, check=True)
+    subprocess.run(
+        [env.get("GO", "go"), "mod", "vendor", "-o", str(stage)],
+        cwd=root,
+        env=env,
+        check=True,
+    )
     destination = root / "vendor"
     destination.mkdir(exist_ok=True)
     for source in stage.iterdir():

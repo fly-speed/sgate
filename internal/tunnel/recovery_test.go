@@ -209,6 +209,9 @@ func (f *recoveryFixture) startServer(addr string) {
 	f.http = h
 	f.addr = h.Listener.Addr().String()
 	h.Listener = recoveryListener{h.Listener, &f.dropResponses}
+	if f.cfg.Options.Stats != nil {
+		h.Listener = f.cfg.Options.Stats.Listener(h.Listener)
+	}
 	if f.tls {
 		h.StartTLS()
 	} else {
