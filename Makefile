@@ -28,6 +28,7 @@ help:
 	  'make server          仅编译服务端' \
 	  'make install         编译并安装到 /opt/soft/sgate（通常需要安装目录写权限）' \
 	  'make install-files   仅安装已编译文件，保留现有配置和密钥' \
+	  '正式配置为 sgate-client.cf / sgate-server.cf；专用示例安装到 samples/' \
 	  'make deps            预下载 go.mod 锁定的模块' \
 	  'make test            框架及项目竞态测试（需要 C 编译器）' \
 	  'make framework-test  测试两份本地框架扩展' \

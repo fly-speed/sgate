@@ -17,6 +17,11 @@ func TestEveryApplicationConfigFieldHasValidationAndRoundTrips(t *testing.T) {
 	if err != nil || len(paths) == 0 {
 		t.Fatal("application configurations not found")
 	}
+	samples, err := filepath.Glob("../../samples/*.cf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths = append(paths, samples...)
 	keys := map[string]bool{}
 	var report []map[string]any
 	for _, path := range paths {

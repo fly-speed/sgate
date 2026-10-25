@@ -16,8 +16,10 @@ case "$destdir" in
 esac
 destination=$destdir$prefix
 
-configs='sgate-client.cf sgate-server.cf ssh-client.cf ssh-server.cf vpn-client.cf vpn-server.cf web-client.cf'
-scripts='sshc-start.sh sshc-stop.sh sshd-start.sh sshd-stop.sh'
+configs='sgate-client.cf sgate-server.cf'
+scripts='sgate-client-start.sh sgate-client-stop.sh sgate-server-start.sh sgate-server-stop.sh'
+sample_configs='ssh-client.cf ssh-server.cf vpn-client.cf vpn-server.cf web-client.cf'
+sample_scripts='sshc-start.sh sshc-stop.sh sshd-start.sh sshd-stop.sh'
 assets='index.html app.css app.js'
 
 require_file() {
@@ -30,6 +32,7 @@ require_file() {
 # 先检查全部输入，避免缺失页面或程序时留下半套安装文件。
 for name in sgate-client sgate-server; do require_file "$binary_dir/$name"; done
 for name in $configs $scripts LICENSE; do require_file "$source_dir/$name"; done
+for name in $sample_configs $sample_scripts README.md; do require_file "$source_dir/samples/$name"; done
 for name in $assets; do require_file "$source_dir/web/admin/$name"; done
 for name in gin-service go-service; do require_file "$source_dir/third_party/$name/LICENSE"; done
 if [ ! -f "$source_dir/sgate.key" ] && ! [ -e "$destination/conf/sgate.key" ] && ! [ -L "$destination/conf/sgate.key" ]; then
@@ -46,7 +49,7 @@ ensure_directory() {
 }
 
 ensure_directory . 0755
-for name in sbin bin web/admin logs var share/licenses; do ensure_directory "$name" 0755; done
+for name in sbin bin web/admin logs var share/licenses samples; do ensure_directory "$name" 0755; done
 ensure_directory conf 0700
 
 # 使用同一文件系统的临时目录再重命名，避免覆盖正在运行的 Linux 可执行文件。
@@ -60,13 +63,15 @@ replace_file() {
 
 for name in sgate-client sgate-server; do replace_file "$binary_dir/$name" "$destination/sbin/$name" 0755; done
 for name in $scripts; do replace_file "$source_dir/$name" "$destination/bin/$name" 0755; done
+for name in $sample_scripts; do replace_file "$source_dir/samples/$name" "$destination/samples/$name" 0755; done
+replace_file "$source_dir/samples/README.md" "$destination/samples/README.md" 0644
 for name in $assets; do replace_file "$source_dir/web/admin/$name" "$destination/web/admin/$name" 0644; done
 replace_file "$source_dir/LICENSE" "$destination/LICENSE" 0644
 for name in gin-service go-service; do
     replace_file "$source_dir/third_party/$name/LICENSE" "$destination/share/licenses/$name.LICENSE" 0644
 done
 
-for name in $configs; do
+render_config() {
     # 仅重定位路径参数，保持地址、密码、证书和其它应用参数的原值。
     awk -v prefix="$prefix" '
         function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
@@ -88,21 +93,32 @@ for name in $configs; do
             value = trim(substr($0, equal + 1))
             if (value ~ /^".*"$/) value = substr(value, 2, length(value) - 2)
             if (key == "key-file" && value == "sgate.key") value = prefix "/conf/sgate.key"
-            else if (key == "admin_web_dir" && value == "web/admin") value = prefix "/web/admin"
-            else if (key ~ /^admin_(users_file|session_dir|setup_token_file)$/ && value ~ /^conf\//) value = prefix "/" value
+            else if (key == "admin_web_dir" && (value == "web/admin" || value == "../web/admin")) value = prefix "/web/admin"
+            else if (key ~ /^admin_(users_file|session_dir|setup_token_file)$/ && value ~ /^(\.\.\/)?conf\//) {
+                sub(/^\.\.\//, "", value)
+                value = prefix "/" value
+            }
             else value = relocate(value)
             # go-service 对 master_* 使用原始字符串，不会移除引号。
             if (key ~ /^master_/) print substr($0, 1, equal) " " value
             else print substr($0, 1, equal) " " quoted(value)
         }
-    ' "$source_dir/$name" > "$stage/config"
-    replace_file "$stage/config" "$destination/conf/$name.dist" 0600
-    if [ -e "$destination/conf/$name" ] || [ -L "$destination/conf/$name" ]; then
-        printf '保留现有配置：%s\n' "$destination/conf/$name"
+    ' "$1" > "$stage/config"
+}
+
+# 专用示例不进入正式 conf/。两种配置都保留已有文件，以免覆盖手工修改的示例。
+install_config() {
+    render_config "$source_dir/$1"
+    replace_file "$stage/config" "$destination/$2.dist" 0600
+    if [ -e "$destination/$2" ] || [ -L "$destination/$2" ]; then
+        printf '保留现有配置：%s\n' "$destination/$2"
     else
-        replace_file "$stage/config" "$destination/conf/$name" 0600
+        replace_file "$stage/config" "$destination/$2" 0600
     fi
-done
+}
+
+for name in $configs; do install_config "$name" "conf/$name"; done
+for name in $sample_configs; do install_config "samples/$name" "samples/$name"; done
 
 if [ ! -e "$destination/conf/sgate.key" ] && [ ! -L "$destination/conf/sgate.key" ]; then
     if [ -f "$source_dir/sgate.key" ]; then

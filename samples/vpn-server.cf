@@ -1,8 +1,8 @@
-service ssh-server {
+service vpn-server {
 #	进程是否禁止运行
 	master_disable = no
 #	服务地址及端口号
-	master_service = |1080
+	master_service = |1088
 
 #	服务类型
 	master_type = sock
@@ -52,11 +52,11 @@ service ssh-server {
 	# 服务版本标识，供 acl_master 管理与展示使用。
 	master_version = 1.0.0-0
 #	进程日志记录文件
-	master_log = /opt/soft/sgate/logs/ssh-server.log
+	master_log = /opt/soft/sgate/logs/vpn-server.log
 	# 服务标准输出的重定向日志文件路径。
-	master_stdout = /opt/soft/sgate/logs/sshd-stdout.log
+	master_stdout = /opt/soft/sgate/logs/vpnd-stdout.log
 	# 服务标准错误的重定向日志文件路径。
-	master_stderr = /opt/soft/sgate/logs/sshd-stderr.log
+	master_stderr = /opt/soft/sgate/logs/vpnd-stderr.log
 #	调试日志方式，格式：tag:level; tag:level; tab:level, 如：all:1; 101:2
 #	master_debug =
 # 附加命令行覆盖项，通常留空；框架自动传入 -f <本文件>。
@@ -73,15 +73,15 @@ service ssh-server {
 #	是否允许产生 core 文件
 
 # 代理配置：使用服务模板读取，命令行同名参数优先。
-    # ssh-server 应用配置（UTF-8）。
+    # vpn-server 应用配置（UTF-8）。
     # 参数优先级：命令行显式参数 > 本文件 > 内置默认值。
     # 相对路径以进程工作目录为基准；原有地址、密码和证书配置保持不变。
 
     # 连接与身份验证
     # HTTP/HTTPS 监听地址；保留现有地址。
-    listen = ":1080"
+    listen = ":1088"
     # 固定转发的后端 TCP 地址；保留现有地址。
-    target = "127.0.0.1:1982"
+    target = "127.0.0.1:2900"
     # 客户端 addr 可选后端的允许列表，逗号分隔且按完整 host:port 精确匹配；支持 IP 或域名。
     # 留空禁止客户端选择后端；未传 addr 时仍使用上面的 target。示例：127.0.0.1:8088,example.com:443
     allowed-targets =
@@ -90,7 +90,7 @@ service ssh-server {
     # 两端共享密钥文件路径；保留现有路径。
     key-file = "/opt/soft/sgate/conf/sgate.key"
     # 连接验证密码，两端须一致；保留现有值。
-    password = "!QAZXSW@.$%^^&"
+    password = "8ik.%^.lo9&*(MJ"
 
     # TLS 证书与信任
     # HTTPS 服务证书 PEM 文件路径；保留现有路径，须与 tls-key 同时设置。
@@ -149,19 +149,19 @@ service ssh-server {
     # 是否启用 Web 管理，默认关闭；命令行 -admin-enabled 可覆盖
     admin_enabled = false
     # 外部 HTML/CSS/JS 目录，相对本 .cf 解析；也可使用绝对路径
-    admin_web_dir = web/admin
+    admin_web_dir = ../web/admin
     # 服务端管理入口为代理端口的 /admin/，不再单独监听；此值仅保留旧登录 Cookie 身份。
     admin_listen = 127.0.0.1:9082
     # 独立管理员账号文件（哈希存储），相对本 .cf 解析
-    admin_users_file = conf/admin-server-users.json
+    admin_users_file = ../conf/admin-server-users.json
     # 持久化登录会话目录，相对本 .cf 解析
-    admin_session_dir = conf/admin-server-sessions
+    admin_session_dir = ../conf/admin-server-sessions
     # 登录会话固定有效期，进程重启后继续有效
     admin_session_timeout = 12h
     # 最多保存的管理登录会话数
     admin_max_sessions = 128
     # 首次创建管理员账号时使用的一次性令牌文件
-    admin_setup_token_file = conf/admin-server-setup.token
+    admin_setup_token_file = ../conf/admin-server-setup.token
     # 服务端管理页面复用代理的 tls-cert/tls-key；以下旧管理证书参数不再使用。
     admin_tls_cert =
     # 旧管理私钥参数，仅保留兼容

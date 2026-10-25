@@ -6,6 +6,8 @@ See [the Chinese documentation](README.md) for all options, protocol details, an
 
 ## acl_master integration
 
+Only `sgate-client.cf` and `sgate-server.cf` remain at the project root for production use. Multiple client mappings use `proxies`; the server selects allowed backends through `/tunnel?addr=host:port`. See [samples/](samples/README.md) for the previous SSH, VPN and Web examples.
+
 The client uses go-service's TCP descriptor APIs. Both standalone and managed server startup now follow gin-service's `Init -> register routes -> Run` lifecycle, with no direct ListenAndServe branch. The local extension in [third_party/gin-service](third_party/gin-service/README.md) is selected by go.mod replace; scripts/sync-go-vendor.py synchronizes standard vendor packages without altering the supplied reference repositories.
 
 The framework owns listeners, TLS/HTTP serving, status monitoring, physical connection counts and callbacks, and joined shutdown. Hijacked connections stay counted until actually closed. With management enabled, the server keeps its HTTP Worker running and replaces only the proxy instance and its sessions; management requests, logins and counters remain available. The per-service context lifecycle replaces upstream global Wait/Stop to support cancellation, WSS cleanup and proxy reload. Gin remains absent from client dependencies. Use `make framework-test` for the local framework tests and `make vendor-sync` after modifying framework sources.
@@ -15,15 +17,15 @@ On Linux, run `python3 scripts/test-linux-integration.py --output artifacts/linu
 Like the template examples, both programs support explicit standalone startup:
 
 ```sh
-./bin/sgate-client -alone -config ssh-client.cf
-./bin/sgate-server -alone -config ssh-server.cf
+./bin/sgate-client -alone -f sgate-client.cf
+./bin/sgate-server -alone -f sgate-server.cf
 ```
 
 The server entry point calls `gin-service.Init`, `setRoute`, and `Run` directly. All WebSocket, management page, authentication, configuration, statistics and restart registrations are visible in `cmd/sgate-server/routes.go`. Application resource management stays in `internal/app/server.go`; a proxy path change uses the current proxy through `NoRoute` without mutating Gin routes while requests are running.
 
-Existing direct commands without `-alone` remain valid. Without Web management, `-config` is optional and all application options may be passed on the command line. Enable embedded management with `-admin-enabled`. Under acl_master, leave `master_args` empty or include only CLI overrides, and omit `-alone`: the framework supplies `-f <service.cf>`, which now contains both proxy and management settings. Standalone mode also accepts `-alone -f ssh-client.cf`.
+Existing direct commands without `-alone` remain valid. Without Web management, `-config` is optional and all application options may be passed on the command line. Enable embedded management with `-admin-enabled`. Under acl_master, leave `master_args` empty or include only CLI overrides, and omit `-alone`: the framework supplies `-f <service.cf>`, which now contains both proxy and management settings. Standalone mode uses `-alone -f sgate-client.cf` or `-alone -f sgate-server.cf`.
 
-The five root application `.cf` files now use `master_type = sock` with addresses taken from their existing application configurations. Keep `master_maxproc = 1`, `master_prefork = 1`, `master_reuseport = no`, `master_status_notify = 0`, `master_unpriv = n`, and `master_chroot = n`. Set `master_stop_kill = false` and `master_stop_wait = true` for status-channel shutdown. Credentials, certificates and application addresses are preserved. Process identity is established by acl_master or the service account; in-template privilege changes/chroot are rejected.
+The two production configurations use `master_type = sock`; the five application-specific examples have moved to `samples/`. Keep `master_maxproc = 1`, `master_prefork = 1`, `master_reuseport = no`, `master_status_notify = 0`, `master_unpriv = n`, and `master_chroot = n`. Set `master_stop_kill = false` and `master_stop_wait = true` for status-channel shutdown. Credentials, certificates and application addresses are preserved. Process identity is established by acl_master or the service account; in-template privilege changes/chroot are rejected.
 
 `master_service` owns the effective listening addresses, including precedence over application `listen`/`-listen`. Other CLI overrides still win over file values. Web apply keeps the process PID, management login and byte counters while replacing the proxy worker. Changing the effective application listen address is rejected with file rollback; change `master_service` and stop/start the service to change ports. Both framework and Web proxy restarts interrupt existing business connections. Relative application paths use `master_home`; management paths remain relative to the management configuration.
 
@@ -133,9 +135,9 @@ For an offline build, first run `make vendor-sync` on a connected machine (requi
 
 Install to `/opt/soft/sgate` with `make build` followed by `sudo make install-files`, or use `sudo make install` to build and install together. Override `PREFIX` for another runtime location; `DESTDIR` stages a package without changing the runtime paths written to configuration.
 
-Programs go in `sbin/`, the four SSH control scripts in `bin/`, seven service configurations and the shared key in `conf/`, and management assets in `web/admin/`. The installer also creates `logs/` and `var/` and copies the program/framework licenses. New configurations have their installation paths relocated while preserving application settings. Existing configurations, keys and login state are retained; updated templates are installed as `.cf.dist`. Newly installed configurations and keys use mode `0600`. Set appropriate directory ownership when using a separate service account.
+Programs go in `sbin/`, the four general service control scripts in `bin/`, two production service configurations and the shared key in `conf/`, and management assets in `web/admin/`. The installer also creates `logs/` and `var/` and copies the program/framework licenses. New configurations have their installation paths relocated while preserving application settings. Existing configurations, keys and login state are retained; updated templates are installed as `.cf.dist`. Newly installed configurations and keys use mode `0600`. Set appropriate directory ownership when using a separate service account.
 
-Local administrator accounts, sessions and setup tokens are not copied. An existing source `sgate.key` is copied only when the destination has no key; otherwise a new 32-byte random key is generated. Both endpoints must use the same key. External certificates and acl_master must be configured separately. Installation does not start or register services. Installed SSH scripts read their corresponding configuration in `conf/` and support a `MASTER_CTL` override.
+Local administrator accounts, sessions and setup tokens are not copied. An existing source `sgate.key` is copied only when the destination has no key; otherwise a new 32-byte random key is generated. Both endpoints must use the same key. External certificates and acl_master must be configured separately. Installation does not start or register services. The installed `sgate-client-start.sh`, `sgate-client-stop.sh`, `sgate-server-start.sh` and `sgate-server-stop.sh` scripts read their corresponding production configuration in `conf/` and support a `MASTER_CTL` override. SSH, VPN and Web examples and their legacy SSH scripts live in `samples/` in both the source tree and installation. Existing legacy deployment files are preserved during upgrades; stop and migrate old services before archiving them.
 
 For standalone startup, use `/opt/soft/sgate/sbin/sgate-server -alone -f /opt/soft/sgate/conf/sgate-server.cf` (and the client equivalent) after configuring addresses and passwords.
 

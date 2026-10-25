@@ -79,6 +79,38 @@ func TestMergedInvalidEditsAreSafe(t *testing.T) {
 	}
 }
 
+// 移动样例目录后，账号、会话和界面仍应解析到同一份项目资源。
+func TestShippedConfigManagementPaths(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pattern := range []string{"*.cf", "samples/*.cf"} {
+		paths, err := filepath.Glob(filepath.Join(root, pattern))
+		if err != nil || len(paths) == 0 {
+			t.Fatalf("missing configurations: %s, %v", pattern, err)
+		}
+		for _, path := range paths {
+			if _, merged, err := serviceconfig.Read(path); err != nil || !merged {
+				t.Fatalf("invalid service configuration %s: %v", path, err)
+			}
+			cfg, err := admin.LoadConfig(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			role := "client"
+			if strings.Contains(filepath.Base(path), "server") {
+				role = "server"
+			}
+			if cfg.UsersFile != filepath.Join(root, "conf/admin-"+role+"-users.json") ||
+				cfg.SessionDir != filepath.Join(root, "conf/admin-"+role+"-sessions") ||
+				cfg.WebDir != filepath.Join(root, "web/admin") {
+				t.Fatalf("management resources moved for %s", path)
+			}
+		}
+	}
+}
+
 // The private, disposable baseline is captured immediately before migration;
 // the test never prints credential values or embeds them in the repository.
 func TestShippedMigrationPreservesValues(t *testing.T) {
@@ -103,6 +135,9 @@ func TestShippedMigrationPreservesValues(t *testing.T) {
 			continue
 		}
 		path := filepath.Join(root, strings.TrimSuffix(name, ".conf")+".cf")
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			path = filepath.Join(root, "samples", filepath.Base(path))
+		}
 		values, merged, e := serviceconfig.Read(path)
 		if e != nil || !merged {
 			t.Fatalf("read %s: %v", name, e)

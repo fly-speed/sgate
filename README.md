@@ -35,13 +35,13 @@ Linux 运行验证可使用 `python3 scripts/test-linux-integration.py --output 
 与两个模板示例一样，手工启动可显式加 `-alone`，客户端和服务端使用相同方式：
 
 ```sh
-./bin/sgate-client -alone -config ssh-client.cf
-./bin/sgate-server -alone -config ssh-server.cf
+./bin/sgate-client -alone -f sgate-client.cf
+./bin/sgate-server -alone -f sgate-server.cf
 ```
 
-原有不带 `-alone` 的直接启动命令继续可用；也可以不提供 `-config`，全部通过命令行指定应用参数。需要 Web 管理时加 `-admin-enabled`。在 acl_master 下启动时，`master_args` 可以留空（或仅包含应用参数覆盖项），**不要加 `-alone`**；框架自动传入 `-f <当前 .cf>`，程序直接读取这份文件中的代理与管理配置，无需另一个 `-config`。独立启动也支持 `-alone -f ssh-client.cf`。
+原有不带 `-alone` 的直接启动命令继续可用；也可以不提供 `-config`，全部通过命令行指定应用参数。需要 Web 管理时加 `-admin-enabled`。在 acl_master 下启动时，`master_args` 可以留空（或仅包含应用参数覆盖项），**不要加 `-alone`**；框架自动传入 `-f <当前 .cf>`，程序直接读取这份文件中的代理与管理配置，无需另一个 `-config`。独立启动使用 `-alone -f sgate-client.cf` 或 `-alone -f sgate-server.cf`。
 
-仓库根目录的 `ssh-client.cf`、`vpn-client.cf`、`web-client.cf`、`ssh-server.cf`、`vpn-server.cf` 已改为 `master_type = sock`，`master_service` 对应各自应用配置原有的监听地址。代理参数及管理参数已从 `conf/*.conf` 合并到各自 `.cf` 的 `service` 块；两份通用示例为 `sgate-client.cf`、`sgate-server.cf`，默认 `master_disable = yes`，避免自动加载示例。原有地址、代理密码和证书保持不变，管理界面默认仍关闭。
+正式配置仅保留根目录的 `sgate-client.cf`、`sgate-server.cf`，代理与管理参数位于各自的 `service` 块中。客户端通过 `proxies` 合并多个本地代理端口，服务端通过后端允许列表及 `/tunnel?addr=host:port` 选择不同目标；托管模式还需让 `master_service` 与实际监听对应。原 SSH、VPN、Web 专用配置和 SSH 启停脚本已移到 [samples/](samples/README.md)。两份正式配置默认 `master_disable = yes`，管理界面仍默认关闭，部署时按需启用。
 
 托管配置须设置：
 
@@ -64,9 +64,9 @@ master_stop_wait = true
 从旧的 `master_type = none` 配置迁移时，先用旧配置停止服务，再安装新程序、应用配置和 `.cf`，最后启动，避免旧进程占用新框架要监听的端口。例如：
 
 ```sh
-/opt/soft/acl-master/bin/master_ctl -f /opt/soft/acl-master/conf/service/ssh-client.cf -a stop
-# 安装 bin/sgate-client、ssh-client.cf 及对应应用/管理配置和 web/ 文件
-/opt/soft/acl-master/bin/master_ctl -f /opt/soft/acl-master/conf/service/ssh-client.cf -a start
+/opt/soft/acl-master/bin/master_ctl -f /opt/soft/sgate/conf/sgate-client.cf -a stop
+# 安装 sbin/sgate-client、conf/sgate-client.cf 及 web/ 文件
+/opt/soft/acl-master/bin/master_ctl -f /opt/soft/sgate/conf/sgate-client.cf -a start
 /opt/soft/acl-master/bin/master_ctl -a list
 ```
 
@@ -207,7 +207,7 @@ sudo make install-files   # 使用已编译的程序安装，不在 root 下重�
 # 也可直接 sudo make install，完成编译和安装。
 ```
 
-安装内容为 `sbin/sgate-client`、`sbin/sgate-server`，`bin/` 下四份 SSH 启停脚本，`conf/` 下七份 `.cf` 配置和 `sgate.key`，以及 `web/admin/` 独立管理页面；同时创建 `logs/`、`var/`，保留程序及框架许可证。安装不启动服务，也不自动注册到 acl_master。
+安装内容为 `sbin/sgate-client`、`sbin/sgate-server`，`bin/` 下四份通用启停脚本，`conf/` 下两份正式 `.cf` 配置和 `sgate.key`，以及 `web/admin/` 独立管理页面；同时创建 `logs/`、`var/`，保留程序及框架许可证。安装不启动服务，也不自动注册到 acl_master。SSH、VPN、Web 专用配置及原 SSH 脚本安装到 `samples/`，不会放入正式配置目录。
 
 初次安装会将配置内的程序、日志、管理页面、账号和会话路径调整到安装目录，地址、密码、证书及业务参数保持原值。再次安装保留已有 `.cf`、密钥和登录状态，新版模板写入 `.cf.dist`，仅更新程序、页面及脚本。新装配置和密钥权限为 `0600`；使用其他运行账号时，应为该账号设置配置、日志和运行目录的所有权。开发机 `conf/` 中的管理员账号、会话和初始化令牌不会被打包。
 
@@ -218,7 +218,7 @@ make install PREFIX="$HOME/sgate"          # 自定义实际运行目录
 make install DESTDIR=/tmp/sgate-package    # 暂存到 /tmp/sgate-package/opt/soft/sgate
 ```
 
-`DESTDIR` 用于打包，写入配置的仍是 `PREFIX` 对应的运行路径。安装后的独立启动命令为 `/opt/soft/sgate/sbin/sgate-server -alone -f /opt/soft/sgate/conf/sgate-server.cf`，客户端同理；请先在配置中填写部署所需的密码和地址。四份 SSH 启停脚本调用外部 `master_ctl`，读取安装目录 `conf/` 内对应配置，可用 `MASTER_CTL` 环境变量指定控制程序。
+`DESTDIR` 用于打包，写入配置的仍是 `PREFIX` 对应的运行路径。安装后的独立启动命令为 `/opt/soft/sgate/sbin/sgate-server -alone -f /opt/soft/sgate/conf/sgate-server.cf`，客户端同理；请先在配置中填写部署所需的密码和地址。通用启停脚本为 `sgate-client-start.sh`、`sgate-client-stop.sh`、`sgate-server-start.sh`、`sgate-server-stop.sh`，调用外部 `master_ctl` 并读取安装目录 `conf/` 内对应的正式配置，可用 `MASTER_CTL` 环境变量指定控制程序。原 SSH 脚本只作为 `samples/` 内的示例保留。升级安装不会自动删除旧的专用配置或脚本，迁移并确认不再使用后可自行归档。
 
 分离界面的部署回归使用实际构建的两端程序，测试不同工作目录、HTTP/HTTPS、界面路径、文件权限恢复和配置应用。先运行 `make build`，再执行：
 
@@ -314,7 +314,7 @@ admin_enabled = false
 
 命令行覆盖按每个参数独立处理，显式 `0` 或空字符串也会生效。例如文件已开启随机间隔白噪音时，关闭发送使用 `-noise-interval-min 0 -noise-interval-max 0`；切换为固定间隔还需加上 `-noise-interval 1s`。固定间隔和随机范围仍须满足原有互斥校验。未提供有效 `key-file` 时继续使用 `SGATE_KEY` 环境变量。
 
-所有配置均位于根目录的 `.cf`：`ssh-client.cf`、`ssh-server.cf`、`vpn-client.cf`、`vpn-server.cf`、`web-client.cf` 以及两份通用示例。旧 `conf/*.conf` 已合并并移除，`conf/` 仍可放密钥、管理员账号、会话及令牌等数据文件。程序保留旧独立 `.conf` 的兼容读取，以及显式 `-admin-config` 指定外部管理配置的能力。
+正式配置为根目录的 `sgate-client.cf`、`sgate-server.cf`；原 SSH、VPN、Web 专用配置位于 `samples/`。旧 `conf/*.conf` 已合并并移除，`conf/` 仍可放密钥、管理员账号、会话及令牌等数据文件。程序保留旧独立 `.conf` 的兼容读取，以及显式 `-admin-config` 指定外部管理配置的能力。
 
 部署时把所需 `.cf` 安装到 acl_master 的服务配置目录，权限设为 `0600`，并保留程序对该目录的写权限以使用 Web 保存功能。升级前先停止旧服务，再安装新版程序和合并配置，最后启动；管理参数相对路径以安装后的 `.cf` 目录为基准，部署到不同目录时应改为原存储位置的绝对路径，以继续使用已有账号和会话。原业务地址、密码和证书路径保持不变；Web 客户端原密码为空，部署前仍须填写或通过 `-password` 提供。
 
@@ -910,7 +910,7 @@ noise-max-bytes = 10K
 
 场景筛选发生在每次候选发送及每个噪音小块之前。禁止的场景跳过该次发送，重新选择下一次固定/随机等待；恢复允许的场景后在下一次候选时间发送，不补发积压。三个场景全部关闭时停止噪音定时器，心跳继续。在线修改场景开关或空闲阈值会取消待发余量并重新计时；已经写出的一个小帧允许完成。共用链路拥塞、系统调度与批次写入耗时仍会增加实际间隔，不保证实时固定带宽。
 
-这四项均标注“保存后立即生效”，保存同步到配置文件；配置页的本端噪音摘要显示实际运行场景策略和空闲阈值。外部编辑文件仍需应用代理配置或重启才能加载。根目录七份 `.cf` 已补齐参数和中文注释，既有地址、密码、证书及噪音间隔/大小保持不变。
+这四项均标注“保存后立即生效”，保存同步到配置文件；配置页的本端噪音摘要显示实际运行场景策略和空闲阈值。外部编辑文件仍需应用代理配置或重启才能加载。两份正式配置及 `samples/` 内五份示例均已补齐参数和中文注释，既有地址、密码、证书及噪音间隔/大小保持不变。
 
 
 ### 判断流量空白期是否真的停发噪音
