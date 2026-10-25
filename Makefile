@@ -26,8 +26,8 @@ help:
 	  'make / make build    编译客户端和服务端到 bin/' \
 	  'make client          仅编译客户端' \
 	  'make server          仅编译服务端' \
-	  'make install         编译并安装到 /opt/soft/sgate（通常需要安装目录写权限）' \
-	  'make install-files   仅安装已编译文件，保留现有配置和密钥' \
+	  'make install         安装已编译程序到 /opt/soft/sgate（先以普通用户 make build）' \
+	  'make install-files   make install 的兼容别名，同样不调用 Go' \
 	  '正式配置为 sgate-client.cf / sgate-server.cf；专用示例安装到 samples/' \
 	  'make deps            预下载 go.mod 锁定的模块' \
 	  'make test            框架及项目竞态测试（需要 C 编译器）' \
@@ -61,12 +61,9 @@ server: check
 	mkdir -p "$(OUTPUT_DIR)"
 	$(GO_CMD) build -mod=$(MOD) $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -o "$(OUTPUT_DIR)/sgate-server" ./cmd/sgate-server
 
-# install-files 可在普通用户编译后通过 sudo 执行，无需 root 再次编译或下载依赖。
+# 普通用户先 make build，再 sudo make install；sudo 环境无需 Go。
 # DESTDIR 仅用于暂存打包；写入配置的运行路径始终使用 PREFIX。
-install: build
-	sh "$(ROOT)/scripts/install.sh" "$(ROOT)" "$(OUTPUT_DIR)" "$(PREFIX)" "$(DESTDIR)"
-
-install-files:
+install install-files:
 	sh "$(ROOT)/scripts/install.sh" "$(ROOT)" "$(OUTPUT_DIR)" "$(PREFIX)" "$(DESTDIR)"
 
 # vendor 不包含依赖自身的测试文件，因此框架测试始终读取 third_party。

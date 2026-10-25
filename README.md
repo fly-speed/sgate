@@ -203,9 +203,11 @@ go test -mod=mod -race ./...
 
 ```sh
 make build
-sudo make install-files   # 使用已编译的程序安装，不在 root 下重新编译
-# 也可直接 sudo make install，完成编译和安装。
+sudo make install        # 仅安装已编译程序，sudo 环境无需 Go
+# sudo make install-files 为兼容别名，行为与 make install 相同。
 ```
+
+`make install` 不会编译、下载依赖或检查 Go 环境；它会先检查客户端和服务端程序是否存在且可执行，缺少任意一端时立即提示先以普通用户执行 `make build`，此时不写入安装目录。使用自定义 `BINDIR` 时，编译和安装命令应传入同一个目录。
 
 安装内容为 `sbin/sgate-client`、`sbin/sgate-server`，`bin/` 下四份通用启停脚本，`conf/` 下两份正式 `.cf` 配置和 `sgate.key`，以及 `web/admin/` 独立管理页面；同时创建 `logs/`、`var/`，保留程序及框架许可证。安装不启动服务，也不自动注册到 acl_master。SSH、VPN、Web 专用配置及原 SSH 脚本安装到 `samples/`，不会放入正式配置目录。
 

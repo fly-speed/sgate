@@ -24,13 +24,18 @@ assets='index.html app.css app.js'
 
 require_file() {
     if [ ! -f "$1" ]; then
-        printf '缺少安装文件：%s；请先执行 make build。\n' "$1" >&2
+        printf '缺少安装文件：%s；请检查源码或部署包是否完整。\n' "$1" >&2
         exit 1
     fi
 }
 
 # 先检查全部输入，避免缺失页面或程序时留下半套安装文件。
-for name in sgate-client sgate-server; do require_file "$binary_dir/$name"; done
+for name in sgate-client sgate-server; do
+    if [ ! -f "$binary_dir/$name" ] || [ ! -x "$binary_dir/$name" ]; then
+        printf '程序不存在或不可执行：%s\n请先以普通用户执行 make build，再执行 sudo make install。\n' "$binary_dir/$name" >&2
+        exit 1
+    fi
+done
 for name in $configs $scripts LICENSE; do require_file "$source_dir/$name"; done
 for name in $sample_configs $sample_scripts README.md; do require_file "$source_dir/samples/$name"; done
 for name in $assets; do require_file "$source_dir/web/admin/$name"; done
