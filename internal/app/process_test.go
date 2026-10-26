@@ -75,7 +75,7 @@ func TestManagementRealProcessRestartAndExpiry(t *testing.T) {
 			if e = os.Mkdir(webDir, 0700); e != nil {
 				t.Fatal(e)
 			}
-			for _, name := range []string{"index.html", "app.css", "app.js"} {
+			for _, name := range []string{"index.html", "app.css", "i18n.js", "app.js"} {
 				b, e := os.ReadFile(filepath.Join(webSource, name))
 				if e != nil {
 					t.Fatal(e)

@@ -85,17 +85,24 @@ func (c *Client) Err() error { return c.controller.tcp.Err() }
 // 托管模式只使用框架继承的端口，不能悄悄遗漏映射或接入未配置的端口。
 func validateProxyListeners(routes []clientProxy, addresses []string) error {
 	want := make(map[string]bool, len(routes))
+	seen := make(map[string]bool, len(routes))
 	for _, route := range routes {
 		want[route.port] = true
 	}
 	for _, address := range addresses {
 		_, port, err := net.SplitHostPort(address)
 		if err != nil || !want[port] {
-			return fmt.Errorf("master_service listeners must match proxies listen ports")
+			return fmt.Errorf(
+				"master_service listener %q must match a proxies listen port; "+
+					"keep the independent admin_listen port out of master_service",
+				address,
+			)
 		}
-		delete(want, port)
+		// acl_master may expand a wildcard port into one listener per network
+		// interface. All of them belong to the same proxy mapping.
+		seen[port] = true
 	}
-	if len(want) != 0 {
+	if len(seen) != len(want) {
 		return fmt.Errorf("master_service is missing proxies listen ports")
 	}
 	return nil

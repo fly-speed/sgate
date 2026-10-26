@@ -911,3 +911,40 @@ footer {
   color: var(--muted);
   font-size: 10px;
 }
+
+/* The same language control is available before and after authentication. */
+.language-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.language-picker select {
+  max-width: 135px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: white;
+  color: #172535;
+  font: inherit;
+  cursor: pointer;
+}
+.language-picker select:focus-visible {
+  outline: 3px solid #69b9a7;
+  outline-offset: 3px;
+}
+.auth-card > .language-picker {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 24px;
+}
+html[lang="en"] .header-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+html[lang="en"] nav button span {
+  white-space: normal;
+}

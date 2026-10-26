@@ -211,7 +211,7 @@ func (c *controller) load(candidate string) (definition, error) {
 			for key := range values {
 				if strings.HasPrefix(key, "admin_") {
 					loadAdmin := admin.LoadConfig
-					if c.sharedMode {
+					if c.role == "server" {
 						loadAdmin = admin.LoadSharedConfig
 					}
 					if _, e := loadAdmin(path); e != nil {
@@ -244,11 +244,7 @@ func (c *controller) load(candidate string) (definition, error) {
 	d.service = c.service
 	d.shared = c.shared
 	if e == nil && c.sharedMode {
-		var addresses []string
-		if c.service != nil {
-			addresses = c.service.Addresses()
-		}
-		e = validateShared(d, addresses)
+		e = validateShared(d)
 	}
 	return d, e
 }

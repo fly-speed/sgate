@@ -28,6 +28,13 @@ func TestMultiProxyConfigAndCLI(t *testing.T) {
 	if err := validateProxyListeners(d.proxies, []string{"127.0.0.1:19002", "127.0.0.1:19001"}); err != nil {
 		t.Fatal(err)
 	}
+	wildcardAddresses := []string{
+		"127.0.0.1:19001", "192.0.2.1:19001",
+		"127.0.0.1:19002", "192.0.2.1:19002",
+	}
+	if err := validateProxyListeners(d.proxies, wildcardAddresses); err != nil {
+		t.Fatal("wildcard listeners on multiple interfaces rejected:", err)
+	}
 	for _, addresses := range [][]string{{"127.0.0.1:19001"}, {"127.0.0.1:19001", "127.0.0.1:19003"}, {"127.0.0.1:19001", "127.0.0.1:19001"}} {
 		if validateProxyListeners(d.proxies, addresses) == nil {
 			t.Fatal("inherited listener mismatch accepted", addresses)

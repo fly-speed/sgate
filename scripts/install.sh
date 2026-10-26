@@ -20,7 +20,7 @@ configs='sgate-client.cf sgate-server.cf'
 scripts='sgate-client-start.sh sgate-client-stop.sh sgate-server-start.sh sgate-server-stop.sh'
 sample_configs='ssh-client.cf ssh-server.cf vpn-client.cf vpn-server.cf web-client.cf'
 sample_scripts='sshc-start.sh sshc-stop.sh sshd-start.sh sshd-stop.sh'
-assets='index.html app.css app.js'
+assets='index.html app.css i18n.js app.js'
 
 require_file() {
     if [ ! -f "$1" ]; then

@@ -261,7 +261,7 @@ func runManagementDeployment(t *testing.T, cb, sb string, secure bool, mode stri
 	}
 	// Deliberate cwd decoys catch accidental resolution outside the config directory.
 	for _, cwd := range cwds {
-		for _, name := range []string{"index.html", "app.css", "app.js"} {
+		for _, name := range []string{"index.html", "app.css", "i18n.js", "app.js"} {
 			deploymentWrite(t, filepath.Join(cwd, "web/admin", name), []byte("wrong cwd"))
 		}
 	}
@@ -335,7 +335,7 @@ func runManagementDeployment(t *testing.T, cb, sb string, secure bool, mode stri
 			}
 			webSetting = "web-dir = " + strconv.Quote(value) + "\n"
 		}
-		for _, name := range []string{"index.html", "app.css", "app.js"} {
+		for _, name := range []string{"index.html", "app.css", "i18n.js", "app.js"} {
 			source, e := os.ReadFile(filepath.Join("../../web/admin", name))
 			if e != nil {
 				t.Fatal(e)
@@ -366,7 +366,7 @@ func runManagementDeployment(t *testing.T, cb, sb string, secure bool, mode stri
 		t.Cleanup(func() {
 			os.Chmod(filepath.Dir(d.appPath), 0700)
 			os.Chmod(d.webDir, 0700)
-			for _, name := range []string{"index.html", "app.css", "app.js"} {
+			for _, name := range []string{"index.html", "app.css", "i18n.js", "app.js"} {
 				os.Chmod(filepath.Join(d.webDir, name), 0600)
 			}
 		})
@@ -491,6 +491,7 @@ func runManagementDeployment(t *testing.T, cb, sb string, secure bool, mode stri
 			"/":               "index.html",
 			"/assets/app.css": "app.css",
 			"/assets/app.js":  "app.js",
+			"/assets/i18n.js": "i18n.js",
 		} {
 			path := filepath.Join(d.webDir, name)
 			original, e := os.ReadFile(path)

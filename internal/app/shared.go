@@ -3,7 +3,6 @@ package app
 import (
 	"crypto/tls"
 	"errors"
-	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -52,21 +51,9 @@ func (s *sharedServer) TLSConfig(config *tls.Config) *tls.Config {
 	return result
 }
 
-func validateShared(d definition, addresses []string) error {
+func validateShared(d definition) error {
 	if d.server.Path == "/admin" || strings.HasPrefix(d.server.Path, managementPath) {
 		return errors.New("proxy path conflicts with /admin/ management routes")
-	}
-	if d.tls == nil {
-		for _, address := range addresses {
-			host, _, e := net.SplitHostPort(address)
-			if e != nil {
-				return e
-			}
-			ip := net.ParseIP(host)
-			if ip == nil || !ip.IsLoopback() {
-				return errors.New("shared management outside loopback requires proxy TLS")
-			}
-		}
 	}
 	return nil
 }
@@ -77,7 +64,7 @@ func (c *controller) replaceShared(next definition) error {
 	if next.listen != c.current.listen || (next.tls == nil) != (c.current.tls == nil) {
 		return errors.New("共享管理端口的监听地址或 HTTP/HTTPS 模式改变；请保存配置后重启整个进程")
 	}
-	if e := validateShared(next, c.service.Addresses()); e != nil {
+	if e := validateShared(next); e != nil {
 		return e
 	}
 	live, e := tunnel.NewLiveSettings(next.liveConfig())

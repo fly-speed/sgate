@@ -7,8 +7,9 @@ const vm = require("node:vm");
 
 async function page() {
   const elements = new Map();
+  const allElements = [];
   function element() {
-    return {
+    const item = {
       children: [],
       disabled: false,
       setCustomValidity(message) {
@@ -37,6 +38,8 @@ async function page() {
         return !this.validationMessage;
       },
     };
+    allElements.push(item);
+    return item;
   }
   const context = vm.createContext({
     document: {
@@ -45,7 +48,8 @@ async function page() {
         if (!elements.has(id)) elements.set(id, element());
         return elements.get(id);
       },
-      querySelectorAll: () => [],
+      querySelectorAll: (selector) => selector === "*" ? allElements : [],
+      documentElement: { lang: "zh-CN" },
     },
     window: { addEventListener() {} },
     URL,
@@ -54,6 +58,7 @@ async function page() {
     clearTimeout,
     fetch: async () => ({ ok: true, json: async () => ({ authenticated: false }) }),
   });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../web/admin/i18n.js"), "utf8"), context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, "../web/admin/app.js"), "utf8"), context);
   await new Promise(setImmediate);
   context.fields = [
@@ -656,6 +661,23 @@ test("relationship validation catches reconnect, sizes, heartbeat, TLS and share
   assert.equal(vm.runInContext("configRelationErrors(values).size", context), 0);
 });
 
+test("server shared HTTP accepts wildcard addresses while client HTTPS rules remain", async () => {
+  const { context } = await page();
+  context.values = {
+    listen: "0.0.0.0:8081",
+    "tls-cert": "",
+    "tls-key": "",
+    admin_enabled: "true",
+  };
+  vm.runInContext('configRole = "server"', context);
+  assert.equal(vm.runInContext("configRelationErrors(values).size", context), 0);
+  context.values["tls-cert"] = "cert.pem";
+  assert.equal(vm.runInContext('configRelationErrors(values).has("tls-key")', context), true);
+  context.values = { admin_listen: "0.0.0.0:9081", admin_tls_cert: "", admin_tls_key: "" };
+  vm.runInContext('configRole = "client"', context);
+  assert.equal(vm.runInContext('configRelationErrors(values).has("admin_listen")', context), true);
+});
+
 test(
   "all deployed application fields pass the frontend rules emitted by Go",
   {
@@ -987,4 +1009,70 @@ test("receive backpressure is distinct from a disconnected tunnel", async () => 
     vm.runInContext("noiseActivityText(activity)", context),
     /业务应用待接收 32.0 KiB.*仍可读取噪音和心跳/,
   );
+});
+
+test("language switches client and server forms without losing drafts, mappings or secrets", async () => {
+  for (const role of ["client", "server"]) {
+    const { context, elements } = await page();
+    context.drawChart = () => {};
+    context.role = role;
+    vm.runInContext('renderConfigFields(fields, {cli_overrides: ["target"]}, role)', context);
+    vm.runInContext(`
+      const password = configInputs.find((entry) => entry.key === "password");
+      password.input.value = "unsaved-private-password";
+      password.input.listeners.input();
+      const target = configInputs.find((entry) => entry.key === "target");
+      target.input.value = "127.0.0.1:9012";
+      target.input.listeners.input();
+      const mapping = configInputs.find((entry) => entry.key === "proxies");
+      if (mapping) {
+        mapping.controls[0].listeners.click();
+        mapping.rows[0].listen.value = "127.0.0.1:9013";
+        mapping.rows[0].server.value = "ws://example.com/tunnel";
+        mapping.rows[0].listen.listeners.input();
+      }
+    `, context);
+    const before = vm.runInContext("JSON.stringify(configPayload(configEdits(), false))", context);
+    let requests = 0;
+    context.fetch = async () => { requests++; throw new Error("switch must not call API"); };
+    for (const lang of ["en", "zh-CN", "en"]) {
+      vm.runInContext(`sgateI18n.setLanguage(${JSON.stringify(lang)})`, context);
+      assert.equal(context.document.documentElement.lang, lang);
+      assert.equal(vm.runInContext("JSON.stringify(configPayload(configEdits(), false))", context), before);
+      assert.equal(vm.runInContext('configInputs.find(e => e.key === "password").input.value', context), "unsaved-private-password");
+      assert.equal(vm.runInContext('configInputs.find(e => e.key === "target").saveButton.disabled', context), false);
+      assert.match(elements.get("pending-label").textContent, lang === "en" ? /Unsaved/ : /未保存/);
+    }
+    assert.equal(requests, 0);
+    assert.equal(vm.runInContext('configInputs.find(e => e.key === "target").saveButton.title', context), "Save this setting");
+    assert.equal(vm.runInContext('configInputs.find(e => e.key === "admin_enabled").input.children[0].textContent', context), "true (yes)");
+  }
+});
+
+test("English validation, live state and chart labels preserve configuration values", async () => {
+  const { context } = await page();
+  context.drawChart = () => {};
+  vm.runInContext('sgateI18n.setLanguage("en")', context);
+  assert.equal(vm.runInContext('configValueError("heartbeat", "bad", {type:"duration"})', context), "Include a time unit, for example 500ms, 1s, 2m or 1h30m");
+  assert.equal(vm.runInContext('chartMetric().title', context), "Live network bandwidth");
+  assert.equal(vm.runInContext('t("单位必须填写：ns、us/µs、ms、s、m、h，可组合如 1m30s；0 的含义依参数而定。 0 使用默认 20s。")', context).includes("0 uses the default of 20s."), true);
+  assert.match(vm.runInContext('configSaveMessage({applied: true})', context), /business proxy restarted/);
+  assert.match(vm.runInContext('noiseActivityText({tunnels: 0})', context), /No online tunnel/);
+  assert.equal(vm.runInContext('t("my-custom-description")', context), "my-custom-description");
+});
+
+test("switching after sign-in keeps account identity and localizes existing save feedback", async () => {
+  const { context, elements } = await page();
+  context.drawChart = () => {};
+  context.loadConfig = async () => {};
+  context.poll = () => {};
+  context.api = async () => ({authenticated: true, role: "client", username: "管理员", expires: "2026-10-27T00:00:00Z", session_timeout_seconds: 3600});
+  await vm.runInContext("refreshAuth()", context);
+  vm.runInContext('notice(() => configSaveMessage({live_applied: ["heartbeat"]})); sgateI18n.setLanguage("en")', context);
+  assert.equal(elements.get("user-label").textContent, "管理员");
+  assert.equal(elements.get("session-user").textContent, "管理员");
+  assert.match(elements.get("notice").textContent, /live settings updated/);
+  vm.runInContext('sgateI18n.setLanguage("zh-CN")', context);
+  assert.equal(elements.get("user-label").textContent, "管理员");
+  assert.match(elements.get("notice").textContent, /在线参数已更新/);
 });

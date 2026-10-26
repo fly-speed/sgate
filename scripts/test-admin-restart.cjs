@@ -29,6 +29,7 @@ async function page() {
     fetch: async () => ({ ok: true, json: async () => ({ authenticated: false }) }),
   });
   const source = fs.readFileSync(path.join(__dirname, "../web/admin/app.js"), "utf8");
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../web/admin/i18n.js"), "utf8"), context);
   vm.runInContext(source, context);
   await new Promise(setImmediate);
   vm.runInContext(

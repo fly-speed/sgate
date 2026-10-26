@@ -13,7 +13,7 @@ func TestClientManagementAliases(t *testing.T) {
 	if redirect.Code != http.StatusPermanentRedirect || redirect.Header().Get("Location") != "/admin/?from=bookmark" {
 		t.Fatal(redirect.Code, redirect.Header())
 	}
-	for _, path := range []string{"/", "/assets/app.css", "/assets/app.js"} {
+	for _, path := range []string{"/", "/assets/app.css", "/assets/app.js", "/assets/i18n.js"} {
 		root := request(h, "GET", path, nil, nil, "", "")
 		alias := request(h, "GET", "/admin"+path, nil, nil, "", "")
 		if root.Code != 200 || alias.Code != 200 || root.Body.String() != alias.Body.String() || root.Header().Get("Content-Type") != alias.Header().Get("Content-Type") {

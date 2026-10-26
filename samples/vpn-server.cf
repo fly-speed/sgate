@@ -1,173 +1,172 @@
 service vpn-server {
-#	进程是否禁止运行
+#	Disable this service process.
 	master_disable = no
-#	服务地址及端口号
+#	Service listen address and port.
 	master_service = |1088
 
-#	服务类型
+#	Service type.
 	master_type = sock
-# acl_master 持有监听端口，Go 服务继承套接字；管理界面重启仅替换代理工作实例。
+# acl_master owns listening sockets inherited by Go; management restarts replace only the proxy worker.
 	master_reuseport = no
-	# 框架停止或重启服务时是否采用发送 SIGTERM 的方式；false 使用框架原有停止流程。
+	# Use SIGTERM when the framework stops or restarts a service; false keeps the framework's original stop sequence.
 	master_stop_kill = false
-	# 当 master_stop_kill 启用时，是否等待旧子进程退出。
+	# Wait for the old child process to exit when master_stop_kill is enabled.
 	master_stop_wait = true
 
 
-	# 是否采集子进程的文件描述符使用情况。
+	# Collect child process file descriptor statistics.
 	master_check_fds = true
-	# 是否采集子进程的内存使用情况。
+	# Collect child process memory statistics.
 	master_check_mem = true
-	# 是否采集子进程的 CPU 使用情况。
+	# Collect child process CPU statistics.
 	master_check_cpu = true
-	# 是否采集子进程的 I/O 使用情况。
+	# Collect child process I/O statistics.
 	master_check_io  = true
-	# 是否检查子进程资源限制。
+	# Check child process resource limits.
 	master_check_limit = true
 
-#	当子进程异常退出时，如果该值非空，则将子进程异常退出的消息通知该服务
+#	If nonempty, notify this service when a child process exits abnormally.
 	master_notify_addr = /opt/soft/acl-master/var/public/monitor.sock
-#	邮件通知接收者
+#	Email notification recipients.
 	master_notify_recipients = zhengshuxin@hotmail.com
 
-#	是否允许延迟接受客户端连接，如果为0则表示关闭该功能，如果大于0则表示打开此功能
-#	并且此值代表延迟接受连接的超时值，超过此值时如果客户端依然没有发来数据，则操作
-#	系统会在系统层直接关闭该连接
+#	Enable deferred accept: 0 disables it, a positive value enables it.
+#	This value is also the deferred accept timeout; if the client still sends no data before it expires,
+#	the operating system closes the connection directly.
 #	master_defer_accept = 0
-#	是否只允许私有访问, 如果为 y, 则域套接口创建在 /opt/soft/acl-master/var/log/private/ 目录下,
-#	如果为 n, 则域套接口创建在 /opt/soft/acl-master/var/log/public/ 目录下,
+#	Restrict to private access: for y, the Unix socket is created under /opt/soft/acl-master/var/log/private/.
+#	For n, the Unix socket is created under /opt/soft/acl-master/var/log/public/.
 	master_private = n
-	# 是否以框架配置的非特权身份运行；n 不切换身份，y 启用。
+	# Run as the framework's configured unprivileged identity; n disables identity switching, y enables it.
 	master_unpriv = n
-#	是否需要 chroot: n -- no, y -- yes
+#	Enable chroot: n -- no, y -- yes.
 	master_chroot = n
-#	每隔多长时间触发一次，单位为秒(仅对 trigger 模式有效)
+#	Wakeup interval in seconds (trigger mode only).
 	master_wakeup = -
-#	最大进程数
+#	Maximum process count.
 	master_maxproc = 1
-#	预启动进程数，该值不得大于 master_maxproc
+#	Prefork child process count; must not exceed master_maxproc.
 	master_prefork = 1
-#	进程程序名
+#	Executable path.
 	master_command = /opt/soft/sgate/sbin/sgate-server
-	# 服务版本标识，供 acl_master 管理与展示使用。
+	# Service version identifier used by acl_master for management and display.
 	master_version = 1.0.0-0
-#	进程日志记录文件
+#	Process log file.
 	master_log = /opt/soft/sgate/logs/vpn-server.log
-	# 服务标准输出的重定向日志文件路径。
+	# Standard output redirection log file.
 	master_stdout = /opt/soft/sgate/logs/vpnd-stdout.log
-	# 服务标准错误的重定向日志文件路径。
+	# Standard error redirection log file.
 	master_stderr = /opt/soft/sgate/logs/vpnd-stderr.log
-#	调试日志方式，格式：tag:level; tag:level; tab:level, 如：all:1; 101:2
+#	Debug logging format: tag:level; tag:level; tab:level. Examples: all:1; 101:2
 #	master_debug =
-# 附加命令行覆盖项，通常留空；框架自动传入 -f <本文件>。
+# Additional CLI overrides, normally empty; the framework supplies -f <this file>.
     master_args =
-	# acl_master 启动服务子进程时使用的工作目录；业务相对路径以此目录解析。
+	# Working directory used by acl_master for the child process; relative application paths resolve from here.
 	master_home = /opt/soft/sgate/var
-#	传递给服务子进程的环境变量, 可以通过 getenv("SERVICE_ENV") 获得此值
+#	Environment variables passed to the child service; available through getenv("SERVICE_ENV").
 #	master_env = mempool_limit:512000000
 #	master_env = logme:FALSE, priority:E_LOG_INFO, action:E_LOG_PER_DAY, flush:sync_flush, imit_size:512,\
 #			sync_action:E_LOG_SEM, sem_name:/tmp/ioctl_echo.sem
 
-#	当启动多个子进程实例时，该开关控制多个子进程在接收连接时是否向 acl_master 发送消息报告自己的状态
+#	When multiple child instances run, control whether they report their status to acl_master on accepting connections.
 	master_status_notify = 0
-#	是否允许产生 core 文件
+#	Allow core dumps.
 
-# 代理配置：使用服务模板读取，命令行同名参数优先。
-    # vpn-server 应用配置（UTF-8）。
-    # 参数优先级：命令行显式参数 > 本文件 > 内置默认值。
-    # 相对路径以进程工作目录为基准；原有地址、密码和证书配置保持不变。
+# Proxy configuration: loaded by the service template; same-name CLI options take precedence.
+    # vpn-server application configuration (UTF-8).
+    # Precedence: explicit CLI options > this file > built-in defaults.
+    # Relative paths resolve from the process working directory; retain existing addresses, passwords and certificates.
 
-    # 连接与身份验证
-    # HTTP/HTTPS 监听地址；保留现有地址。
+    # Connections and authentication
+    # HTTP/HTTPS listen address; HTTP management is allowed on any interface. Retain the existing address.
     listen = ":1088"
-    # 固定转发的后端 TCP 地址；保留现有地址。
+    # Default backend TCP address; retain the existing address.
     target = "127.0.0.1:2900"
-    # 客户端 addr 可选后端的允许列表，逗号分隔且按完整 host:port 精确匹配；支持 IP 或域名。
-    # 留空禁止客户端选择后端；未传 addr 时仍使用上面的 target。示例：127.0.0.1:8088,example.com:443
+    # Comma-separated allowed backends selectable through client addr; exact host:port matching, with IPs or domain names.
+    # Empty disallows client-selected backends; requests without addr still use target above. Example: 127.0.0.1:8088,example.com:443
     allowed-targets =
-    # WebSocket 服务路径，默认 /tunnel，须与客户端 URL 路径一致。
+    # WebSocket endpoint path; default: /tunnel. Must match the client URL path.
     path = "/tunnel"
-    # 两端共享密钥文件路径；保留现有路径。
+    # Shared key file for both endpoints; retain the existing path.
     key-file = "/opt/soft/sgate/conf/sgate.key"
-    # 连接验证密码，两端须一致；保留现有值。
+    # Connection authentication password; must match on both endpoints. Retain the existing value.
     password = "8ik.%^.lo9&*(MJ"
 
-    # TLS 证书与信任
-    # HTTPS 服务证书 PEM 文件路径；保留现有路径，须与 tls-key 同时设置。
+    # TLS certificates and trust
+    # HTTPS certificate PEM file; retain the existing path and set together with tls-key.
     tls-cert = "/opt/soft/nginx/conf/webcool.cn_ecc/fullchain.cer"
-    # HTTPS 服务证书私钥 PEM 文件路径；保留现有路径。
+    # HTTPS certificate private key PEM file; retain the existing path.
     tls-key = "/opt/soft/nginx/conf/webcool.cn_ecc/webcool.cn.key"
 
-    # 断线重连与会话保留
-    # 已断开的会话保留期限，默认 2 分钟；等待客户端重连，到期释放旧连接和缓存。
+    # Reconnection and session retention
+    # Disconnected session retention; default: 2 minutes. Await reconnect, then release old connections and buffers on expiry.
     session-ttl = 2m
-    # 服务端允许保留的会话数量上限，默认 128。
+    # Maximum retained server sessions; default: 128.
     max-sessions = 128
 
-    # 流与缓存上限
-    # 每个会话允许同时存在的 TCP 流上限，默认 128。
+    # Stream and buffer limits
+    # Maximum concurrent TCP streams per session; default: 128.
     max-streams = 128
-    # 每会话、每方向未确认数据缓存上限，单位字节，默认 4 MiB；满后通过背压等待。
+    # Unacknowledged data limit per session and direction, in bytes; default: 4 MiB. Apply backpressure when full.
     buffer-bytes = 4194304
 
-    # 心跳
-    # 自定义接收超时必须大于心跳间隔，并满足程序的拨号、写入超时校验。
-    # WebSocket 心跳发送间隔，默认 20 秒。
+    # Heartbeats
+    # Custom receive timeouts must exceed the heartbeat interval and pass dial/write timeout validation.
+    # WebSocket heartbeat interval; default: 20 seconds.
     heartbeat = 20s
-    # 接收空闲超时；0 按心跳间隔的三倍计算，当前默认 60 秒。
+    # Receive idle timeout; 0 uses three times the heartbeat interval, currently 60 seconds by default.
     heartbeat-timeout = 0
 
-    # 随机白噪音（默认关闭）
-    # 启用每隔 1～3 秒随机发送：保留 noise-interval = 0，将下面 min/max 改为 1s/3s。
-    # 启用固定间隔：将 min/max 均设为 0，再将 noise-interval 改为 1s 等正值。
-    # 双端独立配置；未启用发送的一端仍可接收并丢弃对端的白噪音。
-    # 固定白噪音发送间隔；0 表示不使用固定间隔，默认不主动发送白噪音。
+    # Random padding (disabled by default)
+    # For random 1-3 second intervals, keep noise-interval = 0 and set min/max below to 1s/3s.
+    # For a fixed interval, set min/max to 0 and set noise-interval to a positive duration such as 1s.
+    # Configure each endpoint independently; an endpoint with sending disabled still receives and discards peer padding.
+    # Fixed padding interval; 0 disables fixed-interval sending. Padding is disabled by default.
     noise-interval = 0
-    # 随机等待时间下限，默认 0；与上限同时设为正值才启用随机间隔。
+    # Minimum random wait; default: 0. Set both bounds positive to enable random intervals.
     noise-interval-min = 0
-    # 随机等待时间上限，默认 0；必须不小于下限，不能与非零固定间隔混用。
+    # Maximum random wait; default: 0. Must be at least the minimum; cannot be combined with a nonzero fixed interval.
     noise-interval-max = 0
-    # 每次白噪音随机负载的最小字节数，默认 1024。
+    # Minimum random padding payload per burst, in bytes; default: 1024.
     noise-min-bytes = 1024
-    # 每次白噪音随机负载的最大字节数，默认 10240；允许范围为 1～10M（10485760 字节），支持 K/M 后缀。
+    # Maximum random padding payload per burst; default: 10240 bytes. Range: 1-10M (10485760 bytes); K/M suffixes are supported.
     noise-max-bytes = 10240
-    # 业务传输中是否混入白噪音；true 保留原行为，false 在双向业务活跃时暂停。
+    # Send padding during application traffic; true preserves the original behavior, false pauses it during traffic in either direction.
     noise-traffic = true
-    # 有业务连接但双向无数据时是否发送；沿用上面的固定或随机间隔与大小。
+    # Send padding when application connections exist but neither direction has data; use the interval and size settings above.
     noise-idle = true
-    # 无业务连接但隧道在线时是否发送；true 发送，false 暂停，不影响心跳。
+    # Send padding when the tunnel is online with no application connections; true sends, false pauses. Heartbeats are unaffected.
     noise-empty = true
-    # 连续无双向业务数据达到此时间算空闲；单位 ms/s/m/h，0 使用 1s，新建无流量连接直接视为空闲。
+    # A connection is idle after this duration without application data in either direction. Units: ms/s/m/h. 0 uses 1s; new unused connections are idle immediately.
     noise-idle-after = 1s
 
-    # 可选的独立管理配置文件；非空时使用该文件并启用管理界面。
-    # 留空则通过 admin_enabled 或 -admin-enabled 开启本 .cf 中的管理配置。
+    # Optional separate management configuration file; a nonempty value loads that file and enables management.
+    # Leave empty to enable this .cf file's management settings through admin_enabled or -admin-enabled.
     admin-config =
 
-# Web 管理配置：默认关闭；命令行 -admin-enabled 可开启。
-# 账号和持久化会话仍是独立数据文件，下面的相对路径以本 .cf 所在目录为基准。
-    # 是否启用 Web 管理，默认关闭；命令行 -admin-enabled 可覆盖
+# Web management configuration: disabled by default; enable with -admin-enabled.
+# Accounts and persistent sessions remain separate data files; relative paths below resolve from this .cf file's directory.
+    # Enable Web management, disabled by default; -admin-enabled overrides this setting.
     admin_enabled = false
-    # 外部 HTML/CSS/JS 目录，相对本 .cf 解析；也可使用绝对路径
+    # External HTML/CSS/JS directory, relative to this .cf file; absolute paths are also supported.
     admin_web_dir = ../web/admin
-    # 服务端管理入口为代理端口的 /admin/，不再单独监听；此值仅保留旧登录 Cookie 身份。
-    admin_listen = 127.0.0.1:9082
-    # 独立管理员账号文件（哈希存储），相对本 .cf 解析
+    # Management shares the proxy listen/master_service port at /admin/; there is no separate management listener.
+    # Separate administrator account file (password hashes), relative to this .cf file.
     admin_users_file = ../conf/admin-server-users.json
-    # 持久化登录会话目录，相对本 .cf 解析
+    # Persistent login session directory, relative to this .cf file.
     admin_session_dir = ../conf/admin-server-sessions
-    # 登录会话固定有效期，进程重启后继续有效
+    # Fixed login session lifetime, preserved across process restarts.
     admin_session_timeout = 12h
-    # 最多保存的管理登录会话数
+    # Maximum number of stored management login sessions.
     admin_max_sessions = 128
-    # 首次创建管理员账号时使用的一次性令牌文件
+    # One-time token file used to create the first administrator account.
     admin_setup_token_file = ../conf/admin-server-setup.token
-    # 服务端管理页面复用代理的 tls-cert/tls-key；以下旧管理证书参数不再使用。
+    # Server management reuses the proxy tls-cert/tls-key; the legacy management certificate settings below are unused.
     admin_tls_cert =
-    # 旧管理私钥参数，仅保留兼容
+    # Legacy management private key setting, retained only for compatibility.
     admin_tls_key =
-    # acl_master 控制程序路径，用于界面“重启服务”；默认使用安装目录下的 master_ctl。
+    # acl_master control executable for the management page's restart action; defaults to the installed master_ctl.
     admin_master_ctl = /opt/soft/acl-master/bin/master_ctl
-    # acl_master 管理套接字路径；留空使用 master_ctl 的默认设置，可填绝对路径显式指定。
+    # acl_master control socket path; leave empty for the master_ctl default, or set an explicit absolute path.
     admin_master_socket =
 }

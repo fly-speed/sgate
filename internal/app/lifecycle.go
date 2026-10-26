@@ -129,7 +129,7 @@ func (c *controller) prepareSharedManagement(path string, next *definition, view
 	if !c.sharedMode {
 		return func() {}, nil
 	}
-	if err := validateShared(*next, c.service.Addresses()); err != nil {
+	if err := validateShared(*next); err != nil {
 		return nil, err
 	}
 	handler, stop, err := admin.Shared(c.ctx, path, view)

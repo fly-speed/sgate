@@ -478,6 +478,7 @@ def run(args, secure):
     accept_thread = threading.Thread(target=accept)
     accept_thread.start()
     owned_pids = set()
+    listener_counts = {}
     master = None
     children = {}
     services = {}
@@ -559,11 +560,12 @@ def run(args, secure):
         cf = case / f"conf/service/{role}.cf"
         services[role] = cf
         configs[role] = cfg
+        bind_host = "" if getattr(args, role + "_wildcard", False) else "127.0.0.1"
         write(
             cf,
             f"""service sgate-test-{role} {{
  master_disable = no
- master_service = 127.0.0.1|{addresses[role][0]}, 127.0.0.1|{addresses[role][1]}
+ master_service = {bind_host}|{addresses[role][0]}, {bind_host}|{addresses[role][1]}
  master_type = sock
  master_reuseport = no
  master_status_notify = 0
@@ -677,7 +679,7 @@ scan_subdir = 0
                     "-config",
                     str(services[role]),
                     "-listen",
-                    f"127.0.0.1:{addresses[role][0]}",
+                    f"{'' if role == 'server' and getattr(args, 'server_wildcard', False) else '127.0.0.1'}:{addresses[role][0]}",
                     "-noise-min-bytes",
                     "256",
                 ]
@@ -741,9 +743,15 @@ scan_subdir = 0
             assert "noise-min-bytes" in rt["cli_overrides"]
         if args.mode == "managed":
             assert rt["listener_owner"] == "acl_master"
-            assert len(rt["listeners"]) == 2
+            if getattr(args, role + "_wildcard", False):
+                # acl_master may expand each wildcard port into one socket per interface.
+                ports = {int(address.rsplit(":", 1)[1]) for address in rt["listeners"]}
+                assert ports == set(addresses[role]), rt["listeners"]
+            else:
+                assert len(rt["listeners"]) == 2
         else:
             assert rt["listener_owner"] == "sgate"
+        listener_counts[role] = len(rt["listeners"])
         owned_pids.add(int(rt["pid"]))
         return int(rt["pid"])
 
@@ -800,6 +808,12 @@ scan_subdir = 0
             admin["server"].base + "/assets/app.js", context=context, timeout=5
         ) as response:
             assert b'fetch("api/"' in response.read()
+        for role in ["client", "server"]:
+            with urllib.request.urlopen(
+                admin[role].base + "/assets/i18n.js", context=context, timeout=5
+            ) as response:
+                assert response.status == 200
+                assert b"const sgateI18n" in response.read()
         Admin(admin["server"].base, context).call("config", status=401)
         origin = admin["server"].base.removesuffix("/admin")
         for path in ["/api/status", "/admin-other/api/status", "/tunnel"]:
@@ -1007,6 +1021,9 @@ scan_subdir = 0
             persistent_sessions=True,
             metadata_edit_rollback=True,
             server_management_shared=True,
+            server_wildcard_listener=getattr(args, "server_wildcard", False),
+            client_wildcard_listener=getattr(args, "client_wildcard", False),
+            actual_listener_counts=listener_counts,
             legacy_management_port_unused=True,
             shared_routes_auth_and_rollback=True,
             tls_certificate_reload=secure,
@@ -1119,6 +1136,16 @@ def main():
         help="use one service .cf for proxy, management and framework settings",
     )
     parser.add_argument("--mode", choices=["managed", "standalone"], default="managed")
+    parser.add_argument(
+        "--server-wildcard",
+        action="store_true",
+        help="bind the server to all interfaces to verify shared HTTP/HTTPS management",
+    )
+    parser.add_argument(
+        "--client-wildcard",
+        action="store_true",
+        help="bind client proxy ports to all interfaces; management stays independent",
+    )
     parser.add_argument("--tls", choices=["both", "ws", "wss"], default="both")
     parser.add_argument("--stress", action="store_true")
     parser.add_argument(

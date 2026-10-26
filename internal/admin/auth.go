@@ -164,7 +164,12 @@ func New(c Config, v View) (*Handler, error) {
 	}
 	h := &Handler{cfg: c, view: v, attempts: make(map[string]attempt), authGate: make(chan struct{}, 1)}
 	path, _ := filepath.Abs(c.UsersFile)
-	h.cookie = "sgate_admin_" + digest([]byte(path + c.Listen))[:12]
+	identity := path + c.Listen
+	if c.shared {
+		directory, _ := filepath.Abs(c.SessionDir)
+		identity = path + "\x00shared\x00" + directory
+	}
+	h.cookie = "sgate_admin_" + digest([]byte(identity))[:12]
 	if b, e := regularRead(v.AppConfigPath, 1<<20); e == nil {
 		h.startupRevision = h.restartDigest(b)
 	} else {

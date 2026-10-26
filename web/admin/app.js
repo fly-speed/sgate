@@ -1,4 +1,5 @@
 "use strict";
+const { t, localText, localAttr } = sgateI18n;
 const $ = (id) => document.getElementById(id);
 let state = {},
   revision = "",
@@ -17,7 +18,7 @@ let configInputs = [],
 function renderConfigFields(fields, runtime, role) {
   configRole = role || state.role || "";
   if (role === "client" && !fields.some((field) => field.key === "proxies")) {
-    fields = [...fields, { key: "proxies", kind: "proxies", mappings: [], group: "代理与通道" }];
+    fields = [...fields, { key: "proxies", kind: "proxies", mappings: [], group: t("代理与通道") }];
   }
   if (role === "client") {
     fields = [
@@ -35,7 +36,7 @@ function renderConfigFields(fields, runtime, role) {
     if (!group) {
       group = document.createElement("fieldset");
       const legend = document.createElement("legend");
-      legend.textContent = field.group;
+      localText(legend, () => t(field.group));
       group.append(legend);
       container.append(group);
       groups.set(field.group, group);
@@ -51,28 +52,27 @@ function renderConfigFields(fields, runtime, role) {
     label.htmlFor = id;
     const name = document.createElement("span");
     name.className = "config-key";
-    name.textContent = field.key;
+    localText(name, () => field.key);
     const description = document.createElement("small");
     description.id = id + "-help";
-    description.textContent =
-      (field.description || "配置项：" + field.key) +
-      (field.validation?.hint ? " · " + field.validation.hint : "") +
+    localText(description, () => ((t(field.description) || t("配置项：") + field.key) +
+      (field.validation?.hint ? " · " + t(field.validation.hint) : "") +
       (["noise-min-bytes", "noise-max-bytes"].includes(field.key)
-        ? " · 这是每次发送的负载总量，不是 B/s 速率；一秒发送多次时，图表会累计这些流量。"
-        : "");
+        ? t(" · 这是每次发送的负载总量，不是 B/s 速率；一秒发送多次时，图表会累计这些流量。")
+        : "")));
     label.append(name, description);
     const overridden = overrides.has(field.key === "admin_enabled" ? "admin-enabled" : field.key);
     if (overridden) {
       const badge = document.createElement("span");
       badge.className = "override-badge";
-      badge.textContent = "命令行优先";
+      localText(badge, () => t("命令行优先"));
       label.append(badge);
     }
     if (field.validation?.live) {
       const badge = document.createElement("span");
       badge.className = "live-badge";
-      badge.textContent = overridden ? "支持即时生效 · 命令行已覆盖" : "保存后立即生效";
-      badge.title = "同步写入配置文件，无需重启代理；命令行显式参数优先。";
+      localText(badge, () => overridden ? t("支持即时生效 · 命令行已覆盖") : t("保存后立即生效"));
+      localAttr(badge, "title", () => t("同步写入配置文件，无需重启代理；命令行显式参数优先。"));
       label.append(badge);
     }
     const boolean =
@@ -93,13 +93,12 @@ function renderConfigFields(fields, runtime, role) {
       for (const value of values) {
         const option = document.createElement("option");
         option.value = value;
-        option.textContent =
-          value +
+        localText(option, () => (value +
           (boolean
             ? ["true", "yes", "y", "1", "t", "T", "TRUE", "True"].includes(value)
-              ? "（是）"
-              : "（否）"
-            : "");
+              ? t("（是）")
+              : t("（否）")
+            : "")));
         input.append(option);
       }
     } else {
@@ -111,13 +110,13 @@ function renderConfigFields(fields, runtime, role) {
     input.name = field.key;
     input.setAttribute("aria-describedby", description.id);
     input.value = field.secret ? "" : field.value;
-    if (field.secret) input.placeholder = "已隐藏 · 不修改则保留原值";
+    if (field.secret) localAttr(input, "placeholder", () => t("已隐藏 · 不修改则保留原值"));
     const saveButton = document.createElement("button");
     saveButton.type = "button";
     saveButton.className = "secondary config-save";
     saveButton.innerHTML =
       '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2Z"/><path d="M7 3v6h10V3M7 21v-8h10v8"/></svg>';
-    saveButton.setAttribute("aria-label", "保存 " + field.key);
+    localAttr(saveButton, "aria-label", () => t("保存 ") + field.key);
     const error = document.createElement("small");
     error.className = "config-error";
     error.hidden = true;
@@ -140,9 +139,9 @@ function renderConfigFields(fields, runtime, role) {
       entry.dirty = input.value !== entry.original;
       validateConfigForm(null, false);
       updateConfigSaveButton(entry, configSaving || serviceRestarting);
-      $("pending-label").textContent = Object.keys(configEdits()).length
-        ? "有未保存修改"
-        : "没有未保存修改";
+      localText($("pending-label"), () => Object.keys(configEdits()).length
+        ? t("有未保存修改")
+        : t("没有未保存修改"));
     });
     updateConfigSaveButton(entry);
     saveButton.addEventListener("click", () => saveConfigField(entry));
@@ -180,37 +179,37 @@ function configNumber(value, type) {
     let total = 0n,
       end = 0;
     for (const part of parts) {
-      if (part.index !== end) throw new Error("时间需要单位，例如 500ms、1s、2m 或 1h30m");
+      if (part.index !== end) throw new Error(t("时间需要单位，例如 500ms、1s、2m 或 1h30m"));
       const [whole, fraction = ""] = part[1].split(".");
       const scale = 10n ** BigInt(fraction.length);
       total += (BigInt((whole || "0") + fraction) * units[part[2]]) / scale;
       end += part[0].length;
     }
-    if (!end || end !== value.length) throw new Error("时间需要单位，例如 500ms、1s、2m 或 1h30m");
+    if (!end || end !== value.length) throw new Error(t("时间需要单位，例如 500ms、1s、2m 或 1h30m"));
     return sign * total;
   }
   if (type === "bytes") {
     const match = /^(\d+)(KIB|MIB|KB|MB|K|M|B)?$/i.exec(value.trim());
-    if (!match) throw new Error("大小须为整数字节数或 K/M 后缀，例如 1024、1K、10M");
+    if (!match) throw new Error(t("大小须为整数字节数或 K/M 后缀，例如 1024、1K、10M"));
     const unit = (match[2] || "B")[0].toUpperCase();
     return BigInt(match[1]) * (unit === "M" ? 1048576n : unit === "K" ? 1024n : 1n);
   }
-  if (!/^[-+]?\d+$/.test(value)) throw new Error("请填写整数");
+  if (!/^[-+]?\d+$/.test(value)) throw new Error(t("请填写整数"));
   return BigInt(value);
 }
 function configAddress(value, listen = false) {
   const match = /^(?:\[([^\]]+)\]|([^:\s]*)):(\d+)$/.exec(value);
-  if (!match) throw new Error("地址须为 主机:端口，IPv6 使用 [地址]:端口");
+  if (!match) throw new Error(t("地址须为 主机:端口，IPv6 使用 [地址]:端口"));
   const host = match[1] || match[2];
-  if (!host && !listen) throw new Error("后端主机不能为空");
+  if (!host && !listen) throw new Error(t("后端主机不能为空"));
   const port = Number(match[3]);
-  if (port < (listen ? 0 : 1) || port > 65535) throw new Error("端口超出允许范围");
+  if (port < (listen ? 0 : 1) || port > 65535) throw new Error(t("端口超出允许范围"));
   if (host) {
     if (match[1]) {
       try {
         new URL("http://[" + host + "]");
       } catch {
-        throw new Error("IPv6 地址无效");
+        throw new Error(t("IPv6 地址无效"));
       }
     } else if (
       host.length > 253 ||
@@ -219,9 +218,9 @@ function configAddress(value, listen = false) {
         .split(".")
         .every((label) => label.length <= 63 && /^[a-z\d](?:[a-z\d-]*[a-z\d])?$/i.test(label))
     )
-      throw new Error("主机名或 IP 地址无效");
+      throw new Error(t("主机名或 IP 地址无效"));
     if (/^\d+\.\d+\.\d+\.\d+$/.test(host) && host.split(".").some((n) => Number(n) > 255))
-      throw new Error("IPv4 地址无效");
+      throw new Error(t("IPv4 地址无效"));
   }
   return port;
 }
@@ -230,7 +229,7 @@ function configURL(value, checkAddress = true) {
   try {
     url = new URL(value);
   } catch {
-    throw new Error("需要有效的 ws:// 或 wss:// URL");
+    throw new Error(t("需要有效的 ws:// 或 wss:// URL"));
   }
   if (
     !["ws:", "wss:"].includes(url.protocol) ||
@@ -239,11 +238,11 @@ function configURL(value, checkAddress = true) {
     url.password ||
     url.hash
   )
-    throw new Error("需要不含账号或片段的 ws:// 或 wss:// URL");
-  if (url.port === "0") throw new Error("URL 端口范围为 1～65535");
-  if (!/^wss?:\/\//.test(value) || /\s/.test(value)) throw new Error("WebSocket URL 格式无效");
+    throw new Error(t("需要不含账号或片段的 ws:// 或 wss:// URL"));
+  if (url.port === "0") throw new Error(t("URL 端口范围为 1～65535"));
+  if (!/^wss?:\/\//.test(value) || /\s/.test(value)) throw new Error(t("WebSocket URL 格式无效"));
   const addresses = checkAddress ? url.searchParams.getAll("addr") : [];
-  if (addresses.length > 1) throw new Error("URL 不能重复指定 addr");
+  if (addresses.length > 1) throw new Error(t("URL 不能重复指定 addr"));
   if (addresses.length) configAddress(addresses[0]);
 }
 function configArguments(value, options) {
@@ -251,26 +250,26 @@ function configArguments(value, options) {
   for (let i = 0; i < args.length; i++) {
     const match = /^--?([^=]+)(?:=(.*))?$/.exec(args[i]);
     if (!match || !Object.hasOwn(options, match[1]))
-      throw new Error("master_args 包含未知选项或多余的位置参数");
+      throw new Error(t("master_args 包含未知选项或多余的位置参数"));
     const rule = options[match[1]];
     let argument = match[2];
     if (argument === undefined) argument = rule.type === "boolean" ? "true" : args[++i];
-    if (argument === undefined) throw new Error("master_args 有选项缺少值");
+    if (argument === undefined) throw new Error(t("master_args 有选项缺少值"));
     const error = configValueError(match[1], argument, { ...rule, required: false });
-    if (error) throw new Error("master_args 中 " + match[1] + "：" + error);
+    if (error) throw new Error(t("master_args 中 ") + match[1] + t("：") + error);
     if (rule.type === "proxies" && argument) {
       let mappings;
       try {
         mappings = JSON.parse(argument);
       } catch {
-        throw new Error("master_args 的 proxies 必须为不加 shell 引号的紧凑 JSON");
+        throw new Error(t("master_args 的 proxies 必须为不加 shell 引号的紧凑 JSON"));
       }
       if (!Array.isArray(mappings) || mappings.length > 64)
-        throw new Error("master_args 的映射须为数组且不超过 64 项");
+        throw new Error(t("master_args 的映射须为数组且不超过 64 项"));
       const ports = new Set();
       for (const mapping of mappings) {
         const port = configAddress(mapping.listen, true);
-        if (!port || ports.has(port)) throw new Error("master_args 的映射监听端口无效或重复");
+        if (!port || ports.has(port)) throw new Error(t("master_args 的映射监听端口无效或重复"));
         ports.add(port);
         configURL(mapping.server);
         if (mapping.addr) configAddress(mapping.addr);
@@ -279,11 +278,11 @@ function configArguments(value, options) {
   }
 }
 function configValueError(key, value, rule = {}, values = {}) {
-  if (/[\r\n\x00]/.test(value)) return "不能包含换行或空字符";
+  if (/[\r\n\x00]/.test(value)) return t("不能包含换行或空字符");
   if (/^(master_|app_)/.test(key) && (value.includes("#") || value !== value.trim()))
-    return "框架参数不能包含 # 或首尾空白";
-  if (configByteLength(value) > 4095) return "配置项过长，模板每行最多支持 4095 字节";
-  if (!value) return rule.required ? "不能为空" : "";
+    return t("框架参数不能包含 # 或首尾空白");
+  if (configByteLength(value) > 4095) return t("配置项过长，模板每行最多支持 4095 字节");
+  if (!value) return rule.required ? t("不能为空") : "";
   try {
     if (rule.type === "arguments" && rule.options) {
       configArguments(value, rule.options);
@@ -294,8 +293,8 @@ function configValueError(key, value, rule = {}, values = {}) {
         (rule.min !== undefined && number < BigInt(rule.min)) ||
         (rule.max !== undefined && number > BigInt(rule.max))
       )
-        return "超出允许范围；" + rule.hint;
-    } else if (rule.choices && !rule.choices.includes(value)) return "请使用允许的选项";
+        return t("超出允许范围；") + t(rule.hint);
+    } else if (rule.choices && !rule.choices.includes(value)) return t("请使用允许的选项");
     else if (["address", "listen"].includes(rule.type))
       configAddress(value, rule.type === "listen");
     else if (rule.type === "addresses")
@@ -314,13 +313,13 @@ function configValueError(key, value, rule = {}, values = {}) {
         else text = text.replace(/\|(?=[^|]*$)/, ":");
         const port = configAddress(text, true);
         if (!port || ports.has(text))
-          throw new Error("框架监听端口须为 1～65535，监听地址不能重复");
+          throw new Error(t("框架监听端口须为 1～65535，监听地址不能重复"));
         ports.add(text);
       }
     } else if (rule.type === "route" && (!value.startsWith("/") || /[?#\s]/.test(value)))
-      return "路径须以 / 开头，不含空白、查询参数或片段";
+      return t("路径须以 / 开头，不含空白、查询参数或片段");
     else if (rule.type === "password" && configByteLength(value) > Number(rule.max))
-      return "密码不能超过 " + rule.max + " 个 UTF-8 字节";
+      return t("密码不能超过 ") + rule.max + t(" 个 UTF-8 字节");
   } catch (error) {
     return errorText(error);
   }
@@ -330,7 +329,7 @@ function setConfigError(input, error, element) {
   input.setCustomValidity?.(error);
   input.setAttribute("aria-invalid", error ? "true" : "false");
   if (element) {
-    element.textContent = error;
+    localText(element, () => error);
     element.hidden = !error;
   }
 }
@@ -358,13 +357,13 @@ function configRelationErrors(values) {
     const keys = ["noise-interval", "noise-interval-min", "noise-interval-max"];
     const [fixed, min, max] = keys.map((key) => number(key, "duration", 0n));
     if ((min || max) && (fixed || !min || max < min))
-      fail(keys, "固定间隔须为 0，随机范围须满足 0 < min ≤ max；关联项请一起修改后整页保存");
+      fail(keys, t("固定间隔须为 0，随机范围须满足 0 < min ≤ max；关联项请一起修改后整页保存"));
   }
   if (has("noise-min-bytes", "noise-max-bytes")) {
     if (number("noise-min-bytes", "bytes", 1024n) > number("noise-max-bytes", "bytes", 10240n))
       fail(
         ["noise-min-bytes", "noise-max-bytes"],
-        "噪音最小值不能大于最大值；关联项请一起修改后整页保存",
+        t("噪音最小值不能大于最大值；关联项请一起修改后整页保存"),
       );
   }
   if (
@@ -372,10 +371,10 @@ function configRelationErrors(values) {
     number("reconnect-min", "duration", 250000000n) >
       number("reconnect-max", "duration", 10000000000n)
   )
-    fail(["reconnect-min", "reconnect-max"], "重连最大间隔不能小于最小间隔");
+    fail(["reconnect-min", "reconnect-max"], t("重连最大间隔不能小于最小间隔"));
   if (has("buffer-bytes")) {
     const buffer = number("buffer-bytes", "integer", 4194304n);
-    if (buffer < 16409n) fail(["buffer-bytes"], "缓存至少为 16409 字节，或填 0 使用默认值");
+    if (buffer < 16409n) fail(["buffer-bytes"], t("缓存至少为 16409 字节，或填 0 使用默认值"));
   }
   if (has("heartbeat", "heartbeat-timeout")) {
     const heartbeat = number("heartbeat", "duration", 20000000000n);
@@ -383,7 +382,7 @@ function configRelationErrors(values) {
     if (timeout <= heartbeat || timeout <= 15000000000n)
       fail(
         ["heartbeat", "heartbeat-timeout"],
-        "心跳超时须大于心跳间隔和 15s 写入超时；0 使用心跳间隔的三倍",
+        t("心跳超时须大于心跳间隔和 15s 写入超时；0 使用心跳间隔的三倍"),
       );
   }
   for (const [cert, key] of [
@@ -392,11 +391,11 @@ function configRelationErrors(values) {
     ["tls_cert_file", "tls_key_file"],
   ])
     if (has(cert, key) && !!values[cert] !== !!values[key])
-      fail([cert, key], "证书与私钥路径须同时填写或同时留空");
+      fail([cert, key], t("证书与私钥路径须同时填写或同时留空"));
   if (has("server") && !values.server && !values.proxies?.length)
-    fail(["server"], "单代理模式需要服务端 URL；或先配置至少一个映射");
+    fail(["server"], t("单代理模式需要服务端 URL；或先配置至少一个映射"));
   if (has("path") && (values.path === "/admin" || values.path.startsWith("/admin/")))
-    fail(["path"], "隧道路径不能占用 /admin 管理入口");
+    fail(["path"], t("隧道路径不能占用 /admin 管理入口"));
   const loopback = (address) => /^(localhost|127(?:\.\d+){3}|\[::1\]):/i.test(address);
   if (
     configRole === "client" &&
@@ -406,23 +405,12 @@ function configRelationErrors(values) {
   )
     fail(
       ["admin_listen", "admin_tls_cert", "admin_tls_key"],
-      "管理界面监听非回环地址时必须配置 HTTPS 证书与私钥",
-    );
-  if (
-    configRole === "server" &&
-    has("listen", "tls-cert") &&
-    ["true", "1", "t", "True", "TRUE"].includes(values.admin_enabled) &&
-    !loopback(values.listen) &&
-    !values["tls-cert"]
-  )
-    fail(
-      ["listen", "tls-cert", "tls-key"],
-      "共享管理入口监听非回环地址时必须配置 HTTPS 证书与私钥",
+      t("管理界面监听非回环地址时必须配置 HTTPS 证书与私钥"),
     );
   if (has("admin_users_file", "admin_session_dir", "admin_setup_token_file")) {
     const keys = ["admin_users_file", "admin_session_dir", "admin_setup_token_file"];
     if (new Set(keys.map((key) => values[key])).size < 3)
-      fail(keys, "账号、会话和初始化令牌的存储路径不能相同");
+      fail(keys, t("账号、会话和初始化令牌的存储路径不能相同"));
   }
   return errors;
 }
@@ -447,7 +435,7 @@ function validateConfigForm(single = null, report = true) {
               const port = configAddress(row[key].value, key === "listen");
               if (key === "listen") {
                 if (!port || ports.has(port))
-                  throw new Error("映射监听端口须为 1～65535，且不能重复");
+                  throw new Error(t("映射监听端口须为 1～65535，且不能重复"));
                 ports.add(port);
               }
             }
@@ -457,7 +445,7 @@ function validateConfigForm(single = null, report = true) {
           setConfigError(row[key], error, row.errors?.[key]);
           if (error && !first) first = { input: row[key], key: "proxies", error };
         }
-      if (entry.rows.length > 64 && !first) first = { key: "proxies", error: "最多允许 64 个映射" };
+      if (entry.rows.length > 64 && !first) first = { key: "proxies", error: t("最多允许 64 个映射") };
     } else {
       const error =
         entry.secret && !entry.dirty
@@ -481,7 +469,7 @@ function validateConfigForm(single = null, report = true) {
     }
   }
   if (first && report) {
-    notice(first.key + "：" + first.error, true);
+    notice(() => first.key + t("：") + t(first.error), true);
     first.input?.focus?.();
     first.input?.reportValidity?.();
   }
@@ -505,23 +493,22 @@ function renderProxyMappings(group, field, overridden) {
   const header = document.createElement("div");
   header.className = "proxy-editor-header";
   const title = document.createElement("strong");
-  title.textContent = "多端口代理映射";
+  localText(title, () => t("多端口代理映射"));
   const help = document.createElement("p");
   help.className = "muted";
-  help.textContent =
-    "每行将一个本地端口映射到远程服务。后端地址可选，须在服务端允许列表内；没有映射时使用下面的单代理配置。";
-  if (overridden) help.textContent += " 当前由命令行 proxies 覆盖，保存后仍以命令行为准。";
+  localText(help, () => (t("每行将一个本地端口映射到远程服务。后端地址可选，须在服务端允许列表内；没有映射时使用下面的单代理配置。") +
+    (overridden ? t(" 当前由命令行 proxies 覆盖，保存后仍以命令行为准。") : "")));
   const saveButton = document.createElement("button");
   saveButton.type = "button";
   saveButton.className = "secondary config-save";
   saveButton.innerHTML =
     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2Z"/><path d="M7 3v6h10V3M7 21v-8h10v8"/></svg>';
-  saveButton.setAttribute("aria-label", "保存代理映射");
+  localAttr(saveButton, "aria-label", () => t("保存代理映射"));
   const list = document.createElement("div");
   const add = document.createElement("button");
   add.type = "button";
   add.className = "secondary";
-  add.textContent = "＋ 添加映射";
+  localText(add, () => t("＋ 添加映射"));
   const entry = {
     key: "proxies",
     kind: "proxies",
@@ -540,9 +527,9 @@ function renderProxyMappings(group, field, overridden) {
     entry.dirty = JSON.stringify(entry.read()) !== entry.original;
     validateConfigForm(null, false);
     updateConfigSaveButton(entry, configSaving || serviceRestarting);
-    $("pending-label").textContent = Object.keys(configEdits()).length
-      ? "有未保存修改"
-      : "没有未保存修改";
+    localText($("pending-label"), () => Object.keys(configEdits()).length
+      ? t("有未保存修改")
+      : t("没有未保存修改"));
   };
   const draw = (values) => {
     list.replaceChildren();
@@ -551,7 +538,7 @@ function renderProxyMappings(group, field, overridden) {
     if (!values.length) {
       const empty = document.createElement("p");
       empty.className = "muted";
-      empty.textContent = "尚未添加映射，当前使用单代理配置。";
+      localText(empty, () => t("尚未添加映射，当前使用单代理配置。"));
       list.append(empty);
     }
     for (const value of values) {
@@ -559,20 +546,20 @@ function renderProxyMappings(group, field, overridden) {
       row.className = "proxy-mapping";
       const controls = { errors: {} };
       for (const [key, name, placeholder] of [
-        ["listen", "本地监听地址", "127.0.0.1:9001"],
-        ["server", "远程服务端地址", "wss://服务器:端口/tunnel"],
-        ["addr", "后端地址（可选）", "127.0.0.1:8080 或 域名:端口"],
+        ["listen", t("本地监听地址"), "127.0.0.1:9001"],
+        ["server", t("远程服务端地址"), t("wss://服务器:端口/tunnel")],
+        ["addr", t("后端地址（可选）"), t("127.0.0.1:8080 或 域名:端口")],
       ]) {
         const label = document.createElement("label");
-        label.textContent = name;
+        localText(label, () => t(name));
         const input = document.createElement("input");
         input.type = "text";
         input.autocomplete = "off";
         input.spellcheck = false;
         input.required = key !== "addr";
-        input.placeholder = placeholder;
+        localAttr(input, "placeholder", () => t(placeholder));
         input.value = value[key] || "";
-        input.setAttribute("aria-label", name);
+        localAttr(input, "aria-label", () => t(name));
         input.addEventListener("input", changed);
         controls[key] = input;
         const error = document.createElement("small");
@@ -586,8 +573,8 @@ function renderProxyMappings(group, field, overridden) {
       const remove = document.createElement("button");
       remove.type = "button";
       remove.className = "secondary proxy-remove";
-      remove.textContent = "删除";
-      remove.setAttribute("aria-label", "删除本地端口 " + (value.listen || "未填写") + " 的映射");
+      localText(remove, () => t("删除"));
+      localAttr(remove, "aria-label", () => t("删除本地端口 ") + (value.listen || t("未填写")) + t(" 的映射"));
       remove.addEventListener("click", () => {
         const values = entry.read();
         values.splice(entry.rows.indexOf(controls), 1);
@@ -637,7 +624,7 @@ function setConfigBusy(busy) {
 
 function updateConfigSaveButton(entry, busy = false) {
   entry.saveButton.disabled = busy || !entry.dirty;
-  entry.saveButton.title = entry.dirty ? "保存此项" : "未修改";
+  localAttr(entry.saveButton, "title", () => entry.dirty ? t("保存此项") : t("未修改"));
 }
 
 // 单项存盘不重新加载表单，其他行尚未保存的编辑与密码输入继续保留。
@@ -654,7 +641,7 @@ async function saveConfigField(entry) {
     !entry.dirty ||
     (entry.kind !== "proxies" && !entry.secret && entry.input.value === entry.original)
   ) {
-    notice(entry.key + " 没有需要存盘的修改。");
+    notice(() => entry.key + t(" 没有需要存盘的修改。"));
     return;
   }
   const value = entry.kind === "proxies" ? entry.read() : entry.input.value;
@@ -671,13 +658,12 @@ async function saveConfigField(entry) {
     else entry.original = entry.input.value = entry.secret ? "" : value;
     entry.dirty = false;
     const pending = result.requires_restart !== false;
-    $("pending-label").textContent =
-      (Object.keys(configEdits()).length ? "有未保存修改 · " : "") +
-      (pending ? "已保存项待应用" : "已保存项已生效");
+    localText($("pending-label"), () => ((Object.keys(configEdits()).length ? t("有未保存修改 · ") : "") +
+      (pending ? t("已保存项待应用") : t("已保存项已生效"))));
     if (result.runtime) renderRuntime(result.runtime);
-    notice(configSaveMessage(result, entry.key) + "其他未保存修改已保留。");
+    notice(() => configSaveMessage(result, entry.key) + t("其他未保存修改已保留。"));
   } catch (error) {
-    notice(errorText(error), true);
+    notice(() => errorText(error), true);
   } finally {
     configSaving = false;
     entry.saveButton.setAttribute("aria-busy", "false");
@@ -703,13 +689,13 @@ async function api(path, options = {}) {
       if (r.status === 401 && path !== "login" && path !== "setup") {
         await refreshAuth();
       }
-      const error = new Error(data.error || "请求失败");
+      const error = new Error(t(data.error) || t("请求失败"));
       error.status = r.status;
       throw error;
     }
     return data;
   } catch (e) {
-    if (e.name === "AbortError") throw new Error("请求超时，请重试");
+    if (e.name === "AbortError") throw new Error(t("请求超时，请重试"));
     throw e;
   } finally {
     clearTimeout(timer);
@@ -717,11 +703,11 @@ async function api(path, options = {}) {
 }
 function notice(text, bad = false) {
   $("notice").hidden = false;
-  $("notice").textContent = text;
+  localText($("notice"), () => t(typeof text === "function" ? text() : text));
   $("notice").classList.toggle("bad", bad);
 }
 function errorText(e) {
-  return e.message || "网络连接失败，请稍后重试";
+  return t(e.message) || t("网络连接失败，请稍后重试");
 }
 function units(n, rate = false) {
   if (!Number.isFinite(n)) return "—";
@@ -734,9 +720,9 @@ function units(n, rate = false) {
   return (n < 10 && i ? n.toFixed(2) : n.toFixed(i ? 1 : 0)) + " " + list[i] + (rate ? "/s" : "");
 }
 function uptime(n) {
-  if (n >= 86400) return Math.floor(n / 86400) + " 天 " + Math.floor((n % 86400) / 3600) + " 小时";
-  if (n >= 3600) return Math.floor(n / 3600) + " 小时 " + Math.floor((n % 3600) / 60) + " 分";
-  return Math.floor(n / 60) + " 分 " + (n % 60) + " 秒";
+  if (n >= 86400) return Math.floor(n / 86400) + t(" 天 ") + Math.floor((n % 86400) / 3600) + t(" 小时");
+  if (n >= 3600) return Math.floor(n / 3600) + t(" 小时 ") + Math.floor((n % 3600) / 60) + t(" 分");
+  return Math.floor(n / 60) + t(" 分 ") + (n % 60) + t(" 秒");
 }
 async function refreshAuth() {
   const authEpoch = ++epoch;
@@ -745,17 +731,18 @@ async function refreshAuth() {
   state = status;
   $("dashboard").hidden = !state.authenticated;
   $("auth").hidden = state.authenticated;
-  $("auth-error").textContent = "";
+  localText($("auth-error"), () => "");
   if (!state.authenticated) {
     renderSignedOut();
     return;
   }
-  $("role-title").textContent = state.role === "server" ? "SERVER" : "CLIENT";
-  $("side-role").textContent = state.role === "server" ? "服务端代理" : "客户端代理";
-  $("user-label").textContent = $("session-user").textContent = state.username;
+  localText($("role-title"), () => state.role === "server" ? "SERVER" : "CLIENT");
+  localText($("side-role"), () => state.role === "server" ? t("服务端代理") : t("客户端代理"));
+  localText($("user-label"), () => state.username);
+  localText($("session-user"), () => state.username);
   $("account-user").value = state.username;
-  $("session-duration").textContent = uptime(Math.floor(state.session_timeout_seconds));
-  $("session-expiry").textContent = new Date(state.expires).toLocaleString();
+  localText($("session-duration"), () => uptime(Math.floor(state.session_timeout_seconds)));
+  localText($("session-expiry"), () => new Date(state.expires).toLocaleString(sgateI18n.language()));
   previous = null;
   points = [];
   chartPointer = null;
@@ -763,7 +750,7 @@ async function refreshAuth() {
   try {
     await loadConfig();
   } catch (e) {
-    notice(errorText(e), true);
+    notice(() => errorText(e), true);
   }
   const run = epoch;
   poll(run);
@@ -800,22 +787,22 @@ function renderSignedOut() {
     "noise-observation",
     "noise-activity",
   ])
-    $(id).textContent = "";
+    localText($(id), () => "");
   $("notice").hidden = true;
-  $("auth-error").textContent = "";
+  localText($("auth-error"), () => "");
   $("dashboard").hidden = true;
   $("auth").hidden = false;
   $("login-form").hidden = false;
   const setup = !!state.setup_required;
-  $("auth-title").textContent = setup ? "创建首个管理员" : "欢迎回来";
-  $("auth-help").textContent = setup
-    ? "设置独立管理账号。初始化令牌位于管理配置指定的 " + state.setup_token_file + " 文件中。"
-    : "登录后查看实时流量并管理代理配置。";
+  localText($("auth-title"), () => setup ? t("创建首个管理员") : t("欢迎回来"));
+  localText($("auth-help"), () => setup
+    ? t("设置独立管理账号。初始化令牌位于管理配置指定的 ") + state.setup_token_file + t(" 文件中。")
+    : t("登录后查看实时流量并管理代理配置。"));
   $("confirm-row").hidden = $("token-row").hidden = !setup;
   $("login-pass").minLength = setup ? 12 : 1;
   $("login-pass").autocomplete = setup ? "new-password" : "current-password";
   $("login-confirm").required = $("setup-token").required = setup;
-  $("login-button").textContent = setup ? "创建账号并进入控制台 ↗" : "登录控制台 ↗";
+  localText($("login-button"), () => setup ? t("创建账号并进入控制台 ↗") : t("登录控制台 ↗"));
 }
 
 async function logoutAdmin() {
@@ -828,9 +815,9 @@ async function logoutAdmin() {
     epoch++;
     state = { authenticated: false };
     renderSignedOut();
-    $("auth-help").textContent = "已安全退出，服务器上的本次登录会话已清理。";
+    localText($("auth-help"), () => t("已安全退出，服务器上的本次登录会话已清理。"));
   } catch (error) {
-    notice(errorText(error), true);
+    notice(() => errorText(error), true);
   } finally {
     loggingOut = false;
     $("logout").disabled = false;
@@ -841,28 +828,27 @@ async function loadConfig() {
   const data = await api("config");
   if (configEpoch !== epoch || !state.authenticated) return;
   if (!Array.isArray(data.fields))
-    throw new Error("配置表单需要新版程序，请更新并重启 sgate 服务。");
+    throw new Error(t("配置表单需要新版程序，请更新并重启 sgate 服务。"));
   revision = data.revision;
   renderConfigFields(data.fields || [], data.runtime || {}, data.role);
-  $("config-path").textContent = data.path;
-  $("pending-label").textContent = data.requires_restart ? "已保存 · 待应用" : "配置文件已同步";
+  localText($("config-path"), () => data.path);
+  localText($("pending-label"), () => data.requires_restart ? t("已保存 · 待应用") : t("配置文件已同步"));
   renderRuntime(data.runtime || {});
 }
 function renderRuntime(rt) {
   servicePID = rt.pid || 0;
   $("restart-service").hidden = $("restart-service-help").hidden = !rt.service_restart_available;
   $("restart-service").disabled = serviceRestarting || !!rt.service_restart_pending;
-  $("runtime-state").textContent =
-    "代理状态：" +
-    (rt.running ? "运行中" : "未运行") +
-    " · 配置代次 " +
+  localText($("runtime-state"), () => (t("代理状态：") +
+    (rt.running ? t("运行中") : t("未运行")) +
+    t(" · 配置代次 ") +
     (rt.generation || "—") +
-    " · 生效监听 " +
+    t(" · 生效监听 ") +
     ((rt.listeners?.length ? rt.listeners.join(", ") : rt.listen) || "—") +
-    (rt.cli_overrides?.length ? " · 命令行优先项：" + rt.cli_overrides.join(", ") : "") +
-    (rt.listener_owner === "acl_master" ? " · 监听由 acl_master 管理" : "") +
+    (rt.cli_overrides?.length ? t(" · 命令行优先项：") + rt.cli_overrides.join(", ") : "") +
+    (rt.listener_owner === "acl_master" ? t(" · 监听由 acl_master 管理") : "") +
     (rt.last_error ? " · " + rt.last_error : "") +
-    noiseDescription(rt.noise);
+    noiseDescription(rt.noise)));
 }
 // 显示当前运行参数，避免把只保存的文件值误认为已经生效。
 function noiseDescription(noise) {
@@ -870,21 +856,21 @@ function noiseDescription(noise) {
   const wait =
     noise.mode === "random" ? noise.interval_min + "～" + noise.interval_max : noise.interval;
   return (
-    " · 本端白噪音：" +
+    t(" · 本端白噪音：") +
     (noise.mode === "off"
-      ? "关闭"
+      ? t("关闭")
       : wait +
-        "，每次 " +
+        t("，每次 ") +
         units(noise.min_bytes) +
         "～" +
         units(noise.max_bytes) +
-        "；传输中 " +
-        (noise.traffic === false ? "不发" : "发送") +
-        "，空闲 " +
-        (noise.idle === false ? "不发" : "发送") +
-        "，无连接 " +
-        (noise.empty === false ? "不发" : "发送") +
-        "；空闲阈值 " +
+        t("；传输中 ") +
+        (noise.traffic === false ? t("不发") : t("发送")) +
+        t("，空闲 ") +
+        (noise.idle === false ? t("不发") : t("发送")) +
+        t("，无连接 ") +
+        (noise.empty === false ? t("不发") : t("发送")) +
+        t("；空闲阈值 ") +
         (noise.idle_after || "1s"))
   );
 }
@@ -900,24 +886,23 @@ async function poll(run) {
       points.push(rates);
       points = points.filter((point) => point.time_ms >= rates.time_ms - 60000).slice(-120);
     }
-    $("tx-rate").textContent = rates ? units(rates.tx, true) : "采样中";
-    $("rx-rate").textContent = rates ? units(rates.rx, true) : "采样中";
-    $("noise-observation").textContent = noiseObservationText(data, rates);
-    $("noise-activity").textContent = noiseActivityText(data.noise_activity);
-    $("tx-total").textContent = "累计发送 " + units(data.tx_bytes);
-    $("rx-total").textContent = "累计接收 " + units(data.rx_bytes);
-    $("noise-totals").textContent =
-      "噪音负载累计：发送 " +
+    localText($("tx-rate"), () => rates ? units(rates.tx, true) : t("采样中"));
+    localText($("rx-rate"), () => rates ? units(rates.rx, true) : t("采样中"));
+    localText($("noise-observation"), () => noiseObservationText(data, rates));
+    localText($("noise-activity"), () => noiseActivityText(data.noise_activity));
+    localText($("tx-total"), () => t("累计发送 ") + units(data.tx_bytes));
+    localText($("rx-total"), () => t("累计接收 ") + units(data.rx_bytes));
+    localText($("noise-totals"), () => (t("噪音负载累计：发送 ") +
       units(data.noise_tx_bytes || 0) +
-      " · 接收 " +
+      t(" · 接收 ") +
       units(data.noise_rx_bytes || 0) +
-      "（收发两端独立配置）";
-    $("connections").textContent = data.connections;
-    $("uptime").textContent = uptime(data.uptime_seconds);
-    $("live-status").textContent = "● 实时监测";
+      t("（收发两端独立配置）")));
+    localText($("connections"), () => data.connections);
+    localText($("uptime"), () => uptime(data.uptime_seconds));
+    localText($("live-status"), () => t("● 实时监测"));
     drawChart();
   } catch (e) {
-    if (run === epoch) $("live-status").textContent = "● 数据更新中断";
+    if (run === epoch) localText($("live-status"), () => t("● 数据更新中断"));
   }
   if (run === epoch && state.authenticated)
     setTimeout(() => poll(run), document.hidden ? 5000 : 1000);
@@ -947,79 +932,79 @@ function trafficRates(data, last) {
   };
 }
 function noiseObservationText(data, rates) {
-  const value = (v) => (v == null ? "采样中/未提供" : units(v, true));
+  const value = (v) => (v == null ? t("采样中/未提供") : units(v, true));
   return (
-    "白噪音：发送 " +
+    t("白噪音：发送 ") +
     value(rates?.noiseTX) +
-    " · 接收 " +
+    t(" · 接收 ") +
     value(rates?.noiseRX) +
-    "；累计发送 " +
+    t("；累计发送 ") +
     units(data.noise_tx_bytes || 0) +
-    " · 接收 " +
+    t(" · 接收 ") +
     units(data.noise_rx_bytes || 0) +
-    "。业务负载：发送 " +
+    t("。业务负载：发送 ") +
     value(rates?.businessTX) +
-    " · 接收 " +
+    t(" · 接收 ") +
     value(rates?.businessRX) +
-    "。负载统计不含协议开销，包含通道重发。"
+    t("。负载统计不含协议开销，包含通道重发。")
   );
 }
 function noiseActivityText(activity) {
-  if (!activity) return "当前运行程序未提供隧道忙闲状态，更新程序并重启后可查看暂停原因。";
+  if (!activity) return t("当前运行程序未提供隧道忙闲状态，更新程序并重启后可查看暂停原因。");
   const offline = activity.offline
-    ? "离线保留 " +
+    ? t("离线保留 ") +
       activity.offline +
-      " 个会话、" +
+      t(" 个会话、") +
       activity.offline_streams +
-      " 条业务连接，等待客户端重连；离线期间无法发送噪音。"
+      t(" 条业务连接，等待客户端重连；离线期间无法发送噪音。")
     : "";
   const disconnected = activity.last_disconnect
-    ? "最近隧道断开（" +
-      new Date(activity.last_disconnect_ms).toLocaleTimeString([], { hour12: false }) +
+    ? t("最近隧道断开（") +
+      new Date(activity.last_disconnect_ms).toLocaleTimeString(sgateI18n.language(), { hour12: false }) +
       "）：" +
       activity.last_disconnect +
-      "。"
+      t("。")
     : "";
-  if (!activity.tunnels) return "没有在线隧道，无法发送白噪音。" + offline + disconnected;
+  if (!activity.tunnels) return t("没有在线隧道，无法发送白噪音。") + offline + disconnected;
   const buffered = activity.receive_buffer_bytes
-    ? "业务应用待接收 " + units(activity.receive_buffer_bytes) + "；隧道仍可读取噪音和心跳。"
+    ? t("业务应用待接收 ") + units(activity.receive_buffer_bytes) + t("；隧道仍可读取噪音和心跳。")
     : "";
   const reasons = [
-    ["suppressed_traffic", "业务活跃暂停"],
-    ["suppressed_idle", "空闲策略关闭"],
-    ["suppressed_empty", "无业务连接策略关闭"],
-    ["disabled", "发送间隔关闭"],
+    ["suppressed_traffic", t("业务活跃暂停")],
+    ["suppressed_idle", t("空闲策略关闭")],
+    ["suppressed_empty", t("无业务连接策略关闭")],
+    ["disabled", t("发送间隔关闭")],
   ]
     .filter(([key]) => activity[key] > 0)
-    .map(([key, label]) => label + " " + activity[key] + " 条");
+    .map(([key, label]) => label + " " + activity[key] + t(" 条"));
   return (
-    "在线隧道 " +
+    t("在线隧道 ") +
     activity.tunnels +
-    " 条：业务活跃 " +
+    t(" 条：业务活跃 ") +
     activity.traffic +
-    "，空闲 " +
+    t("，空闲 ") +
     activity.idle +
-    "，无业务连接 " +
+    t("，无业务连接 ") +
     activity.empty +
-    "；当前允许噪音 " +
+    t("；当前允许噪音 ") +
     activity.permitted +
-    " 条。" +
+    t(" 条。") +
     offline +
     buffered +
     (reasons.length
-      ? "暂停原因：" + reasons.join("、") + "。"
-      : "按配置间隔发送，采样间隙可能为零。") +
-    (activity.suppressed_traffic ? "少量后台业务数据也会刷新空闲阈值。" : "")
+      ? t("暂停原因：") + reasons.join(t("、")) + t("。")
+      : t("按配置间隔发送，采样间隙可能为零。")) +
+    (activity.suppressed_traffic ? t("少量后台业务数据也会刷新空闲阈值。") : "")
   );
 }
 function chartMetric() {
   switch ($("traffic-metric").value) {
     case "noise":
-      return { keys: ["noiseTX", "noiseRX"], title: "白噪音负载带宽" };
+      return { keys: ["noiseTX", "noiseRX"], title: t("白噪音负载带宽") };
     case "business":
-      return { keys: ["businessTX", "businessRX"], title: "业务负载带宽" };
+      return { keys: ["businessTX", "businessRX"], title: t("业务负载带宽") };
     default:
-      return { keys: ["tx", "rx"], title: "实时网络带宽" };
+      return { keys: ["tx", "rx"], title: t("实时网络带宽") };
   }
 }
 // 绘制与命中使用同一套 CSS 像素坐标，不受高分屏 canvas 缩放影响。
@@ -1079,13 +1064,13 @@ function drawChartTimeAxis(c, geometry) {
     // 窄屏仍保留5秒刻度，仅减少文字以免重叠。
     if (index % labelEvery) continue;
     c.textAlign = "center";
-    c.fillText(new Date(time).toLocaleTimeString([], { hour12: false }), x, geometry.bottom + 20);
+    c.fillText(new Date(time).toLocaleTimeString(sgateI18n.language(), { hour12: false }), x, geometry.bottom + 20);
   }
 }
 function chartHoverRate(value) {
-  if (!Number.isFinite(value)) return "未提供";
+  if (!Number.isFinite(value)) return t("未提供");
   return value < 1024
-    ? value.toLocaleString([], { maximumSignificantDigits: 4 }) + " B/s"
+    ? value.toLocaleString(sgateI18n.language(), { maximumSignificantDigits: 4 }) + " B/s"
     : units(value, true);
 }
 function drawChartHover(c, geometry, metric, max) {
@@ -1117,11 +1102,11 @@ function drawChartHover(c, geometry, metric, max) {
     c.fill();
   }
   const time = Number.isFinite(point.time_ms)
-    ? new Date(point.time_ms).toLocaleTimeString([], { hour12: false })
-    : "时间未提供";
-  $("traffic-tooltip-time").textContent = "采样时间 " + time;
-  $("traffic-tooltip-tx").textContent = chartHoverRate(point[metric.keys[0]]);
-  $("traffic-tooltip-rx").textContent = chartHoverRate(point[metric.keys[1]]);
+    ? new Date(point.time_ms).toLocaleTimeString(sgateI18n.language(), { hour12: false })
+    : t("时间未提供");
+  localText($("traffic-tooltip-time"), () => t("采样时间 ") + time);
+  localText($("traffic-tooltip-tx"), () => chartHoverRate(point[metric.keys[0]]));
+  localText($("traffic-tooltip-rx"), () => chartHoverRate(point[metric.keys[1]]));
   tooltip.hidden = false;
   // 靠近边缘时将提示框收进图内，避免遮挡或溢出页面。
   const width = tooltip.offsetWidth,
@@ -1165,7 +1150,7 @@ $("traffic-chart").addEventListener("pointercancel", clearChartHover);
 window.addEventListener("blur", clearChartHover);
 function drawChart() {
   const metric = chartMetric();
-  $("traffic-chart-title").textContent = metric.title;
+  localText($("traffic-chart-title"), () => t(metric.title));
   const canvas = $("traffic-chart");
   if (canvas.clientWidth === 0) return;
   const ratio = window.devicePixelRatio || 1,
@@ -1237,9 +1222,9 @@ function drawChart() {
 $("traffic-metric").addEventListener("change", drawChart);
 $("login-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  $("auth-error").textContent = "";
+  localText($("auth-error"), () => "");
   if (state.setup_required && $("login-pass").value !== $("login-confirm").value) {
-    $("auth-error").textContent = "两次输入的密码不一致";
+    localText($("auth-error"), () => t("两次输入的密码不一致"));
     return;
   }
   const b = $("login-button");
@@ -1255,7 +1240,7 @@ $("login-form").addEventListener("submit", async (e) => {
     });
     await refreshAuth();
   } catch (e) {
-    $("auth-error").textContent = errorText(e);
+    localText($("auth-error"), () => errorText(e));
   } finally {
     b.disabled = false;
   }
@@ -1265,31 +1250,31 @@ document.querySelectorAll("[data-tab]").forEach((b) =>
   b.addEventListener("click", () => {
     document.querySelectorAll("[data-tab]").forEach((x) => x.classList.toggle("selected", x === b));
     document.querySelectorAll(".tab").forEach((x) => (x.hidden = x.id !== b.dataset.tab));
-    $("page-title").textContent = {
-      overview: "实时概览",
-      configuration: "代理配置",
-      account: "账号与会话",
-    }[b.dataset.tab];
+    localText($("page-title"), () => ({
+      overview: t("实时概览"),
+      configuration: t("代理配置"),
+      account: t("账号与会话"),
+    }[b.dataset.tab]));
     drawChart();
   }),
 );
 $("reload-config").addEventListener("click", () =>
-  loadConfig().catch((e) => notice(errorText(e), true)),
+  loadConfig().catch((e) => notice(() => errorText(e), true)),
 );
 // 以服务端实际应用结果提示，不根据点击的按钮猜测是否发生重启。
-function configSaveMessage(result, key = "配置") {
-  if (result.applied) return key + "已应用，业务代理已重启。管理登录继续有效。";
+function configSaveMessage(result, key = t("配置")) {
+  if (result.applied) return key + t("已应用，业务代理已重启。管理登录继续有效。");
   if (result.live_applied?.length) {
     const overrides = result.runtime?.cli_overrides || [];
     const covered = result.live_applied.filter((name) => overrides.includes(name));
     return (
       key +
-      "已保存，在线参数已更新，无需重启代理。" +
-      (covered.length ? "命令行覆盖项仍使用启动值：" + covered.join("、") + "。" : "") +
-      (result.requires_restart ? "其他配置仍待应用或重启。" : "")
+      t("已保存，在线参数已更新，无需重启代理。") +
+      (covered.length ? t("命令行覆盖项仍使用启动值：") + covered.join(t("、")) + t("。") : "") +
+      (result.requires_restart ? t("其他配置仍待应用或重启。") : "")
     );
   }
-  return key + "已校验并保存，尚未重启代理。";
+  return key + t("已校验并保存，尚未重启代理。");
 }
 async function saveConfig(apply) {
   if (serviceRestarting || configSaving) return;
@@ -1304,9 +1289,9 @@ async function saveConfig(apply) {
       body: JSON.stringify(configPayload(fields, apply)),
     });
     await loadConfig();
-    notice(configSaveMessage(result));
+    notice(() => configSaveMessage(result));
   } catch (e) {
-    notice(errorText(e), true);
+    notice(() => errorText(e), true);
   } finally {
     configSaving = false;
     setConfigBusy(serviceRestarting);
@@ -1326,7 +1311,7 @@ async function restartService() {
   const buttons = [$("restart-service"), $("save-config"), $("apply-config")];
   serviceRestarting = true;
   buttons.forEach((button) => (button.disabled = true));
-  notice("正在请求 acl_master 重启服务，等待管理连接恢复…");
+  notice(() => t("正在请求 acl_master 重启服务，等待管理连接恢复…"));
   try {
     try {
       await api("restart-service", {
@@ -1339,9 +1324,9 @@ async function restartService() {
     }
     await waitForServiceRestart(oldPID);
     await refreshAuth();
-    if (state.authenticated) notice("服务已由 acl_master 重启，登录会话继续有效。");
+    if (state.authenticated) notice(() => t("服务已由 acl_master 重启，登录会话继续有效。"));
   } catch (error) {
-    notice(errorText(error), true);
+    notice(() => errorText(error), true);
   } finally {
     serviceRestarting = false;
     buttons.forEach((button) => (button.disabled = false));
@@ -1367,13 +1352,13 @@ async function waitForServiceRestart(oldPID) {
     }
   }
   throw new Error(
-    "等待服务恢复超时，请检查 acl_master 日志；若管理地址或证书已更改，请打开新地址。",
+    t("等待服务恢复超时，请检查 acl_master 日志；若管理地址或证书已更改，请打开新地址。"),
   );
 }
 $("account-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   if ($("account-password").value !== $("account-confirm").value) {
-    notice("两次输入的新密码不一致", true);
+    notice(() => t("两次输入的新密码不一致"), true);
     return;
   }
   const b = e.submitter;
@@ -1390,7 +1375,7 @@ $("account-form").addEventListener("submit", async (e) => {
     e.target.reset();
     await refreshAuth();
   } catch (e) {
-    notice(errorText(e), true);
+    notice(() => errorText(e), true);
   } finally {
     b.disabled = false;
   }
@@ -1399,7 +1384,11 @@ window.addEventListener("resize", () => {
   chartPointer = null;
   drawChart();
 });
+sgateI18n.init(() => {
+  validateConfigForm(null, false);
+  drawChart();
+});
 refreshAuth().catch((e) => {
-  $("auth-title").textContent = "无法连接管理服务";
-  $("auth-help").textContent = errorText(e);
+  localText($("auth-title"), () => t("无法连接管理服务"));
+  localText($("auth-help"), () => errorText(e));
 });

@@ -17,6 +17,7 @@ func externalWeb(t *testing.T) string {
 	for name, body := range map[string]string{
 		"index.html": "<!doctype html><title>external v1</title>",
 		"app.css":    "body { color: navy; }",
+		"i18n.js":    "const translations = {};",
 		"app.js":     "console.log('external v1');",
 	} {
 		if e := os.WriteFile(filepath.Join(dir, name), []byte(body), 0600); e != nil {
@@ -36,6 +37,7 @@ func TestExternalWebFilesReloadWithoutRestart(t *testing.T) {
 		"/":               "index.html",
 		"/assets/app.css": "app.css",
 		"/assets/app.js":  "app.js",
+		"/assets/i18n.js": "i18n.js",
 	} {
 		get := func() *httptest.ResponseRecorder {
 			w := httptest.NewRecorder()

@@ -23,6 +23,7 @@ func setRoute(service *mastergin.GinService, proxyPath string, management http.H
 			group.GET("/", admin)
 			group.GET("/assets/app.css", admin)
 			group.GET("/assets/app.js", admin)
+			group.GET("/assets/i18n.js", admin)
 			group.GET("/api/status", admin)
 			group.POST("/api/setup", admin)
 			group.POST("/api/login", admin)

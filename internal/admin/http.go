@@ -18,7 +18,7 @@ import (
 const secretMarker = "__SGATE_KEEP_EXISTING_PASSWORD__"
 
 func validateWebDir(dir string) error {
-	for _, name := range []string{"index.html", "app.css", "app.js"} {
+	for _, name := range []string{"index.html", "app.css", "i18n.js", "app.js"} {
 		if _, e := regularRead(filepath.Join(dir, name), 1<<20); e != nil {
 			return fmt.Errorf("management web-dir requires readable regular files: %s: %w", filepath.Join(dir, name), e)
 		}
@@ -103,6 +103,7 @@ func (h *Handler) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		problem(w, 403, "请求来源不允许")
 		return
 	}
+	h.migrateSharedCookie(w, r)
 	if r.URL.Path == "/api/status" && r.Method == "GET" {
 		h.getStatus(w, r)
 		return
@@ -157,7 +158,7 @@ func setSecurityHeaders(w http.ResponseWriter) {
 
 // serveAsset 只暴露明确列出的页面文件，每次从磁盘读取以支持热更新。
 func (h *Handler) serveAsset(w http.ResponseWriter, r *http.Request) bool {
-	if !(r.URL.Path == "/" || r.URL.Path == "/assets/app.css" || r.URL.Path == "/assets/app.js") {
+	if !(r.URL.Path == "/" || r.URL.Path == "/assets/app.css" || r.URL.Path == "/assets/app.js" || r.URL.Path == "/assets/i18n.js") {
 		return false
 	}
 	if r.Method != "GET" {
@@ -454,6 +455,15 @@ func (h *Handler) getConfig(w http.ResponseWriter) {
 		problem(w, 500, "无法生成配置表单："+e.Error())
 		return
 	}
+	if h.view.Role == "server" {
+		visible := fields[:0]
+		for _, field := range fields {
+			if field.Key != "admin_listen" {
+				visible = append(visible, field)
+			}
+		}
+		fields = visible
+	}
 	for i := range fields {
 		for _, key := range h.view.LiveFields {
 			if key == fields[i].Key && h.view.ApplyLive != nil {
@@ -509,6 +519,10 @@ func (h *Handler) putConfig(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if !h.authorizeMutation(w, r) {
+		return
+	}
+	if _, exists := input.Fields["admin_listen"]; h.view.Role == "server" && exists {
+		problem(w, 400, "服务端管理与代理共用监听端口，请修改 listen 或 master_service")
 		return
 	}
 	current, e := regularRead(h.view.AppConfigPath, 1<<20)

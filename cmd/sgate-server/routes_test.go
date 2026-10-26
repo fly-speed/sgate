@@ -91,7 +91,7 @@ func TestRoutesKeepManagementSeparateAndSupportPathChanges(t *testing.T) {
 	for _, route := range service.Servers[0].Engine.Routes() {
 		registered[route.Method+" "+route.Path] = true
 	}
-	for _, endpoint := range []string{"GET /tunnel", "GET /admin/api/status", "POST /admin/api/restart-service", "PUT /admin/api/config"} {
+	for _, endpoint := range []string{"GET /tunnel", "GET /admin/assets/i18n.js", "GET /admin/api/status", "POST /admin/api/restart-service", "PUT /admin/api/config"} {
 		if !registered[endpoint] {
 			t.Fatal("route missing from central registration:", endpoint)
 		}

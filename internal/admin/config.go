@@ -1,4 +1,4 @@
-// Package admin serves the optional, independent sgate management interface.
+// Package admin serves client management separately and server management on the proxy listener.
 package admin
 
 import (
@@ -33,15 +33,19 @@ func LoadConfig(path string) (Config, error) {
 	return loadConfig(path, false)
 }
 
-// LoadSharedConfig retains Listen for the existing cookie identity, but does
-// not use the legacy management address or certificate to bind a second socket.
+// LoadSharedConfig has no management listen address; the proxy owns HTTP/TLS.
 func LoadSharedConfig(path string) (Config, error) { return loadConfig(path, true) }
 
 func loadConfig(path string, shared bool) (Config, error) {
 	c := Config{shared: shared}
 	fs := flag.NewFlagSet("management", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	fs.StringVar(&c.Listen, "listen", "127.0.0.1:9081", "management address")
+	if shared {
+		// 仅兼容读取旧文件；不保存、不验证，也不用于监听或会话身份。
+		fs.Func("listen", "obsolete shared management option (ignored)", func(string) error { return nil })
+	} else {
+		fs.StringVar(&c.Listen, "listen", "127.0.0.1:9081", "client management address")
+	}
 	fs.StringVar(&c.WebDir, "web-dir", "../web/admin", "external management HTML, CSS and JavaScript directory")
 	fs.StringVar(&c.UsersFile, "users-file", "admin-users.json", "credential file")
 	fs.StringVar(&c.SessionDir, "session-dir", "admin-sessions", "persistent session directory")
