@@ -1,6 +1,6 @@
 # 默认编译两端；首次构建由 Go 自动下载缺少的模块，无需 Python 或 vendor。
 .DEFAULT_GOAL := build
-.PHONY: all help check deps build client server install install-files test framework-test vendor-sync stress weaknet vet clean
+.PHONY: all help check deps build client server _build-client _build-server install install-files test framework-test vendor-sync stress weaknet vet clean
 
 ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 GO ?= go
@@ -18,6 +18,8 @@ MOD ?= mod
 GO_CMD = $(GO) -C "$(ROOT)"
 OUTPUT_DIR := $(if $(filter /%,$(BINDIR)),$(BINDIR),$(ROOT)/$(BINDIR))
 SGATE_STRESS_REPORT ?= $(ROOT)/artifacts/stress.json
+# install 后的 client/server 是安装选择项，不运行同名编译目标。
+INSTALL_ROLE := $(if $(filter client,$(MAKECMDGOALS)),$(if $(filter server,$(MAKECMDGOALS)),all,client),$(if $(filter server,$(MAKECMDGOALS)),server,all))
 
 all: build
 
@@ -27,6 +29,8 @@ help:
 	  'make client          仅编译客户端' \
 	  'make server          仅编译服务端' \
 	  'make install         安装已编译程序到 /opt/soft/sgate（先以普通用户 make build）' \
+	  'make install server  只安装服务端（先以普通用户 make server）' \
+	  'make install client  只安装客户端（先以普通用户 make client）' \
 	  'make install-files   make install 的兼容别名，同样不调用 Go' \
 	  '正式配置为 sgate-client.cf / sgate-server.cf；专用示例安装到 samples/' \
 	  'make deps            预下载 go.mod 锁定的模块' \
@@ -51,20 +55,28 @@ check:
 deps: check
 	$(GO_CMD) mod download
 
-build: client server
+build: _build-client _build-server
 
-client: check
+ifneq ($(filter install install-files,$(MAKECMDGOALS)),)
+client server:
+	@:
+else
+client: _build-client
+server: _build-server
+endif
+
+_build-client: check
 	mkdir -p "$(OUTPUT_DIR)"
 	$(GO_CMD) build -mod=$(MOD) $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -o "$(OUTPUT_DIR)/sgate-client" ./cmd/sgate-client
 
-server: check
+_build-server: check
 	mkdir -p "$(OUTPUT_DIR)"
 	$(GO_CMD) build -mod=$(MOD) $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -o "$(OUTPUT_DIR)/sgate-server" ./cmd/sgate-server
 
 # 普通用户先 make build，再 sudo make install；sudo 环境无需 Go。
 # DESTDIR 仅用于暂存打包；写入配置的运行路径始终使用 PREFIX。
 install install-files:
-	sh "$(ROOT)/scripts/install.sh" "$(ROOT)" "$(OUTPUT_DIR)" "$(PREFIX)" "$(DESTDIR)"
+	sh "$(ROOT)/scripts/install.sh" "$(ROOT)" "$(OUTPUT_DIR)" "$(PREFIX)" "$(DESTDIR)" "$(INSTALL_ROLE)"
 
 # vendor 不包含依赖自身的测试文件，因此框架测试始终读取 third_party。
 framework-test: check

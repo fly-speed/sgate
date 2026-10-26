@@ -16,10 +16,31 @@ case "$destdir" in
 esac
 destination=$destdir$prefix
 
-configs='sgate-client.cf sgate-server.cf'
-scripts='sgate-client-start.sh sgate-client-stop.sh sgate-server-start.sh sgate-server-stop.sh'
-sample_configs='ssh-client.cf ssh-server.cf vpn-client.cf vpn-server.cf web-client.cf'
-sample_scripts='sshc-start.sh sshc-stop.sh sshd-start.sh sshd-stop.sh'
+role=${5:-all}
+case "$role" in
+    all) roles='client server' ;;
+    client|server) roles=$role ;;
+    *) printf '未知安装类型：%s；请选择 all、client 或 server。\n' "$role" >&2; exit 1 ;;
+esac
+programs=''
+configs=''
+scripts=''
+sample_configs=''
+sample_scripts=''
+licenses='go-service'
+for selected in $roles; do
+    programs="$programs sgate-$selected"
+    configs="$configs sgate-$selected.cf"
+    scripts="$scripts sgate-$selected-start.sh sgate-$selected-stop.sh"
+    sample_configs="$sample_configs ssh-$selected.cf vpn-$selected.cf"
+    if [ "$selected" = client ]; then
+        sample_configs="$sample_configs web-client.cf"
+        sample_scripts="$sample_scripts sshc-start.sh sshc-stop.sh"
+    else
+        sample_scripts="$sample_scripts sshd-start.sh sshd-stop.sh"
+        licenses="$licenses gin-service"
+    fi
+done
 assets='index.html app.css i18n.js app.js'
 
 require_file() {
@@ -30,7 +51,7 @@ require_file() {
 }
 
 # 先检查全部输入，避免缺失页面或程序时留下半套安装文件。
-for name in sgate-client sgate-server; do
+for name in $programs; do
     if [ ! -f "$binary_dir/$name" ] || [ ! -x "$binary_dir/$name" ]; then
         printf '程序不存在或不可执行：%s\n请先以普通用户执行 make build，再执行 sudo make install。\n' "$binary_dir/$name" >&2
         exit 1
@@ -39,7 +60,7 @@ done
 for name in $configs $scripts LICENSE; do require_file "$source_dir/$name"; done
 for name in $sample_configs $sample_scripts README.md; do require_file "$source_dir/samples/$name"; done
 for name in $assets; do require_file "$source_dir/web/admin/$name"; done
-for name in gin-service go-service; do require_file "$source_dir/third_party/$name/LICENSE"; done
+for name in $licenses; do require_file "$source_dir/third_party/$name/LICENSE"; done
 if [ ! -f "$source_dir/sgate.key" ] && ! [ -e "$destination/conf/sgate.key" ] && ! [ -L "$destination/conf/sgate.key" ]; then
     if [ ! -r /dev/urandom ]; then
         printf '%s\n' '无法读取随机源 /dev/urandom，请先准备 sgate.key。' >&2
@@ -66,13 +87,13 @@ replace_file() {
     mv -f "$stage/file" "$2"
 }
 
-for name in sgate-client sgate-server; do replace_file "$binary_dir/$name" "$destination/sbin/$name" 0755; done
+for name in $programs; do replace_file "$binary_dir/$name" "$destination/sbin/$name" 0755; done
 for name in $scripts; do replace_file "$source_dir/$name" "$destination/bin/$name" 0755; done
 for name in $sample_scripts; do replace_file "$source_dir/samples/$name" "$destination/samples/$name" 0755; done
 replace_file "$source_dir/samples/README.md" "$destination/samples/README.md" 0644
 for name in $assets; do replace_file "$source_dir/web/admin/$name" "$destination/web/admin/$name" 0644; done
 replace_file "$source_dir/LICENSE" "$destination/LICENSE" 0644
-for name in gin-service go-service; do
+for name in $licenses; do
     replace_file "$source_dir/third_party/$name/LICENSE" "$destination/share/licenses/$name.LICENSE" 0644
 done
 
