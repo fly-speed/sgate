@@ -158,9 +158,18 @@ func TestInvalidTestCommandsDoNotDialBackend(t *testing.T) {
 				_ = ws.WriteMessage(websocket.BinaryMessage, data)
 				_ = ws.WriteMessage(websocket.BinaryMessage, data)
 			}
-			_, _, err := ws.ReadMessage()
-			if kind != "duplicate" && err == nil {
-				t.Fatal("invalid command accepted")
+			var reply probeReply
+			err := readProbeMessage(ws, crypt, &reply)
+			switch kind {
+			case "unknown", "wrong-id", "plaintext", "tampered":
+				if err != nil || reply.Status != "failed" || reply.Stage != "command" || reply.Error == "" {
+					t.Fatalf("missing command error response: %+v %v", reply, err)
+				}
+			case "duplicate":
+			default:
+				if err == nil {
+					t.Fatal("incomplete/oversized command accepted")
+				}
 			}
 			ws.Close()
 			waitFor(t, "probe released", func() bool { return len(f.server.probeGate) == 0 })

@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -21,11 +22,13 @@ const (
 	probeCommandProtocol = "command-v1"
 	probeConnectCommand  = "TEST_CONNECT"
 	probeResultCommand   = "TEST_CONNECT_RESULT"
-	maxProbeMessageBytes = 1024
+	maxProbeMessageBytes = 4096
 )
 
 // ProbeResult describes a short-lived authenticated test, not application health.
 type ProbeResult struct {
+	Error     string `json:"error,omitempty"`
+	Target    string `json:"target,omitempty"`
 	TestID    string `json:"test_id"`
 	OK        bool   `json:"ok"`
 	Stage     string `json:"stage"`
@@ -41,6 +44,9 @@ type probeCommand struct {
 }
 
 type probeReply struct {
+	Error   string `json:"error,omitempty"`
+	Target  string `json:"target,omitempty"`
+	Stage   string `json:"stage,omitempty"`
 	Status  string `json:"status"`
 	Command string `json:"command"`
 	TestID  string `json:"test_id"`
@@ -56,13 +62,14 @@ func (c *Client) Probe(ctx context.Context) (result ProbeResult) {
 	logf("test_id=%s command=%s started", id, probeConnectCommand)
 	defer func() {
 		result.ElapsedMS = time.Since(started).Milliseconds()
-		logf("test_id=%s command=%s completed: ok=%t stage=%s reason=%q elapsed_ms=%d",
-			id, probeConnectCommand, result.OK, result.Stage, result.Detail, result.ElapsedMS)
+		logf("test_id=%s command=%s completed: ok=%t stage=%s target=%q reason=%q error=%q elapsed_ms=%d",
+			id, probeConnectCommand, result.OK, result.Stage, result.Target, result.Detail, result.Error, result.ElapsedMS)
 	}()
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	probing := *c
 	u, _ := url.Parse(probing.cfg.URL)
+	result.Target = u.Query().Get("addr")
 	query := u.Query()
 	query.Set(probeQuery, "1")
 	u.RawQuery = query.Encode()
@@ -70,7 +77,7 @@ func (c *Client) Probe(ctx context.Context) (result ProbeResult) {
 	// Legacy servers reject this unknown resumed ID without retaining a session.
 	ws, crypt, status, err := probing.dial(ctx, id, true)
 	if err != nil {
-		result.Detail = err.Error()
+		result.fail(ctx, err)
 		switch status {
 		case http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound, http.StatusConflict, http.StatusServiceUnavailable:
 			result.Detail = handshakeStatusReason(status)
@@ -83,29 +90,38 @@ func (c *Client) Probe(ctx context.Context) (result ProbeResult) {
 	result.Stage = "command"
 	reply, err := exchangeProbeCommand(ws, crypt, id, logf)
 	if err != nil {
-		result.Detail = err.Error()
+		result.fail(ctx, err)
 		return result
 	}
-	result.Stage, result.OK = "backend", reply.Reason == 0
+	result.Stage, result.OK, result.Target = "backend", reply.Reason == 0, reply.Target
+	if reply.Stage != "" {
+		result.Stage = reply.Stage
+	}
 	if result.OK {
 		result.Detail = "Tunnel authenticated; backend TCP reachable"
 	} else {
 		result.Detail = resetReasonText([]byte{reply.Reason})
+		if result.Stage == "command" {
+			result.Detail = "connectivity test command rejected"
+		}
+		result.Error = reply.Error
+		if result.Error == "" {
+			result.Error = result.Detail
+		}
 	}
 	return result
 }
 
 func exchangeProbeCommand(ws *websocket.Conn, crypt *codec, id string, logf func(string, ...any)) (probeReply, error) {
 	if err := writeProbeMessage(ws, crypt, probeCommand{Command: probeConnectCommand, TestID: id}); err != nil {
-		return probeReply{}, err
+		return probeReply{}, fmt.Errorf("send TEST_CONNECT: %w", err)
 	}
 	logf("test_id=%s command=%s sent", id, probeConnectCommand)
 	var reply probeReply
 	if err := readProbeMessage(ws, crypt, &reply); err != nil {
-		return probeReply{}, err
+		return probeReply{}, fmt.Errorf("receive TEST_CONNECT_RESULT: %w", err)
 	}
-	if reply.Command != probeResultCommand || reply.TestID != id || reply.Reason > resetUnreachable ||
-		(reply.Status != "ok" && reply.Status != "failed") || (reply.Status == "ok") != (reply.Reason == 0) {
+	if !validProbeReply(reply, id) {
 		return probeReply{}, errors.New("invalid connectivity test result command or test ID")
 	}
 	logf("test_id=%s command=%s received: status=%s reason=%d", id, probeResultCommand, reply.Status, reply.Reason)
@@ -245,18 +261,19 @@ func (s *Server) serveProbe(w http.ResponseWriter, r *http.Request, request tunn
 func (s *Server) executeProbeCommand(ctx context.Context, ws *websocket.Conn, crypt *codec, request tunnelRequest, peer string) {
 	var command probeCommand
 	if err := readProbeMessage(ws, crypt, &command); err != nil {
-		s.cfg.Options.Logf("test_id=%s command=%s rejected: peer=%q reason=%v", request.id, probeConnectCommand, peer, err)
+		s.rejectProbeCommand(ctx, ws, crypt, request, err)
 		return
 	}
 	if command.Command != probeConnectCommand || command.TestID != request.id {
-		s.cfg.Options.Logf("test_id=%s command=%s rejected: peer=%q reason=invalid command or test ID", request.id, probeConnectCommand, peer)
+		s.rejectProbeCommand(ctx, ws, crypt, request, errors.New("invalid command or test ID"))
 		return
 	}
 	s.cfg.Options.Logf("test_id=%s command=%s received: peer=%q target=%q", request.id, probeConnectCommand, peer, request.target)
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", request.target)
-	reply := probeReply{Command: probeResultCommand, TestID: request.id, Status: "ok"}
+	reply := probeReply{Command: probeResultCommand, TestID: request.id, Status: "ok", Stage: "backend", Target: probeDiagnostic(request.target)}
 	if err != nil {
 		reply.Status, reply.Reason = "failed", dialResetReason(err)
+		reply.Error = probeDiagnostic(err.Error())
 		s.cfg.Options.Logf("test_id=%s command=%s backend failed: target=%q reason=%v", request.id, probeConnectCommand, request.target, err)
 	} else {
 		_ = conn.Close()

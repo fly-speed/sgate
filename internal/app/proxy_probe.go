@@ -2,7 +2,7 @@ package app
 
 import (
 	"context"
-	"errors"
+	"log"
 
 	"sgate/internal/admin"
 	"sgate/internal/tunnel"
@@ -16,21 +16,21 @@ func (c *controller) testProxy(ctx context.Context, mapping admin.ProxyMapping) 
 	switch {
 	case c.role != "client":
 		c.mu.Unlock()
-		return tunnel.ProbeResult{}, errors.New("mapping tests require a client")
+		return proxyConfigFailure(mapping.Listen, "mapping tests require a client")
 	case len(c.current.proxies) > 0:
 		config = c.current.proxies[0].config
 	case c.current.client != nil:
 		config = *c.current.client
 	default:
 		c.mu.Unlock()
-		return tunnel.ProbeResult{}, errors.New("no effective client configuration")
+		return proxyConfigFailure(mapping.Listen, "no effective client configuration")
 	}
 	c.mu.Unlock()
 	config.URL, config.Addr = mapping.Server, mapping.Addr
 	config.Options.Stats, config.Options.Live = nil, nil
 	client, err := tunnel.NewClient(config)
 	if err != nil {
-		return tunnel.ProbeResult{}, err
+		return proxyConfigFailure(mapping.Listen, err.Error())
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -39,4 +39,10 @@ func (c *controller) testProxy(ctx context.Context, mapping admin.ProxyMapping) 
 		defer stop()
 	}
 	return client.Probe(ctx), nil
+}
+
+// NewClient validation errors contain fixed messages, never credential values.
+func proxyConfigFailure(listen, reason string) (tunnel.ProbeResult, error) {
+	log.Printf("mapping connectivity test failed: listen=%q stage=config reason=%q", listen, reason)
+	return tunnel.ProbeResult{Stage: "config", Detail: "invalid effective client configuration or mapping", Error: reason}, nil
 }

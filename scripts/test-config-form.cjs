@@ -1161,3 +1161,14 @@ test("mapping results distinguish encrypted command failures and show the correl
   assert.match(vm.runInContext("configInputs[0].rows[0].result.textContent", context), /连通失败.*测试命令.*测试编号：.*cdcd/);
   assert.equal(vm.runInContext("configInputs[0].rows[0].testButton.disabled", context), false);
 });
+
+test("failed mapping tests display target and detailed error with safe text and bilingual labels", async () => {
+  const { context } = await page();
+  vm.runInContext('renderConfigFields([{key:"proxies",kind:"proxies",group:"代理与通道",mappings:[{listen:"127.0.0.1:9001",server:"ws://localhost:8081/tunnel"}]}],{})', context);
+  context.api = async () => ({ok:false,stage:"backend",detail:"backend TCP connection refused",error:"dial tcp 127.0.0.1:8088: connect: connection refused <text>",target:"127.0.0.1:8088",elapsed_ms:2,test_id:"ab".repeat(32)});
+  await vm.runInContext("testProxyMapping(configInputs[0].rows[0])", context);
+  assert.match(vm.runInContext("configInputs[0].rows[0].result.textContent", context), /连通失败.*目标：127.0.0.1:8088.*错误：dial tcp.*connection refused <text>.*测试编号：/);
+  context.drawChart = () => {};
+  vm.runInContext('sgateI18n.setLanguage("en")', context);
+  assert.match(vm.runInContext("configInputs[0].rows[0].result.textContent", context), /Connection failed.*Target: 127.0.0.1:8088.*Error: dial tcp.*Test ID:/);
+});

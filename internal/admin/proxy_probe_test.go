@@ -117,3 +117,22 @@ func TestProxyConnectivityAPIBoundedConcurrency(t *testing.T) {
 		t.Fatal("probe permits leaked")
 	}
 }
+
+func TestProxyConnectivityAPIReturnsErrorDetails(t *testing.T) {
+	h, cfg := adminFixture(t)
+	cookie, csrf := setupAccount(t, h, cfg)
+	h.view.TestProxy = func(context.Context, ProxyMapping) (tunnel.ProbeResult, error) {
+		return tunnel.ProbeResult{TestID: strings.Repeat("ab", 32), Stage: "backend", Detail: "backend TCP connection refused", Target: "127.0.0.1:8088", Error: "dial tcp 127.0.0.1:8088: connect: connection refused"}, nil
+	}
+	mapping := ProxyMapping{Listen: "127.0.0.1:9001", Server: "ws://localhost:8081/tunnel"}
+	w := request(h, "POST", "/api/proxy-test", mapping, cookie, csrf, "")
+	data := object(t, w)
+	if w.Code != 200 || data["ok"] != false || data["error"] != "dial tcp 127.0.0.1:8088: connect: connection refused" || data["target"] != "127.0.0.1:8088" || data["test_id"] != strings.Repeat("ab", 32) {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	h.view.TestProxy = func(context.Context, ProxyMapping) (tunnel.ProbeResult, error) { return tunnel.ProbeResult{}, nil }
+	w = request(h, "POST", "/api/proxy-test", mapping, cookie, csrf, "")
+	if data := object(t, w); data["error"] == "" || data["detail"] == "" {
+		t.Fatal("empty failure", w.Body.String())
+	}
+}

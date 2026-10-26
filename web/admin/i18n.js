@@ -3,6 +3,17 @@
 // UI translations only: editable values and protocol/configuration keys are never translated.
 const sgateI18n = (() => {
   const messages = {
+  "连通性测试失败，请查看客户端和服务端日志": "connectivity test failed; check client and server logs",
+  "客户端配置": "Client configuration",
+  "目标：": "Target: ",
+  "错误：": "Error: ",
+  "测试已取消": "connectivity test canceled",
+  "等待加密测试结果超时": "timed out waiting for connectivity test command result",
+  "连接隧道超时": "tunnel connection timed out",
+  "收到有效测试结果前连接已断开": "test connection closed before a valid result was received",
+  "测试命令被服务端拒绝": "connectivity test command rejected",
+  "生效的客户端配置或映射参数无效": "invalid effective client configuration or mapping",
+  "没有生效的客户端配置": "no effective client configuration",
   "测试命令": "Test command",
   "测试编号：": "Test ID: ",
   "测试结果命令或测试编号无效": "invalid connectivity test result command or test ID",

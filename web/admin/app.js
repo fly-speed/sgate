@@ -651,8 +651,11 @@ async function testProxyMapping(row) {
     if ((row.testVersion || 0) !== version) return;
     row.result.classList.toggle("bad", !result.ok);
     localText(row.result, () => (result.ok ? t("连通成功") : t("连通失败")) + " · " +
-      (result.stage === "backend" ? t("后端 TCP") : result.stage === "command" ? t("测试命令") : t("隧道连接")) + " · " +
-      t(result.detail) + " · " + result.elapsed_ms + " ms" +
+      (result.stage === "backend" ? t("后端 TCP") : result.stage === "command" ? t("测试命令") : result.stage === "config" ? t("客户端配置") : t("隧道连接")) + " · " +
+      t(result.detail) +
+      (result.target ? " · " + t("目标：") + result.target : "") +
+      (result.error && result.error !== result.detail ? " · " + t("错误：") + t(result.error) : "") +
+      " · " + result.elapsed_ms + " ms" +
       (result.test_id ? " · " + t("测试编号：") + result.test_id : ""));
   } catch (error) {
     if ((row.testVersion || 0) !== version) return;
