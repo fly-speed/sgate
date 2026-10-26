@@ -67,7 +67,8 @@ service sgate-client {
     # A nonempty array replaces top-level listen/server/addr; password, key, TLS, reconnect, heartbeat and padding settings are shared.
     # Local ports must differ between mappings; send-addr=false removes addr from every mapping URL.
     # Example: proxies = '[{"listen":"127.0.0.1:9001","server":"ws://127.0.0.1:8081/tunnel?addr=127.0.0.1:22"},{"listen":"127.0.0.1:9002","server":"ws://127.0.0.1:8081/tunnel?addr=127.0.0.1:8088"}]'
-    # In managed mode, also set master_service to 127.0.0.1|9001,127.0.0.1|9002; port changes require a framework service restart.
+    # UI saves update mappings online and synchronize master_service; managed port changes automatically restart the client via master_ctl.
+    # Manual file edits must keep master_service and mapping ports consistent; standalone updates preserve unchanged mappings.
     proxies = '[{"listen":"127.0.0.1:9000","server":"ws://127.0.0.1:8081/tunnel","addr":"127.0.0.1:8080"}]'
     # Server WebSocket URL using ws:// or wss://; its path must match the server path setting.
     server = ws://127.0.0.1:8081/tunnel

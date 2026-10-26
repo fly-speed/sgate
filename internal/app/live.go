@@ -112,17 +112,37 @@ func (c *controller) applyLive(keys []string) error {
 	}
 	value := c.current.liveConfig()
 	copyLiveFields(&value, next.liveConfig(), keys)
+	if _, err = tunnel.NewLiveSettings(value); err != nil {
+		return err
+	}
+	if slices.Contains(keys, "proxies") || slices.Contains(keys, "master_service") {
+		if err = c.replaceClientMappings(next); err != nil {
+			return err
+		}
+	}
+	if c.role == "server" && slices.Contains(keys, "allowed-targets") {
+		if err = c.worker.server.UpdateAllowedTargets(next.server.AllowedTargets); err != nil {
+			return err
+		}
+	}
 	if err = c.worker.live.Update(value); err != nil {
 		return err
 	}
 	c.current = c.current.withLiveConfig(value)
+	if c.role == "server" && slices.Contains(keys, "allowed-targets") {
+		c.current.server.AllowedTargets = slices.Clone(next.server.AllowedTargets)
+	}
 	c.lastError = ""
 	return nil
 }
 
 func (c *controller) liveFields() []string {
 	fields := tunnel.LiveFields()
+	if c.role == "client" && c.tcp != nil {
+		fields = append(fields, "proxies", "master_service")
+	}
 	if c.role == "server" {
+		fields = append(fields, "allowed-targets")
 		fields = slices.DeleteFunc(fields, func(key string) bool { return key == "reconnect-min" || key == "reconnect-max" })
 	}
 	return fields

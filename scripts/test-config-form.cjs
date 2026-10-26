@@ -111,6 +111,33 @@ test("form groups rows, masks secrets and submits only explicitly changed values
   assert.equal(row.children[0].children[2].textContent, "命令行优先");
 });
 
+test("configuration sections retain independent collapse state for each role", async () => {
+  const { context, elements } = await page();
+  let groups = elements.get("config-fields").children;
+  assert.equal(groups[0].className, "config-group");
+  assert.equal(groups[0].children[0].textContent, "代理与通道");
+  assert.equal(groups[0].open, true);
+  groups[0].open = false;
+  groups[0].listeners.toggle();
+  assert.equal(groups[1].open, true);
+  vm.runInContext('renderConfigFields(fields, {})', context);
+  groups = elements.get("config-fields").children;
+  assert.equal(groups[0].open, false);
+  assert.equal(groups[1].open, true);
+  vm.runInContext('renderConfigFields(fields, {}, "server")', context);
+  assert.equal(elements.get("config-fields").children[0].open, true);
+});
+
+test("invalid fields reveal their collapsed section before validation feedback", async () => {
+  const { context, elements } = await page();
+  const group = elements.get("config-fields").children[0];
+  group.open = false;
+  context.collapsedGroup = group;
+  vm.runInContext('configInputs[1].input.closest = () => collapsedGroup; configInputs[1].rule = {required:true}; configInputs[1].input.value = ""; configInputs[1].dirty = true; validateConfigForm()', context);
+  assert.equal(group.open, true);
+  assert.equal(vm.runInContext('configInputs[1].input.focused', context), true);
+});
+
 test("failed save retains edits and restores controls without exposing raw content", async () => {
   const { context, elements } = await page();
   let payload;
@@ -1171,4 +1198,32 @@ test("failed mapping tests display target and detailed error with safe text and 
   context.drawChart = () => {};
   vm.runInContext('sgateI18n.setLanguage("en")', context);
   assert.match(vm.runInContext("configInputs[0].rows[0].result.textContent", context), /Connection failed.*Target: 127.0.0.1:8088.*Error: dial tcp.*Test ID:/);
+});
+
+test("managed mapping save automatically restarts and waits for the replacement without losing drafts", async () => {
+  const { context, elements } = await page();
+  context.fields.push({key:"proxies",kind:"proxies",group:"代理与通道",mappings:[{listen:"127.0.0.1:9001",server:"ws://localhost:8081/tunnel"}]});
+  vm.runInContext('renderConfigFields(fields,{}); revision="old"; configInputs[1].input.value="keep-draft";configInputs[1].input.listeners.input();configInputs[3].rows[0].listen.value="127.0.0.1:9002";configInputs[3].rows[0].listen.listeners.input()', context);
+  const calls=[];
+  context.renderRuntime=()=>{};
+  context.waitForServiceRestart=async (pid)=>{assert.equal(pid,101);return {revision:"new",runtime:{pid:102,running:true}}};
+  context.api=async(route,options)=>{
+    calls.push(route);
+    if(route==="config")return {revision:"saved",requires_restart:true,service_restart_required:true,runtime:{pid:101}};
+    assert.equal(route,"restart-service");assert.equal(JSON.parse(options.body).expected_pid,101);return {restart_requested:true};
+  };
+  await vm.runInContext("saveConfigField(configInputs[3])",context);
+  assert.deepEqual(calls,["config","restart-service"]);
+  assert.equal(vm.runInContext("revision",context),"new");
+  assert.equal(vm.runInContext("configInputs[1].input.value",context),"keep-draft");
+  assert.match(elements.get("notice").textContent,/映射已生效/);
+  assert.equal(vm.runInContext("serviceRestarting || configSaving",context),false);
+});
+
+test("failed automatic mapping restart never displays success", async () => {
+ const {context,elements}=await page();
+ context.api=async()=>{throw Object.assign(new Error("master_ctl unavailable"),{status:409})};
+ await assert.rejects(vm.runInContext("restartSavedMappings({runtime:{pid:101}})",context),/master_ctl unavailable/);
+ assert.doesNotMatch(elements.get("notice").textContent,/映射已生效/);
+ assert.equal(vm.runInContext("serviceRestarting",context),false);
 });

@@ -14,3 +14,9 @@ Managed listeners stay owned by acl_master. Standalone listener replacement uses
 exclusive net.Listen and supports rollback after a failed rebind. Framework state
 FD 5 and inherited sockets are closed on shutdown; unrelated inherited sockets are
 removed before acquisition. No global Stop/Wait channel is used by this opt-in API.
+
+UpdateAddresses transactionally binds standalone additions before committing the
+listener set, retaining the current worker, unchanged accept loops and accepted
+connections. Removed accept loops are joined individually; wildcard and port-zero
+identities are retained. Managed listener updates still require acl_master to
+replace its sockets; the application exposes that as an automatic service restart.

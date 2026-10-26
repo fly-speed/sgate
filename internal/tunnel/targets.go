@@ -40,6 +40,25 @@ func validateSelectableTarget(address string) error {
 	return nil
 }
 
+// UpdateAllowedTargets replaces admission policy atomically. Existing sessions
+// keep their bound backend; new requests, including reconnects, use this list.
+func (s *Server) UpdateAllowedTargets(targets []string) error {
+	allowed := make(map[string]struct{}, len(targets))
+	for _, target := range targets {
+		if err := validateSelectableTarget(target); err != nil {
+			return err
+		}
+		allowed[target] = struct{}{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return errors.New("server is closed")
+	}
+	s.allowedTargets = allowed
+	return nil
+}
+
 func (s *Server) selectTarget(w http.ResponseWriter, r *http.Request) (string, bool) {
 	query, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil {
@@ -56,7 +75,10 @@ func (s *Server) selectTarget(w http.ResponseWriter, r *http.Request) (string, b
 		http.Error(w, "invalid addr", http.StatusBadRequest)
 		return "", false
 	}
-	if _, allowed := s.allowedTargets[addresses[0]]; !allowed {
+	s.mu.Lock()
+	_, allowed := s.allowedTargets[addresses[0]]
+	s.mu.Unlock()
+	if !allowed {
 		s.cfg.Options.Logf("tunnel target rejected: session=%s peer=%q target=%q reason=target not in allowed-targets", r.Header.Get("X-Sgate-Session"), r.RemoteAddr, addresses[0])
 		http.Error(w, "target not allowed", http.StatusForbidden)
 		return "", false

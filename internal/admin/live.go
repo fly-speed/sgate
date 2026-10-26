@@ -2,8 +2,12 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"slices"
 )
+
+// ErrMappingServiceRestart requests a process restart after saving managed port changes.
+var ErrMappingServiceRestart = errors.New("acl_master mapping listener change requires service restart")
 
 // 待重启标记只比较非热参数，避免在线更新误报“待应用”。
 func (h *Handler) restartDigest(content []byte) string {

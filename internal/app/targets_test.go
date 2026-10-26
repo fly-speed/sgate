@@ -111,3 +111,42 @@ func TestClientSendAddrConfigApplyAndCLIOverride(t *testing.T) {
 		})
 	}
 }
+
+func TestAllowedTargetsOnlineKeepsWorkerAndPendingConfig(t *testing.T) {
+	for _, override := range []bool{false, true} {
+		name := "file"
+		var args []string
+		if override {
+			name = "cli"
+			args = []string{"-allowed-targets", "localhost:8088"}
+		}
+		t.Run(name, func(t *testing.T) {
+			c := newController(t, "server", "target = 127.0.0.1:9001\nallowed-targets = localhost:8088\n", args...)
+			worker := c.worker
+			setConfig(t, c, "target", "127.0.0.1:9999")
+			for _, value := range []string{"localhost:8089", "", "localhost:8090,localhost:8091"} {
+				setConfig(t, c, "allowed-targets", value)
+				if err := c.applyLive([]string{"allowed-targets"}); err != nil {
+					t.Fatal(err)
+				}
+				if c.worker != worker || c.generation != 1 || c.current.server.Target != "127.0.0.1:9001" {
+					t.Fatal("online update restarted worker or applied pending target")
+				}
+				next, err := c.load("")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(c.current.server.AllowedTargets, next.server.AllowedTargets) {
+					t.Fatal("online policy lost CLI priority")
+				}
+			}
+			if !override {
+				before := append([]string(nil), c.current.server.AllowedTargets...)
+				setConfig(t, c, "allowed-targets", "localhost:0")
+				if err := c.applyLive([]string{"allowed-targets"}); err == nil || !reflect.DeepEqual(c.current.server.AllowedTargets, before) {
+					t.Fatal("invalid policy replaced runtime")
+				}
+			}
+		})
+	}
+}

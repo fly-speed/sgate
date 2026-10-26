@@ -365,13 +365,13 @@ env.setdefault(
     ),
 )
 for role in ["client", "server"]:
-    cmd = ["go", "build", "-overlay", str(mapfile)]
+    cmd = ["go", "build", "-mod=mod", "-overlay", str(mapfile)]
     if a.race:
         cmd += ["-race"]
     cmd += ["-o", str(out / ("sgate-" + role + ("-race" if a.race else ""))), "./cmd/sgate-" + role]
     subprocess.run(cmd, cwd=repo, env=env, check=True)
 if a.check_registry:
-    command = ["go", "test", "-overlay", str(mapfile)]
+    command = ["go", "test", "-mod=mod", "-overlay", str(mapfile)]
     if a.race:
         command.append("-race")
     command += ["./internal/tunnel", "-run", "^TestDiagnosticRegistry", "-count=10"]
@@ -383,6 +383,7 @@ manifest = {
     "created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     "race": a.race,
     "instrumented": True,
+    "module_mode": "mod",
     "watch_goroutines": a.watch_goroutines,
     "registry_check": a.check_registry,
     "overlay": str(mapfile),
@@ -390,12 +391,14 @@ manifest = {
     "build_inputs": {},
     "binaries": {},
 }
-inputs = [repo / "go.mod", repo / "go.sum", repo / "vendor/modules.txt"]
+inputs = [repo / "go.mod", repo / "go.sum"]
 for pattern in [
     "cmd/**/*.go",
     "internal/**/*.go",
-    "vendor/github.com/acl-dev/gin-service/*.go",
-    "vendor/github.com/acl-dev/go-service/*.go",
+    "third_party/gin-service/*.go",
+    "third_party/go-service/*.go",
+    "third_party/gin-service/go.mod",
+    "third_party/go-service/go.mod",
 ]:
     inputs.extend(path for path in repo.glob(pattern) if not path.name.endswith("_test.go"))
 if a.watch_goroutines:

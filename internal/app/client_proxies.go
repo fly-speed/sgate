@@ -1,12 +1,10 @@
 package app
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"strings"
 	"sync"
@@ -88,88 +86,3 @@ func (l *proxyListener) Accept() (net.Conn, error) {
 }
 func (l *proxyListener) Close() error   { l.once.Do(func() { close(l.done) }); return nil }
 func (l *proxyListener) Addr() net.Addr { return l.address }
-
-func runClientProxies(parent context.Context, listener net.Listener, routes []clientProxy) error {
-	ctx, cancel := context.WithCancel(parent)
-	defer cancel()
-	listeners := make(map[string]*proxyListener, len(routes))
-	clients := make([]*tunnel.Client, 0, len(routes))
-	for _, route := range routes {
-		client, err := tunnel.NewClient(route.config)
-		if err != nil {
-			return err
-		}
-		clients = append(clients, client)
-		size := route.config.Options.MaxStreams
-		if size <= 0 {
-			size = 128
-		}
-		address, _ := net.ResolveTCPAddr("tcp", route.Listen)
-		listeners[route.port] = &proxyListener{incoming: make(chan net.Conn, size), done: make(chan struct{}), address: address}
-	}
-	// 任一运行循环失败时停止整个工作实例，避免管理界面误报部分启动成功。
-	failures := make(chan error, len(routes)+1)
-	var workers sync.WaitGroup
-	for index, route := range routes {
-		workers.Add(1)
-		go func(c *tunnel.Client, l *proxyListener) {
-			defer workers.Done()
-			failures <- c.Run(ctx, l)
-			cancel()
-		}(clients[index], listeners[route.port])
-	}
-	workers.Add(1)
-	go func() {
-		defer workers.Done()
-		failures <- dispatchClientProxies(ctx, listener, listeners)
-		cancel()
-	}()
-	<-ctx.Done()
-	listener.Close()
-	for _, l := range listeners {
-		l.Close()
-	}
-	workers.Wait()
-	close(failures)
-	for _, l := range listeners {
-		for len(l.incoming) > 0 {
-			(<-l.incoming).Close()
-		}
-	}
-	for err := range failures {
-		if err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, context.Canceled) {
-			return err
-		}
-	}
-	return nil
-}
-
-func dispatchClientProxies(ctx context.Context, listener net.Listener, routes map[string]*proxyListener) error {
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			return err
-		}
-		_, port, err := net.SplitHostPort(conn.LocalAddr().String())
-		route := routes[port]
-		if err != nil || route == nil {
-			log.Printf("TCP connection rejected: listen=%q peer=%q reason=no matching proxy mapping", conn.LocalAddr(), conn.RemoteAddr())
-			conn.Close()
-			continue
-		}
-		select {
-		case <-ctx.Done():
-			conn.Close()
-			return nil
-		case <-route.done:
-			if ctx.Err() == nil {
-				log.Printf("TCP connection rejected: listen=%q peer=%q reason=proxy mapping stopped", conn.LocalAddr(), conn.RemoteAddr())
-			}
-			conn.Close()
-		case route.incoming <- conn:
-		default:
-			log.Printf("TCP connection rejected: listen=%q peer=%q reason=proxy accept queue full", conn.LocalAddr(), conn.RemoteAddr())
-			conn.Close() // 有界入站队列，单端口过载不能阻塞其他代理。
-		}
-	}
-}

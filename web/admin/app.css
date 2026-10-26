@@ -489,16 +489,25 @@ dd {
   border-radius: 0 0 10px 10px;
   padding: 20px;
 }
-#config-fields fieldset {
+#config-fields .config-group {
   border: 0;
   padding: 0;
   margin: 0 0 24px;
   min-width: 0;
 }
-#config-fields legend {
+#config-fields .config-group > summary {
   font-weight: 600;
   font-size: 14px;
   padding: 8px 0;
+  cursor: pointer;
+  color: var(--ink, #20313b);
+}
+#config-fields .config-group > summary:hover {
+  background: #f4f7fa;
+}
+#config-fields .config-group > summary:focus-visible {
+  outline: 2px solid var(--accent, #07856f);
+  outline-offset: 3px;
 }
 .config-row {
   display: grid;

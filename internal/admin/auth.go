@@ -51,14 +51,15 @@ type attempt struct {
 // Handler 在代理热重启期间继续存在，登录身份由持久会话文件恢复。
 // mu 串行化账号、会话和配置文件操作；authGate 限制同时进行的密码派生计算。
 type Handler struct {
-	cfg             Config
-	view            View
-	cookie          string
-	startupRevision string
-	mu              sync.Mutex
-	attempts        map[string]attempt
-	authGate        chan struct{}
-	probeGate       chan struct{}
+	cfg                   Config
+	view                  View
+	cookie                string
+	startupRevision       string
+	mappingRestartPending bool
+	mu                    sync.Mutex
+	attempts              map[string]attempt
+	authGate              chan struct{}
+	probeGate             chan struct{}
 }
 
 func randomToken() (string, error) {

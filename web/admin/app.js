@@ -10,6 +10,8 @@ let state = {},
   servicePID = 0,
   serviceRestarting = false;
 let configRole = "";
+// Keep each role's expanded sections across saves and language changes.
+const configGroupOpen = new Map();
 let configInputs = [],
   configSaving = false,
   loggingOut = false;
@@ -34,10 +36,14 @@ function renderConfigFields(fields, runtime, role) {
   for (const field of fields) {
     let group = groups.get(field.group);
     if (!group) {
-      group = document.createElement("fieldset");
-      const legend = document.createElement("legend");
-      localText(legend, () => t(field.group));
-      group.append(legend);
+      group = document.createElement("details");
+      group.className = "config-group";
+      const groupKey = configRole + ":" + field.group;
+      group.open = configGroupOpen.get(groupKey) ?? true;
+      group.addEventListener("toggle", () => configGroupOpen.set(groupKey, group.open));
+      const summary = document.createElement("summary");
+      localText(summary, () => t(field.group));
+      group.append(summary);
       container.append(group);
       groups.set(field.group, group);
     }
@@ -469,6 +475,10 @@ function validateConfigForm(single = null, report = true) {
     }
   }
   if (first && report) {
+    // Validation must reveal a collapsed section before focusing its control.
+    const control = first.input || first.controls?.[0];
+    const group = control?.closest?.("details.config-group");
+    if (group) group.open = true;
     notice(() => first.key + t("：") + t(first.error), true);
     first.input?.focus?.();
     first.input?.reportValidity?.();
@@ -499,7 +509,7 @@ function renderProxyMappings(group, field, overridden) {
   localText(help, () => (t("每行将一个本地端口映射到远程服务。后端地址可选，须在服务端允许列表内；没有映射时使用下面的单代理配置。") +
     (overridden ? t(" 当前由命令行 proxies 覆盖，保存后仍以命令行为准。") : "") +
     " " + t("测试使用本行地址及当前生效的密码、密钥、TLS 和 send-addr 设置；不保存、不监听本地端口，仅验证隧道及后端 TCP 连通性。") +
-    " " + t("保存映射时会自动同步 master_service；清空映射后使用单代理 listen。托管模式端口变化后，请保存并通过 acl_master 重启整个服务。")));
+    " " + t("保存后自动在线更新映射并同步 master_service，未修改映射的连接继续保留。清空时使用单代理 listen；托管模式端口变化会自动通过 acl_master 重启客户端，并中断当前业务连接。")));
   const saveButton = document.createElement("button");
   saveButton.type = "button";
   saveButton.className = "secondary config-save";
@@ -617,7 +627,12 @@ function renderProxyMappings(group, field, overridden) {
   saveButton.addEventListener("click", () => saveConfigField(entry));
   updateConfigSaveButton(entry);
   configInputs.push(entry);
-  header.append(title, saveButton);
+  if (field.validation?.live) {
+    const badge = document.createElement("span");
+    badge.className = "config-live";
+    localText(badge, () => t("支持在线修改"));
+    header.append(title, badge, saveButton);
+  } else header.append(title, saveButton);
   section.append(header, help, list, add);
   group.append(section);
 }
@@ -740,7 +755,8 @@ async function saveConfigField(entry) {
     localText($("pending-label"), () => ((Object.keys(configEdits()).length ? t("有未保存修改 · ") : "") +
       (pending ? t("已保存项待应用") : t("已保存项已生效"))));
     if (result.runtime) renderRuntime(result.runtime);
-    notice(() => configSaveMessage(result, entry.key) + t("其他未保存修改已保留。"));
+    if (result.service_restart_required) await restartSavedMappings(result);
+    else notice(() => configSaveMessage(result, entry.key) + t("其他未保存修改已保留。"));
   } catch (error) {
     notice(() => errorText(error), true);
   } finally {
@@ -1367,8 +1383,9 @@ async function saveConfig(apply) {
       method: "PUT",
       body: JSON.stringify(configPayload(fields, apply)),
     });
+    if (result.service_restart_required) await restartSavedMappings(result);
     await loadConfig();
-    notice(() => configSaveMessage(result));
+    if (!result.service_restart_required) notice(() => configSaveMessage(result));
   } catch (e) {
     notice(() => errorText(e), true);
   } finally {
@@ -1383,6 +1400,29 @@ $("config-form").addEventListener("submit", (event) => {
 $("save-config").addEventListener("click", () => saveConfig(false));
 $("apply-config").addEventListener("click", () => saveConfig(true));
 $("restart-service").addEventListener("click", restartService);
+
+// A saved managed port change needs master_ctl, because the parent still owns
+// inherited sockets. Wait for a new running PID; do not discard other drafts.
+async function restartSavedMappings(result) {
+  const oldPID = result.runtime?.pid || servicePID;
+  if (!oldPID) throw new Error(t("无法确定客户端进程，配置已保存，请刷新后重试重启"));
+  serviceRestarting = true;
+  setConfigBusy(true);
+  notice(() => t("映射已保存，正在通过 acl_master 重启客户端并等待恢复…"));
+  try {
+    try {
+      await api("restart-service", {method: "POST", body: JSON.stringify({expected_pid: oldPID})});
+    } catch (error) { if (error.status) throw error; }
+    const config = await waitForServiceRestart(oldPID);
+    revision = config.revision || revision;
+    if (config.runtime) renderRuntime(config.runtime);
+    localText($("pending-label"), () => (Object.keys(configEdits()).length ? t("有未保存修改 · ") : "") + t("已保存项已生效"));
+    notice(() => t("映射已生效，客户端已由 acl_master 重启，登录会话继续有效。其他未保存修改已保留。"));
+  } finally {
+    serviceRestarting = false;
+    setConfigBusy(configSaving);
+  }
+}
 
 async function restartService() {
   if (serviceRestarting || configSaving || !servicePID) return;
@@ -1416,16 +1456,16 @@ async function waitForServiceRestart(oldPID) {
   const deadline = Date.now() + 90000;
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 1000));
-    let runtime;
+    let runtime, config;
     try {
-      const config = await api("config");
+      config = await api("config");
       runtime = config.runtime || {};
     } catch (error) {
       if (error.status || !state.authenticated) throw error;
       // HTTP 监听重建期间继续轮询；只有新 PID 就绪才报告完成。
       continue;
     }
-    if (runtime.pid && runtime.pid !== oldPID && runtime.running) return;
+    if (runtime.pid && runtime.pid !== oldPID && runtime.running) return config;
     if (!runtime.service_restart_pending && runtime.last_error) {
       throw new Error(runtime.last_error);
     }

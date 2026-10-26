@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -24,6 +25,7 @@ type tcpListeners struct {
 	listeners []net.Listener
 	wg        sync.WaitGroup
 	started   bool
+	done      map[net.Listener]chan struct{}
 }
 type tcpLifecycle struct {
 	op          sync.Mutex
@@ -163,15 +165,26 @@ func (s *TcpService) startAcceptLocked() {
 		return
 	}
 	sockets.started = true
-	for _, l := range sockets.listeners {
+	s.startListenersLocked(sockets, sockets.listeners)
+}
+
+func (s *TcpService) startListenersLocked(sockets *tcpListeners, listeners []net.Listener) {
+	life := s.lifecycle
+	if sockets.done == nil {
+		sockets.done = make(map[net.Listener]chan struct{})
+	}
+	for _, l := range listeners {
+		done := make(chan struct{})
+		sockets.done[l] = done
 		sockets.wg.Add(1)
 		go func(l net.Listener) {
 			defer sockets.wg.Done()
+			defer close(done)
 			for {
 				conn, err := l.Accept()
 				if err != nil {
 					life.mu.Lock()
-					expected := life.closed || life.sockets != sockets
+					expected := life.closed || life.sockets != sockets || !slices.Contains(sockets.listeners, l)
 					if !expected {
 						life.err = err
 						life.cancel()
@@ -352,7 +365,7 @@ func (w *TCPWorker) Accept() (net.Conn, error) {
 		}
 	}
 }
-func (w *TCPWorker) Addr() net.Addr { return w.address }
+func (w *TCPWorker) Addr() net.Addr { w.mu.Lock(); defer w.mu.Unlock(); return w.address }
 func (w *TCPWorker) stop() {
 	w.mu.Lock()
 	if w.closed {

@@ -26,6 +26,7 @@ type definition struct {
 	shared   *sharedServer
 }
 type instance struct {
+	proxies  *clientProxyGroup
 	live     *tunnel.LiveSettings
 	cancel   context.CancelFunc
 	listener net.Listener
@@ -71,8 +72,15 @@ func (d definition) start(ctx context.Context, stats *tunnel.Stats) (*instance, 
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	i := &instance{live: live, cancel: cancel, listener: l, done: make(chan struct{})}
-	if len(d.proxies) > 0 {
-		go func() { i.err = runClientProxies(runCtx, l, d.proxies); close(i.done) }()
+	if d.tcp != nil && (len(d.proxies) > 0 || d.client != nil) {
+		group, err := newClientProxyGroup(runCtx, l, d.clientRoutes(l.Addr().String()))
+		if err != nil {
+			l.Close()
+			cancel()
+			return nil, err
+		}
+		i.proxies = group
+		go func() { i.err = group.run(); close(i.done) }()
 	} else if d.client != nil {
 		c, e := tunnel.NewClient(*d.client)
 		if e != nil {

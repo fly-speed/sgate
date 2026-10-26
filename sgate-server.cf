@@ -67,6 +67,7 @@ service sgate-server {
     target = 127.0.0.1:9001
     # Comma-separated allowed backends selectable through client addr; exact host:port matching, with IPs or domain names.
     # Empty disallows client-selected backends; requests without addr still use target above. Example: 127.0.0.1:8088,example.com:443
+    # Saved changes apply immediately to new tunnels and reconnects; existing tunnels continue. Explicit CLI values take priority.
     allowed-targets = "127.0.0.1:8080"
     # WebSocket tunnel path; must match the client server URL path. Management uses /admin/.
     path = /tunnel

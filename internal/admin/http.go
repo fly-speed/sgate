@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -493,7 +494,7 @@ func (h *Handler) getConfig(w http.ResponseWriter) {
 		"fields":               fields,
 		"content":              redactConfig(b),
 		"revision":             digest(b),
-		"requires_restart":     h.restartDigest(b) != h.startupRevision,
+		"requires_restart":     h.restartDigest(b) != h.startupRevision || h.mappingRestartPending,
 		"path":                 h.view.AppConfigPath,
 		"role":                 h.view.Role,
 		"password_placeholder": secretMarker,
@@ -623,8 +624,9 @@ func (h *Handler) commitConfig(
 		return
 	}
 	live := h.changedLiveFields(current, content)
-	requiresRestart := h.restartDigest([]byte(content)) != h.startupRevision
+	requiresRestart := h.restartDigest([]byte(content)) != h.startupRevision || h.mappingRestartPending
 	// 有非热参数待应用时保持原重启流程，否则不触碰现有隧道和业务连接。
+	mappingLive := slices.Contains(live, "proxies") || slices.Contains(live, "master_service")
 	restart := apply && (h.view.ApplyLive == nil || requiresRestart || len(live) == 0)
 	if restart {
 		if h.view.Apply == nil {
@@ -635,6 +637,12 @@ func (h *Handler) commitConfig(
 	} else if len(live) > 0 {
 		e = h.view.ApplyLive(live)
 	}
+	serviceRestart := errors.Is(e, ErrMappingServiceRestart)
+	if serviceRestart {
+		e = nil
+		live = nil
+		requiresRestart = true
+	}
 	if e != nil {
 		if restoreErr := atomicFile(h.view.AppConfigPath, current); restoreErr != nil {
 			problem(w, 500, "应用失败，且无法恢复配置文件："+e.Error())
@@ -643,13 +651,17 @@ func (h *Handler) commitConfig(
 		problem(w, 409, e.Error())
 		return
 	}
+	if mappingLive {
+		h.mappingRestartPending = serviceRestart
+		requiresRestart = h.restartDigest([]byte(content)) != h.startupRevision || h.mappingRestartPending
+	}
 	if restart {
 		h.startupRevision = h.restartDigest([]byte(content))
 		requiresRestart = false
 	}
 	result := map[string]any{
 		"revision": digest([]byte(content)), "requires_restart": requiresRestart,
-		"applied": restart, "live_applied": live,
+		"applied": restart, "live_applied": live, "service_restart_required": serviceRestart,
 	}
 	if len(synced) > 0 {
 		result["synced_fields"] = synced

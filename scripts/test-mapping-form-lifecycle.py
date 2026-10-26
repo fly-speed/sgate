@@ -78,6 +78,7 @@ class LiveLoad:
     def __init__(self, case, number):
         self.case, self.number = case, number
         self.records = 0
+        self.per_stream = [0] * 128
         self.errors, self.ready = [], set()
         self.connections = []
         self.lock = threading.Lock()
@@ -119,6 +120,7 @@ class LiveLoad:
                     )
                     with self.lock:
                         self.ready.add(index)
+                        self.per_stream[index] += 1
                         self.records += 1
                     sequence += 1
                     time.sleep(0.02)
@@ -137,7 +139,7 @@ class LiveLoad:
         before = self.case.client_admin.runtime()
         self.case.planned.set()
         result = action()
-        if allow_live and result and not result.get("applied"):
+        if result and not result.get("applied") and result.get("live_applied"):
             # Noise-only live updates deliberately retain the existing streams.
             # Verify traffic and generation before the fixture closes its sockets.
             self.case.planned.clear()
@@ -145,7 +147,7 @@ class LiveLoad:
             after = self.case.client_admin.runtime()
             assert after["pid"] == before["pid"]
             assert after["generation"] == before["generation"]
-            assert "noise-max-bytes" in result.get("live_applied", [])
+            assert result.get("live_applied")
             self.case.planned.set()
             for connection in self.connections:
                 try:
@@ -160,6 +162,38 @@ class LiveLoad:
         self.case.live_records += self.records
         multi.eventually(lambda: not any(b.active() for b in self.case.backends.values()), 15)
         self.case.planned.clear()
+
+    def online(self, action, routes, labels):
+        """Check every unchanged stream, then close fixture-owned sockets."""
+        before = self.case.client_admin.runtime()
+        progress = list(self.per_stream)
+        targets = {r["listen"]: labels[i] for i, r in enumerate(routes)}
+        keep = [i for i in range(128) if targets.get(self.case.active[i % len(self.case.active)]["listen"]) == self.case.expected(i)]
+        self.case.planned.set()
+        result = action()
+        if result.get("service_restart_required"):
+            assert self.case.args.mode == "managed"
+            self.case.restart_saved()
+            keep = []
+        else:
+            after = self.case.client_admin.runtime()
+            assert after["pid"] == before["pid"] and after["generation"] == before["generation"]
+            multi.eventually(lambda: all(self.per_stream[i] > progress[i] for i in keep) and not self.errors, 8)
+            assert all(self.threads[i].is_alive() for i in keep), "unchanged mapping disconnected"
+        for connection in self.connections:
+            try:
+                connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            connection.close()
+        for thread in self.threads:
+            thread.join(15)
+            assert not thread.is_alive()
+        assert not self.errors, self.errors
+        self.case.live_records += self.records
+        multi.eventually(lambda: not any(b.active() for b in self.case.backends.values()), 15)
+        self.case.planned.clear()
+        return result
 
 
 class Case(combined.Case):
@@ -333,22 +367,12 @@ class Case(combined.Case):
 
     def change_ports(self, routes, labels, label):
         load = LiveLoad(self, self.number + 1000)
-        if self.args.mode == "managed":
-            before = self.configs["client0"].read_text()
-            self.submit(routes, status=409)
-            assert self.configs["client0"].read_text() == before
-            load.alive()
-            addresses = [r["listen"] for r in routes] or [f"127.0.0.1:{self.ports['client0']}"]
-            service = ",".join(a.replace(":", "|") for a in addresses)
-            # The mapping form must synchronize framework listeners without a second edit.
-            self.submit(routes, apply=False)
-            values = self.client_admin.call("config")["fields"]
-            saved = next(row["value"] for row in values if row["key"] == "master_service")
-            assert {item.strip() for item in saved.split(",")} == set(service.split(",")), saved
-            load.alive()
-            load.reset(self.restart_saved)
-        else:
-            load.reset(lambda: self.submit(routes))
+        load.online(lambda: self.submit(routes, apply=False), routes, labels)
+        addresses = [r["listen"] for r in routes] or [f"127.0.0.1:{self.ports['client0']}"]
+        service = ",".join(a.replace(":", "|") for a in addresses)
+        values = self.client_admin.call("config")["fields"]
+        saved = next(row["value"] for row in values if row["key"] == "master_service")
+        assert {item.strip() for item in saved.split(",")} == set(service.split(",")), saved
         self.active = [dict(r) for r in routes] or [
             {
                 "listen": f"127.0.0.1:{self.ports['client0']}",
@@ -377,12 +401,9 @@ class Case(combined.Case):
             occupied.listen()
             bad = [dict(r) for r in self.routes]
             bad[0]["listen"] = f"127.0.0.1:{occupied.getsockname()[1]}"
-            if self.args.mode == "standalone":
-                load.reset(lambda: self.submit(bad, status=409))
-            else:
-                self.submit(bad, status=409)
-                load.alive()
-                load.reset(lambda: self.submit(self.routes))
+            self.submit(bad, status=409)
+            load.alive()
+            load.reset(lambda: self.submit(self.routes))
         assert self.configs["client0"].read_text() == original
         self.round("invalid-and-bind-rollback")
 
@@ -446,11 +467,8 @@ class Case(combined.Case):
             changed[0][key], changed[1][key] = changed[1].get(key, ""), changed[0].get(key, "")
         load = LiveLoad(self, self.number + 1000)
         stale = self.client_admin.call("config")["revision"]
-        self.submit(changed, apply=False)
-        load.alive()
+        load.online(lambda: self.submit(changed, apply=False), changed, ["B", "A", "C"])
         self.submit(changed, apply=False, status=409, revision=stale)
-        load.alive()
-        load.reset(lambda: self.submit(changed))
         self.routes = changed
         self.active = [dict(r) for r in changed]
         self.labels = ["B", "A", "C"]

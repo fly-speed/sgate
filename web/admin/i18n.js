@@ -3,6 +3,17 @@
 // UI translations only: editable values and protocol/configuration keys are never translated.
 const sgateI18n = (() => {
   const messages = {
+  "支持在线修改": "Online changes supported",
+  "保存后自动在线更新映射并同步 master_service，未修改映射的连接继续保留。清空时使用单代理 listen；托管模式端口变化会自动通过 acl_master 重启客户端，并中断当前业务连接。": "Saving updates mappings and master_service online, preserving unchanged mappings. Clearing uses the single-proxy listen address. Managed port changes automatically restart the client through acl_master, interrupting current business connections.",
+  "无法确定客户端进程，配置已保存，请刷新后重试重启": "Cannot identify the client process; configuration saved. Refresh before retrying the restart.",
+  "映射已保存，正在通过 acl_master 重启客户端并等待恢复…": "Mappings saved; restarting the client through acl_master and waiting for recovery…",
+  "映射已生效，客户端已由 acl_master 重启，登录会话继续有效。其他未保存修改已保留。": "Mappings active; the client restarted through acl_master. Your login session and other unsaved drafts are preserved.",
+  "master_service 必须与生效的映射监听地址一致": "master_service must match the effective mapping listeners",
+  "客户端映射运行器不可用": "Client mapping runtime is unavailable",
+  "在线映射更新需要固定的非零 TCP 端口": "Online mapping changes require fixed nonzero TCP ports",
+  "go-service 不支持在线监听更新，请升级客户端": "go-service does not support online listener updates; upgrade the client",
+  "缺少 acl_master 服务文件，无法自动重启": "Missing acl_master service configuration; cannot restart automatically",
+
   "连通性测试失败，请查看客户端和服务端日志": "connectivity test failed; check client and server logs",
   "客户端配置": "Client configuration",
   "目标：": "Target: ",

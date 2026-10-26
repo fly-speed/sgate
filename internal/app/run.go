@@ -156,6 +156,9 @@ func (c *controller) apply() error {
 		return e
 	}
 	if c.isManaged() && next.listen != c.current.listen {
+		if c.role == "client" && c.worker != nil && c.worker.proxies != nil && !sameClientAddresses(next.listen, c.current.listen) {
+			return c.replaceClientMappings(next)
+		}
 		return errors.New("监听端口由 acl_master 管理；请修改 .cf 的 master_service 并通过 master_ctl 重启服务")
 	}
 	controls, e := processSettings(c.path)

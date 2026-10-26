@@ -74,3 +74,36 @@ func TestRemovedOnlineFieldRestoresDefaultsWithoutClearingPendingChanges(t *test
 		t.Fatal("removed live field incorrectly requires restart")
 	}
 }
+
+func TestAllowedTargetsSaveIsLiveAndRollsBackFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.cf")
+	original := []byte("allowed-targets = localhost:8080\ntarget = localhost:9000\n")
+	if err := os.WriteFile(path, original, 0600); err != nil {
+		t.Fatal(err)
+	}
+	fail := false
+	h := &Handler{view: View{Role: "server", AppConfigPath: path, LiveFields: []string{"allowed-targets"}, ApplyLive: func(keys []string) error {
+		if !reflect.DeepEqual(keys, []string{"allowed-targets"}) {
+			t.Fatal(keys)
+		}
+		if fail {
+			return errors.New("invalid allowlist")
+		}
+		return nil
+	}, Apply: func() error { t.Fatal("allowlist save restarted proxy"); return nil }}}
+	h.startupRevision = h.restartDigest(original)
+	updated := "allowed-targets = localhost:8081\ntarget = localhost:9000\n"
+	w := httptest.NewRecorder()
+	h.commitConfig(w, original, updated, false, nil)
+	data, _ := os.ReadFile(path)
+	if w.Code != 200 || string(data) != updated || h.restartDigest(data) != h.startupRevision {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	fail = true
+	w = httptest.NewRecorder()
+	h.commitConfig(w, data, "allowed-targets = localhost:0\ntarget = localhost:9000\n", false, nil)
+	data, _ = os.ReadFile(path)
+	if w.Code != 409 || string(data) != updated {
+		t.Fatal("failed online save did not roll back", w.Code, string(data))
+	}
+}
