@@ -129,7 +129,10 @@ func TestResumeConfirmationControlsRetention(t *testing.T) {
 			t.Cleanup(s.Close)
 			h := httptest.NewServer(s)
 			t.Cleanup(h.Close)
-			old := newSession(s.ctx, s.cfg.Target, s.cfg.Options)
+			// Seed the same negotiated state that the current client creates.
+			oldOptions := s.cfg.Options
+			oldOptions.reportStreamErrors = true
+			old := newSession(s.ctx, s.cfg.Target, oldOptions)
 			if err := old.enqueue(opData, 1, []byte("retained")); err != nil {
 				t.Fatal(err)
 			}

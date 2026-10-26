@@ -30,6 +30,8 @@ type Options struct {
 	NoiseMinBytes        int
 	NoiseMaxBytes        int
 	Logf                 func(string, ...any)
+
+	reportStreamErrors bool // Negotiated per session; never enabled for legacy peers.
 }
 
 func (o Options) defaults() (Options, error) {

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net"
 	"net/http"
-	"strconv"
 	"sync"
 	"time"
 
@@ -40,6 +39,7 @@ type Server struct {
 	nonces         map[string]time.Time
 	closed         bool
 	allowedTargets map[string]struct{}
+	probeGate      chan struct{}
 }
 
 func NewServer(cfg ServerConfig) (*Server, error) {
@@ -89,6 +89,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		sessions:       make(map[string]*serverEntry),
 		nonces:         make(map[string]time.Time),
 		allowedTargets: allowedTargets,
+		probeGate:      make(chan struct{}, 4),
 	}
 	go s.reap()
 	return s, nil
@@ -154,6 +155,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	request, ok := s.authenticateRequest(r)
 	if !ok {
+		id := r.Header.Get("X-Sgate-Session")
+		if !validID(id) {
+			id = ""
+		}
+		s.cfg.Options.Logf("tunnel handshake rejected: session=%s peer=%q reason=invalid authentication or handshake fields", id, r.RemoteAddr)
 		http.NotFound(w, r)
 		return
 	}
@@ -161,11 +167,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if values, probe := r.URL.Query()[probeQuery]; probe {
+		if len(values) != 1 || values[0] != "1" {
+			s.rejectHandshake(w, r, request, "invalid connectivity test", http.StatusBadRequest)
+			return
+		}
+		s.serveProbe(w, r, request)
+		return
+	}
 	entry, resumeDeadline, ok := s.acquireSession(w, r, request)
 	if !ok {
 		return
 	}
-	id, nonce, ts, credential := request.id, request.nonce, request.timestamp, request.credential
+	id, nonce := request.id, request.nonce
 	confirmed := false
 	defer func() {
 		s.mu.Lock()
@@ -177,14 +191,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 	}()
 	serverNonce := randomID()
-	headers := http.Header{}
-	headers.Set("X-Sgate-Nonce", serverNonce)
-	window := ""
-	if request.peerWindow > 0 {
-		window = strconv.Itoa(s.cfg.Options.BufferBytes)
-		headers.Set(receiveWindowHeader, window)
-	}
-	headers.Set("X-Sgate-Auth", windowMAC(s.cfg.Key, window, protocol, "server", id, nonce, serverNonce, ts, credential))
+	headers := s.handshakeHeaders(request, serverNonce)
 	upgrader := websocket.Upgrader{
 		HandshakeTimeout: s.cfg.Options.DialTimeout,
 		ReadBufferSize:   chunkSize,
@@ -192,9 +199,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	ws, err := upgrader.Upgrade(w, r, headers)
 	if err != nil {
+		entry.session.opts.Logf("WebSocket upgrade failed: peer=%q reason=%v", r.RemoteAddr, err)
 		return
 	}
-	s.cfg.Options.Logf("tunnel connected")
+	entry.session.opts.Logf("tunnel connected: peer=%q", r.RemoteAddr)
 	crypt := newCodec(s.cfg.Key, id, nonce, serverNonce, false)
 	crypt.peerWindow = request.peerWindow
 	err = entry.session.transportConfirmed(
@@ -203,7 +211,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		resumeDeadline,
 		func() { confirmed = true },
 	)
-	s.cfg.Options.Logf("tunnel disconnected: %v", err)
+	entry.session.opts.Logf("tunnel disconnected: peer=%q reason=%v", r.RemoteAddr, err)
 }
 
 // tunnelRequest 是通过请求头完整性和密码校验后才能使用的握手信息。
@@ -211,6 +219,7 @@ type tunnelRequest struct {
 	id, nonce, timestamp, resume, credential string
 	target                                   string
 	peerWindow                               int
+	reportStreamErrors                       bool
 }
 
 func (s *Server) authenticateRequest(r *http.Request) (tunnelRequest, bool) {
@@ -241,6 +250,12 @@ func (s *Server) authenticateRequest(r *http.Request) (tunnelRequest, bool) {
 			return tunnelRequest{}, false
 		}
 	}
+	if values, ok := r.URL.Query()[streamErrorsQuery]; ok {
+		if len(values) != 1 || values[0] != "1" {
+			return tunnelRequest{}, false
+		}
+		request.reportStreamErrors = true
+	}
 	return request, true
 }
 
@@ -256,17 +271,18 @@ func (s *Server) acquireSession(w http.ResponseWriter, r *http.Request, request 
 	s.reapLocked(time.Now())
 	if s.closed {
 		s.mu.Unlock()
-		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		s.rejectHandshake(w, r, request, "unavailable", http.StatusServiceUnavailable)
 		return nil, time.Time{}, false
 	}
 	if _, exists := s.nonces[nonce]; exists {
 		s.mu.Unlock()
+		s.cfg.Options.Logf("tunnel handshake rejected: peer=%q session=%s reason=replayed nonce", r.RemoteAddr, id)
 		http.NotFound(w, r)
 		return nil, time.Time{}, false
 	}
 	if len(s.nonces) >= 100000 {
 		s.mu.Unlock()
-		http.Error(w, "busy", http.StatusServiceUnavailable)
+		s.rejectHandshake(w, r, request, "nonce cache limit reached", http.StatusServiceUnavailable)
 		return nil, time.Time{}, false
 	}
 	s.nonces[nonce] = time.Now()
@@ -286,26 +302,37 @@ func (s *Server) acquireSession(w http.ResponseWriter, r *http.Request, request 
 			serverNonce := randomID()
 			w.Header().Set("X-Sgate-Nonce", serverNonce)
 			w.Header().Set("X-Sgate-Auth", mac(s.cfg.Key, protocol, "gone", id, nonce, serverNonce, ts, credential))
-			http.Error(w, "session expired", http.StatusGone)
+			s.rejectHandshake(w, r, request, "session expired", http.StatusGone)
 			return nil, time.Time{}, false
 		}
 		if len(s.sessions) >= s.cfg.MaxSessions {
 			s.mu.Unlock()
-			http.Error(w, "busy", http.StatusServiceUnavailable)
+			s.rejectHandshake(w, r, request, "session limit reached", http.StatusServiceUnavailable)
 			return nil, time.Time{}, false
 		}
-		e = &serverEntry{session: newSession(s.ctx, request.target, s.cfg.Options), idle: time.Now()}
+		opts := s.cfg.Options
+		opts.reportStreamErrors = request.reportStreamErrors
+		logf, target := opts.Logf, request.target
+		opts.Logf = func(format string, args ...any) {
+			logf("session=%s target=%q "+format, append([]any{id, target}, args...)...)
+		}
+		e = &serverEntry{session: newSession(s.ctx, request.target, opts), idle: time.Now()}
 		s.sessions[id] = e
 	}
 	// 会话内所有流始终属于首次选择的后端；重连不能把旧缓存送给另一个服务。
 	if e.session.target != request.target {
 		s.mu.Unlock()
-		http.Error(w, "session target mismatch", http.StatusConflict)
+		s.rejectHandshake(w, r, request, "session target mismatch", http.StatusConflict)
+		return nil, time.Time{}, false
+	}
+	if e.session.opts.reportStreamErrors != request.reportStreamErrors {
+		s.mu.Unlock()
+		s.rejectHandshake(w, r, request, "session diagnostic capability mismatch", http.StatusConflict)
 		return nil, time.Time{}, false
 	}
 	if e.inUse {
 		s.mu.Unlock()
-		http.Error(w, "session busy", http.StatusConflict)
+		s.rejectHandshake(w, r, request, "session busy", http.StatusConflict)
 		return nil, time.Time{}, false
 	}
 	e.inUse = true

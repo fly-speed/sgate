@@ -497,7 +497,9 @@ function renderProxyMappings(group, field, overridden) {
   const help = document.createElement("p");
   help.className = "muted";
   localText(help, () => (t("每行将一个本地端口映射到远程服务。后端地址可选，须在服务端允许列表内；没有映射时使用下面的单代理配置。") +
-    (overridden ? t(" 当前由命令行 proxies 覆盖，保存后仍以命令行为准。") : "")));
+    (overridden ? t(" 当前由命令行 proxies 覆盖，保存后仍以命令行为准。") : "") +
+    " " + t("测试使用本行地址及当前生效的密码、密钥、TLS 和 send-addr 设置；不保存、不监听本地端口，仅验证隧道及后端 TCP 连通性。") +
+    " " + t("保存映射时会自动同步 master_service；清空映射后使用单代理 listen。托管模式端口变化后，请保存并通过 acl_master 重启整个服务。")));
   const saveButton = document.createElement("button");
   saveButton.type = "button";
   saveButton.className = "secondary config-save";
@@ -560,7 +562,11 @@ function renderProxyMappings(group, field, overridden) {
         localAttr(input, "placeholder", () => t(placeholder));
         input.value = value[key] || "";
         localAttr(input, "aria-label", () => t(name));
-        input.addEventListener("input", changed);
+        input.addEventListener("input", () => {
+          controls.testVersion = (controls.testVersion || 0) + 1;
+          if (controls.result) controls.result.hidden = true;
+          changed();
+        });
         controls[key] = input;
         const error = document.createElement("small");
         error.className = "config-error";
@@ -581,9 +587,24 @@ function renderProxyMappings(group, field, overridden) {
         draw(values);
         changed();
       });
-      entry.controls.push(remove);
+      const test = document.createElement("button");
+      test.type = "button";
+      test.className = "secondary proxy-test";
+      localText(test, () => controls.testing ? t("测试中…") : t("测试"));
+      localAttr(test, "aria-label", () => t("测试映射连通性"));
+      controls.testButton = test;
+      controls.result = document.createElement("small");
+      controls.result.className = "proxy-test-result";
+      controls.result.setAttribute("role", "status");
+      controls.result.setAttribute("aria-live", "polite");
+      controls.result.hidden = true;
+      test.addEventListener("click", () => testProxyMapping(controls));
+      const actions = document.createElement("div");
+      actions.className = "proxy-actions";
+      actions.append(test, remove);
+      entry.controls.push(test, remove);
       entry.rows.push(controls);
-      row.append(remove);
+      row.append(actions, controls.result);
       list.append(row);
     }
   };
@@ -601,6 +622,49 @@ function renderProxyMappings(group, field, overridden) {
   group.append(section);
 }
 
+// Keep testing separate from saving: unrelated drafts and mapping overrides
+// must not be submitted, persisted, or silently substituted into the probe.
+async function testProxyMapping(row) {
+  if (row.testing || configSaving || serviceRestarting) return;
+  try {
+    if (!configAddress(row.listen.value, true)) throw new Error(t("映射监听端口须为 1～65535，且不能重复"));
+    configURL(row.server.value, !row.addr.value);
+    if (row.addr.value) configAddress(row.addr.value);
+  } catch (error) {
+    row.result.hidden = false;
+    row.result.classList.toggle("bad", true);
+    localText(row.result, () => errorText(error));
+    return;
+  }
+  const version = row.testVersion || 0;
+  row.testing = true;
+  row.testButton.disabled = true;
+  row.result.hidden = false;
+  row.result.classList.toggle("bad", false);
+  localText(row.testButton, () => row.testing ? t("测试中…") : t("测试"));
+  localText(row.result, () => t("正在测试隧道和后端 TCP 连通性…"));
+  try {
+    const result = await api("proxy-test", {
+      method: "POST",
+      body: JSON.stringify({ listen: row.listen.value, server: row.server.value, addr: row.addr.value }),
+    });
+    if ((row.testVersion || 0) !== version) return;
+    row.result.classList.toggle("bad", !result.ok);
+    localText(row.result, () => (result.ok ? t("连通成功") : t("连通失败")) + " · " +
+      (result.stage === "backend" ? t("后端 TCP") : result.stage === "command" ? t("测试命令") : t("隧道连接")) + " · " +
+      t(result.detail) + " · " + result.elapsed_ms + " ms" +
+      (result.test_id ? " · " + t("测试编号：") + result.test_id : ""));
+  } catch (error) {
+    if ((row.testVersion || 0) !== version) return;
+    row.result.classList.toggle("bad", true);
+    localText(row.result, () => t("测试失败：") + errorText(error));
+  } finally {
+    row.testing = false;
+    row.testButton.disabled = configSaving || serviceRestarting;
+    localText(row.testButton, () => t("测试"));
+  }
+}
+
 function configEdits() {
   const edits = {};
   for (const entry of configInputs) {
@@ -615,7 +679,10 @@ function configEdits() {
 
 function setConfigBusy(busy) {
   for (const entry of configInputs) {
-    if (entry.kind === "proxies") entry.controls.forEach((control) => (control.disabled = busy));
+    if (entry.kind === "proxies") {
+      entry.controls.forEach((control) => (control.disabled = busy));
+      entry.rows.forEach((row) => { if (row.testing) row.testButton.disabled = true; });
+    }
     else entry.input.disabled = busy;
     updateConfigSaveButton(entry, busy);
   }
@@ -654,6 +721,15 @@ async function saveConfigField(entry) {
       body: JSON.stringify(configPayload({ [entry.key]: value }, false)),
     });
     revision = result.revision;
+    // 后端把框架监听与映射一起保存；只刷新关联值，保留其他行的草稿。
+    for (const [key, saved] of Object.entries(result.synced_fields || {})) {
+      const linked = configInputs.find((item) => item.key === key);
+      if (!linked || linked.kind === "proxies" || linked.secret) continue;
+      if (!linked.dirty) linked.input.value = saved;
+      linked.original = saved;
+      linked.dirty = linked.input.value !== saved;
+      updateConfigSaveButton(linked, configSaving || serviceRestarting);
+    }
     if (entry.kind === "proxies") entry.original = JSON.stringify(value);
     else entry.original = entry.input.value = entry.secret ? "" : value;
     entry.dirty = false;

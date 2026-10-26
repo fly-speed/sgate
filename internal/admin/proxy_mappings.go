@@ -10,12 +10,15 @@ import (
 	"strings"
 )
 
-// proxyMapping 是表单中的一个映射对；JSON 配置的编码只在服务端进行。
-type proxyMapping struct {
+// ProxyMapping 是表单中的一个映射对；JSON 配置的编码只在服务端进行。
+type ProxyMapping struct {
 	Listen string `json:"listen"`
 	Server string `json:"server"`
 	Addr   string `json:"addr,omitempty"`
 }
+
+// Keep internal configuration helpers using the same mapping representation.
+type proxyMapping = ProxyMapping
 
 func proxyMappings(raw string) ([]proxyMapping, error) {
 	mappings := []proxyMapping{}

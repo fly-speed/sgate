@@ -79,6 +79,7 @@ class LiveLoad:
         self.case, self.number = case, number
         self.records = 0
         self.errors, self.ready = [], set()
+        self.connections = []
         self.lock = threading.Lock()
         self.threads = [threading.Thread(target=self.stream, args=(i,)) for i in range(128)]
         case.planned.clear()
@@ -94,6 +95,8 @@ class LiveLoad:
             address = case.active[index % len(case.active)]["listen"]
             host, port = address.rsplit(":", 1)
             with socket.create_connection((host, int(port)), 5) as conn:
+                with self.lock:
+                    self.connections.append(conn)
                 conn.settimeout(20)
                 conn.sendall(multi.HELLO.pack(marker.encode(), self.number, index, LIVE))
                 sequence = 0
@@ -130,9 +133,26 @@ class LiveLoad:
         multi.eventually(lambda: self.records > before + 128 and not self.errors, 5)
         assert all(t.is_alive() for t in self.threads) and not self.errors, self.errors
 
-    def reset(self, action):
+    def reset(self, action, allow_live=False):
+        before = self.case.client_admin.runtime()
         self.case.planned.set()
-        action()
+        result = action()
+        if allow_live and result and not result.get("applied"):
+            # Noise-only live updates deliberately retain the existing streams.
+            # Verify traffic and generation before the fixture closes its sockets.
+            self.case.planned.clear()
+            self.alive()
+            after = self.case.client_admin.runtime()
+            assert after["pid"] == before["pid"]
+            assert after["generation"] == before["generation"]
+            assert "noise-max-bytes" in result.get("live_applied", [])
+            self.case.planned.set()
+            for connection in self.connections:
+                try:
+                    connection.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                connection.close()
         for thread in self.threads:
             thread.join(15)
             assert not thread.is_alive(), "old live stream did not close"
@@ -320,7 +340,11 @@ class Case(combined.Case):
             load.alive()
             addresses = [r["listen"] for r in routes] or [f"127.0.0.1:{self.ports['client0']}"]
             service = ",".join(a.replace(":", "|") for a in addresses)
-            self.submit(routes, apply=False, fields={"master_service": service})
+            # The mapping form must synchronize framework listeners without a second edit.
+            self.submit(routes, apply=False)
+            values = self.client_admin.call("config")["fields"]
+            saved = next(row["value"] for row in values if row["key"] == "master_service")
+            assert {item.strip() for item in saved.split(",")} == set(service.split(",")), saved
             load.alive()
             load.reset(self.restart_saved)
         else:
@@ -462,7 +486,8 @@ class Case(combined.Case):
         for index in range(3):
             load = LiveLoad(self, self.number + 1000)
             load.reset(
-                lambda: self.submit(self.routes, fields={"noise-max-bytes": str(512 + index * 64)})
+                lambda: self.submit(self.routes, fields={"noise-max-bytes": str(512 + index * 64)}),
+                allow_live=True,
             )
             self.round("consecutive-apply-" + str(index))
         self.pin_cli()

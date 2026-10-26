@@ -58,6 +58,7 @@ type Handler struct {
 	mu              sync.Mutex
 	attempts        map[string]attempt
 	authGate        chan struct{}
+	probeGate       chan struct{}
 }
 
 func randomToken() (string, error) {
@@ -162,7 +163,7 @@ func New(c Config, v View) (*Handler, error) {
 	if e != nil || !st.IsDir() || st.Mode().Perm()&0077 != 0 {
 		return nil, errors.New("session-dir must be a private directory (mode 0700)")
 	}
-	h := &Handler{cfg: c, view: v, attempts: make(map[string]attempt), authGate: make(chan struct{}, 1)}
+	h := &Handler{cfg: c, view: v, attempts: make(map[string]attempt), authGate: make(chan struct{}, 1), probeGate: make(chan struct{}, 4)}
 	path, _ := filepath.Abs(c.UsersFile)
 	identity := path + c.Listen
 	if c.shared {

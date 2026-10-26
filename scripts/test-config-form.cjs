@@ -317,7 +317,7 @@ test("proxy mappings render as pairs, submit structured data, and preserve other
   add.listeners.click();
   assert.equal(vm.runInContext("configInputs[3].rows.length", context), 2);
   const second = editor.children[2].children[1];
-  second.children.at(-1).listeners.click();
+  second.children.find((child) => child.className === "proxy-actions").children.at(-1).listeners.click();
   assert.equal(vm.runInContext("configInputs[3].rows.length", context), 1);
   assert.equal(vm.runInContext("configInputs[3].dirty", context), false);
 });
@@ -1075,4 +1075,89 @@ test("switching after sign-in keeps account identity and localizes existing save
   vm.runInContext('sgateI18n.setLanguage("zh-CN")', context);
   assert.equal(elements.get("user-label").textContent, "管理员");
   assert.match(elements.get("notice").textContent, /在线参数已更新/);
+});
+
+test("mapping row save refreshes synchronized master_service while preserving unrelated drafts", async () => {
+  const { context } = await page();
+  context.fields = [
+    {key: "proxies", kind: "proxies", mappings: [{listen: "127.0.0.1:9000", server: "ws://localhost/tunnel"}], group: "Proxy"},
+    {key: "master_service", value: "127.0.0.1|9000", group: "Framework"},
+    {key: "password", value: "", secret: true, group: "Proxy"},
+  ];
+  vm.runInContext('renderConfigFields(fields, {}, "client"); configInputs[0].controls[0].listeners.click(); configInputs[0].rows[1].listen.value="127.0.0.1:2022"; configInputs[0].rows[1].server.value="ws://localhost/tunnel"; configInputs[0].rows[1].listen.listeners.input(); configInputs[2].input.value="keep-private-draft"; configInputs[2].input.listeners.input()', context);
+  context.api = async () => ({revision: "new", requires_restart: true, synced_fields: {master_service: "127.0.0.1|9000, 127.0.0.1|2022"}});
+  await vm.runInContext("saveConfigField(configInputs[0])", context);
+  assert.equal(vm.runInContext("configInputs[1].input.value", context), "127.0.0.1|9000, 127.0.0.1|2022");
+  assert.equal(vm.runInContext("configInputs[1].dirty", context), false);
+  assert.equal(vm.runInContext("configInputs[2].input.value", context), "keep-private-draft");
+  // A pending manual framework edit remains a draft against the new saved value.
+  vm.runInContext('configInputs[1].input.value="127.0.0.1|9009"; configInputs[1].input.listeners.input(); configInputs[0].rows[0].addr.value="localhost:80"; configInputs[0].rows[0].addr.listeners.input()', context);
+  await vm.runInContext("saveConfigField(configInputs[0])", context);
+  assert.equal(vm.runInContext("configInputs[1].input.value", context), "127.0.0.1|9009");
+  assert.equal(vm.runInContext("configInputs[1].original", context), "127.0.0.1|9000, 127.0.0.1|2022");
+  assert.equal(vm.runInContext("configInputs[1].dirty", context), true);
+});
+
+test("mapping test uses only the row draft, debounces clicks, and does not save configuration", async () => {
+  const { context } = await page();
+  vm.runInContext('renderConfigFields([{key:"proxies",kind:"proxies",group:"代理与通道",mappings:[{listen:"127.0.0.1:9001",server:"ws://localhost:8081/tunnel",addr:"localhost:8088"}]}],{}); revision="unchanged"', context);
+  let calls = 0, payload, finish;
+  context.api = async (path, options) => {
+    calls++;
+    assert.equal(path, "proxy-test");
+    payload = JSON.parse(options.body);
+    return await new Promise((resolve) => { finish = resolve; });
+  };
+  const first = vm.runInContext("configInputs[0].rows[0].testButton.listeners.click()", context);
+  assert.equal(vm.runInContext("configInputs[0].rows[0].testButton.disabled", context), true);
+  await vm.runInContext("configInputs[0].rows[0].testButton.listeners.click()", context);
+  assert.equal(calls, 1);
+  assert.deepEqual(payload, {listen:"127.0.0.1:9001",server:"ws://localhost:8081/tunnel",addr:"localhost:8088"});
+  vm.runInContext("setConfigBusy(false)", context);
+  assert.equal(vm.runInContext("configInputs[0].rows[0].testButton.disabled", context), true);
+  finish({ok:true,stage:"backend",detail:"Tunnel authenticated; backend TCP reachable",elapsed_ms:12,test_id:"ab".repeat(32)});
+  await first;
+  assert.match(vm.runInContext("configInputs[0].rows[0].result.textContent", context), /连通成功.*12 ms.*测试编号：.*abab/);
+  assert.equal(vm.runInContext("configInputs[0].testButton?.disabled", context), undefined);
+  assert.equal(vm.runInContext("revision", context), "unchanged");
+  assert.equal(vm.runInContext("JSON.stringify(configEdits())", context), "{}");
+  context.drawChart = () => {};
+  vm.runInContext('sgateI18n.setLanguage("en")', context);
+  assert.match(vm.runInContext("configInputs[0].rows[0].result.textContent", context), /Connected.*Backend TCP.*Test ID:.*abab/);
+});
+
+test("mapping edits invalidate pending test results and invalid values never reach the API", async () => {
+  const { context } = await page();
+  vm.runInContext('renderConfigFields([{key:"proxies",kind:"proxies",group:"代理与通道",mappings:[{listen:"127.0.0.1:9001",server:"ws://localhost:8081/tunnel",addr:"localhost:8088"}]}],{})', context);
+  let finish, calls = 0;
+  context.api = async () => { calls++; return await new Promise((resolve) => { finish = resolve; }); };
+  const pending = vm.runInContext("testProxyMapping(configInputs[0].rows[0])", context);
+  vm.runInContext('configInputs[0].rows[0].addr.value="localhost:8089"; configInputs[0].rows[0].addr.listeners.input()', context);
+  finish({ok:false,stage:"backend",detail:"backend TCP connection refused",elapsed_ms:1});
+  await pending;
+  assert.equal(vm.runInContext("configInputs[0].rows[0].result.hidden", context), true);
+  assert.equal(vm.runInContext("configInputs[0].dirty", context), true);
+  vm.runInContext('configInputs[0].rows[0].server.value="not-a-url"', context);
+  await vm.runInContext("testProxyMapping(configInputs[0].rows[0])", context);
+  assert.equal(calls, 1);
+  assert.equal(vm.runInContext("configInputs[0].rows[0].result.hidden", context), false);
+});
+
+test("mapping test failures restore the button and preserve drafts", async () => {
+  const { context } = await page();
+  vm.runInContext('renderConfigFields([{key:"proxies",kind:"proxies",group:"代理与通道",mappings:[{listen:"127.0.0.1:9001",server:"ws://localhost:8081/tunnel"}]}],{})', context);
+  context.api = async () => { throw new Error("network unavailable"); };
+  await vm.runInContext("testProxyMapping(configInputs[0].rows[0])", context);
+  assert.equal(vm.runInContext("configInputs[0].rows[0].testButton.disabled", context), false);
+  assert.match(vm.runInContext("configInputs[0].rows[0].result.textContent", context), /network unavailable/);
+  assert.equal(vm.runInContext("configInputs[0].rows[0].listen.value", context), "127.0.0.1:9001");
+});
+
+test("mapping results distinguish encrypted command failures and show the correlated test ID", async () => {
+  const { context } = await page();
+  vm.runInContext('renderConfigFields([{key:"proxies",kind:"proxies",group:"代理与通道",mappings:[{listen:"127.0.0.1:9001",server:"ws://localhost:8081/tunnel"}]}],{})', context);
+  context.api = async () => ({ok:false,stage:"command",detail:"invalid connectivity test result command or test ID",elapsed_ms:3,test_id:"cd".repeat(32)});
+  await vm.runInContext("testProxyMapping(configInputs[0].rows[0])", context);
+  assert.match(vm.runInContext("configInputs[0].rows[0].result.textContent", context), /连通失败.*测试命令.*测试编号：.*cdcd/);
+  assert.equal(vm.runInContext("configInputs[0].rows[0].testButton.disabled", context), false);
 });

@@ -28,7 +28,7 @@ func TestOnlineSavePersistsAppliesAndTracksPendingRestart(t *testing.T) {
 	h.startupRevision = h.restartDigest(original)
 	hot := "noise-interval = 1s\nnoise-min-bytes = 1024\nnoise-max-bytes = 10240\ntarget = localhost:1\n"
 	w := httptest.NewRecorder()
-	h.commitConfig(w, original, hot, true)
+	h.commitConfig(w, original, hot, true, nil)
 	if w.Code != 200 || restarts != 0 || !reflect.DeepEqual(keys, []string{"noise-interval"}) {
 		t.Fatal(w.Code, w.Body.String(), keys, restarts)
 	}
@@ -38,26 +38,26 @@ func TestOnlineSavePersistsAppliesAndTracksPendingRestart(t *testing.T) {
 	}
 	pending := hot + "password = pending-password\n"
 	w = httptest.NewRecorder()
-	h.commitConfig(w, data, pending, false)
+	h.commitConfig(w, data, pending, false, nil)
 	if w.Code != 200 || h.restartDigest([]byte(pending)) == h.startupRevision {
 		t.Fatal("cold setting lost pending restart")
 	}
 	updated := "noise-interval = 2s\nnoise-min-bytes = 1024\nnoise-max-bytes = 10240\ntarget = localhost:1\npassword = pending-password\n"
 	fail = true
 	w = httptest.NewRecorder()
-	h.commitConfig(w, []byte(pending), updated, false)
+	h.commitConfig(w, []byte(pending), updated, false, nil)
 	data, _ = os.ReadFile(path)
 	if w.Code != 409 || string(data) != pending {
 		t.Fatal("hot apply failure did not restore file", w.Code)
 	}
 	fail = false
 	w = httptest.NewRecorder()
-	h.commitConfig(w, data, updated, false)
+	h.commitConfig(w, data, updated, false, nil)
 	if w.Code != 200 || h.restartDigest([]byte(updated)) == h.startupRevision {
 		t.Fatal("hot save cleared pending cold setting")
 	}
 	w = httptest.NewRecorder()
-	h.commitConfig(w, []byte(updated), updated, true)
+	h.commitConfig(w, []byte(updated), updated, true, nil)
 	if w.Code != 200 || restarts != 1 || h.restartDigest([]byte(updated)) != h.startupRevision {
 		t.Fatal("cold apply did not restart")
 	}

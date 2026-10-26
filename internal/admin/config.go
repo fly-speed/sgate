@@ -116,6 +116,8 @@ type View struct {
 	Role, AppConfigPath string
 	Stats               *tunnel.Stats
 	Validate            func(path string) error
+	ProxyListeners      func(path string) ([]string, error)
+	TestProxy           func(context.Context, ProxyMapping) (tunnel.ProbeResult, error)
 	Apply               func() error
 	ApplyLive           func([]string) error
 	LiveFields          []string

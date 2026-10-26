@@ -43,6 +43,7 @@ func validateSelectableTarget(address string) error {
 func (s *Server) selectTarget(w http.ResponseWriter, r *http.Request) (string, bool) {
 	query, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil {
+		s.cfg.Options.Logf("tunnel target rejected: session=%s peer=%q reason=invalid query", r.Header.Get("X-Sgate-Session"), r.RemoteAddr)
 		http.Error(w, "invalid query", http.StatusBadRequest)
 		return "", false
 	}
@@ -51,10 +52,12 @@ func (s *Server) selectTarget(w http.ResponseWriter, r *http.Request) (string, b
 		return s.cfg.Target, true
 	}
 	if len(addresses) != 1 || validateSelectableTarget(addresses[0]) != nil {
+		s.cfg.Options.Logf("tunnel target rejected: session=%s peer=%q reason=invalid addr (expected host:port)", r.Header.Get("X-Sgate-Session"), r.RemoteAddr)
 		http.Error(w, "invalid addr", http.StatusBadRequest)
 		return "", false
 	}
 	if _, allowed := s.allowedTargets[addresses[0]]; !allowed {
+		s.cfg.Options.Logf("tunnel target rejected: session=%s peer=%q target=%q reason=target not in allowed-targets", r.Header.Get("X-Sgate-Session"), r.RemoteAddr, addresses[0])
 		http.Error(w, "target not allowed", http.StatusForbidden)
 		return "", false
 	}

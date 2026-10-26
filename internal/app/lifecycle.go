@@ -117,6 +117,8 @@ func (c *controller) managementView() admin.View {
 			return e
 		},
 		Apply:          c.apply,
+		ProxyListeners: c.proxyListeners,
+		TestProxy:      c.testProxy,
 		ApplyLive:      c.applyLive,
 		LiveFields:     c.liveFields(),
 		Runtime:        c.status,

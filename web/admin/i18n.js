@@ -3,6 +3,39 @@
 // UI translations only: editable values and protocol/configuration keys are never translated.
 const sgateI18n = (() => {
   const messages = {
+  "测试命令": "Test command",
+  "测试编号：": "Test ID: ",
+  "测试结果命令或测试编号无效": "invalid connectivity test result command or test ID",
+  "测试命令必须为加密二进制消息": "connectivity test requires an encrypted binary command",
+  "测试命令认证失败": "connectivity test command authentication failed",
+  "测试命令无效": "invalid connectivity test command",
+  "后端地址不在服务端允许列表中": "backend target is not allowed",
+  "隧道路径或认证被拒绝": "tunnel path or authentication rejected",
+  "隧道请求或后端地址无效": "invalid tunnel request or backend addr",
+  "会话被占用或参数已改变": "session busy or session parameters changed",
+  "服务端不可用或达到容量限制": "server unavailable or capacity limit reached",
+  "测试": "Test",
+  "测试中…": "Testing…",
+  "测试映射连通性": "Test mapping connectivity",
+  "测试使用本行地址及当前生效的密码、密钥、TLS 和 send-addr 设置；不保存、不监听本地端口，仅验证隧道及后端 TCP 连通性。": "Tests use this row and effective password, key, TLS, and send-addr settings. No save or local listener; only tunnel and backend TCP connectivity are checked.",
+  "正在测试隧道和后端 TCP 连通性…": "Testing tunnel and backend TCP connectivity…",
+  "连通成功": "Connected",
+  "连通失败": "Connection failed",
+  "后端 TCP": "Backend TCP",
+  "隧道连接": "Tunnel connection",
+  "测试失败：": "Test failed: ",
+  "当前服务不支持映射测试": "Mapping tests are unavailable on this service",
+  "正在进行的映射测试过多，请稍后重试": "Too many mapping tests; try again shortly",
+  "无法加载生效的代理参数，请检查客户端配置和日志": "Cannot load effective proxy settings; check client configuration and logs",
+  "隧道认证成功，后端 TCP 可达": "Tunnel authenticated; backend TCP reachable",
+  "后端 TCP 连接被拒绝": "backend TCP connection refused",
+  "后端 TCP 连接超时": "backend TCP connection timed out",
+  "后端 DNS 解析失败": "backend DNS resolution failed",
+  "后端网络或主机不可达": "backend network/host unreachable",
+  "后端 TCP 连接失败（详见服务端日志）": "backend TCP connection failed (see server log)",
+  "服务端不支持连通性测试，请升级服务端": "server does not support connectivity tests; upgrade the server",
+  "连通性测试响应验证失败": "invalid connectivity test response",
+
   "代理与通道": "Proxy and tunnel",
   "配置项：": "Setting: ",
   " · 这是每次发送的负载总量，不是 B/s 速率；一秒发送多次时，图表会累计这些流量。": " · Payload per burst, not B/s; the chart sums all bursts sent within each second.",
@@ -446,7 +479,11 @@ const sgateI18n = (() => {
   "：": ": ",
   "（": "(",
   "）": ")",
-  "不要将 admin_listen 加入此列表：独立 HTTP 管理协程会监听该管理端口。": "Do not include admin_listen: the independent HTTP management goroutine owns that port."
+  "不要将 admin_listen 加入此列表：独立 HTTP 管理协程会监听该管理端口。": "Do not include admin_listen: the independent HTTP management goroutine owns that port.",
+  "保存映射时会自动同步 master_service；清空映射后使用单代理 listen。托管模式端口变化后，请保存并通过 acl_master 重启整个服务。": "Saving mappings automatically synchronizes master_service; clearing mappings uses the single-proxy listen address. In managed mode, save port changes and restart the whole service through acl_master.",
+  "自动同步 master_service 需要有效的非零 TCP 监听端口": "Automatic master_service synchronization requires valid, nonzero TCP listen ports",
+  "master_service 与映射监听地址冲突；请修改映射中的 listen，框架监听会自动同步": "master_service conflicts with mapping listeners; edit listen in the mappings and framework listeners will be synchronized automatically",
+  "无法解析生效监听参数，请检查命令行覆盖与 master_args": "Cannot parse effective listeners; check command-line overrides and master_args"
 };
   const reverse = new Map(Object.entries(messages).map(([zh, en]) => [en, zh]));
   const storageKey = "sgate.admin.language";

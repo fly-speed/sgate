@@ -131,6 +131,8 @@ func (h *Handler) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		h.getConfig(w)
 	case r.URL.Path == "/api/config" && r.Method == "PUT":
 		h.putConfig(w, r)
+	case r.URL.Path == "/api/proxy-test" && r.Method == "POST":
+		h.testProxy(w, r)
 	case r.URL.Path == "/api/apply" && r.Method == "POST":
 		h.applyProxy(w, r)
 	case r.URL.Path == "/api/restart-service" && r.Method == "POST":
@@ -575,6 +577,20 @@ func (h *Handler) putConfig(w http.ResponseWriter, r *http.Request) {
 		problem(w, 500, "无法写入待校验配置")
 		return
 	}
+	var synced map[string]string
+	if input.Proxies != nil {
+		content, synced, e = h.syncMappingListeners(name, content, input.Fields, *input.Proxies)
+		if e != nil {
+			problem(w, 400, e.Error())
+			return
+		}
+		if len(synced) > 0 {
+			if e = atomicFile(name, []byte(content)); e != nil {
+				problem(w, 500, "无法写入待校验配置")
+				return
+			}
+		}
+	}
 	if e = h.view.Validate(name); e != nil {
 		problem(w, 400, "配置校验失败："+e.Error())
 		return
@@ -586,11 +602,17 @@ func (h *Handler) putConfig(w http.ResponseWriter, r *http.Request) {
 		problem(w, 409, "校验期间配置发生变化，请重新加载后再编辑")
 		return
 	}
-	h.commitConfig(w, current, content, input.Apply)
+	h.commitConfig(w, current, content, input.Apply, synced)
 }
 
 // commitConfig 在 h.mu 持有期间执行：先备份并保存，应用失败则恢复原文件。
-func (h *Handler) commitConfig(w http.ResponseWriter, current []byte, content string, apply bool) {
+func (h *Handler) commitConfig(
+	w http.ResponseWriter,
+	current []byte,
+	content string,
+	apply bool,
+	synced map[string]string,
+) {
 	var e error
 	if e = atomicFile(h.view.AppConfigPath+".bak", current); e != nil {
 		problem(w, 500, "无法保存配置备份")
@@ -628,6 +650,9 @@ func (h *Handler) commitConfig(w http.ResponseWriter, current []byte, content st
 	result := map[string]any{
 		"revision": digest([]byte(content)), "requires_restart": requiresRestart,
 		"applied": restart, "live_applied": live,
+	}
+	if len(synced) > 0 {
+		result["synced_fields"] = synced
 	}
 	if h.view.Runtime != nil {
 		result["runtime"] = h.view.Runtime()

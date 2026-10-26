@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"strings"
 	"sync"
@@ -152,6 +153,7 @@ func dispatchClientProxies(ctx context.Context, listener net.Listener, routes ma
 		_, port, err := net.SplitHostPort(conn.LocalAddr().String())
 		route := routes[port]
 		if err != nil || route == nil {
+			log.Printf("TCP connection rejected: listen=%q peer=%q reason=no matching proxy mapping", conn.LocalAddr(), conn.RemoteAddr())
 			conn.Close()
 			continue
 		}
@@ -160,9 +162,13 @@ func dispatchClientProxies(ctx context.Context, listener net.Listener, routes ma
 			conn.Close()
 			return nil
 		case <-route.done:
+			if ctx.Err() == nil {
+				log.Printf("TCP connection rejected: listen=%q peer=%q reason=proxy mapping stopped", conn.LocalAddr(), conn.RemoteAddr())
+			}
 			conn.Close()
 		case route.incoming <- conn:
 		default:
+			log.Printf("TCP connection rejected: listen=%q peer=%q reason=proxy accept queue full", conn.LocalAddr(), conn.RemoteAddr())
 			conn.Close() // 有界入站队列，单端口过载不能阻塞其他代理。
 		}
 	}

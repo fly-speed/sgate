@@ -78,8 +78,10 @@ func (c *Client) dial(ctx context.Context, id string, resume bool) (*websocket.C
 	}
 	u, _ := url.Parse(c.cfg.URL)
 	query := u.Query()
+	query.Set(streamErrorsQuery, "1")
 	query.Set(receiveWindowQuery, strconv.Itoa(c.cfg.Options.BufferBytes))
 	u.RawQuery = query.Encode()
+	probe := query.Get(probeQuery) == "1"
 	headers, err := requestHeaders(c.cfg.Key, c.cfg.Password, id, nonce, ts, r, u.RequestURI())
 	if err != nil {
 		return nil, nil, 0, err
@@ -102,11 +104,18 @@ func (c *Client) dial(ctx context.Context, id string, resume bool) (*websocket.C
 	}
 	ws, response, err := d.DialContext(ctx, u.String(), headers)
 	if err != nil {
+		err = safeDialError(err)
 		status := 0
 		if response != nil {
 			status = response.StatusCode
-			err = fmt.Errorf("tunnel handshake HTTP %d: %w", status, err)
+			err = fmt.Errorf("tunnel handshake HTTP %d (%s): %w", status, handshakeStatusReason(status), err)
 			response.Body.Close()
+			if probe {
+				request := tunnelRequest{id: id, nonce: nonce, timestamp: ts, credential: headers.Get(passwordHeader)}
+				if probeErr := probeResponseError(c.cfg.Key, response, request); probeErr != nil {
+					return nil, nil, status, probeErr
+				}
+			}
 			if status == http.StatusGone {
 				serverNonce := response.Header.Get("X-Sgate-Nonce")
 				expected := mac(c.cfg.Key, protocol, "gone", id, nonce, serverNonce, ts, headers.Get(passwordHeader))
@@ -123,6 +132,17 @@ func (c *Client) dial(ctx context.Context, id string, resume bool) (*websocket.C
 	if !validID(serverNonce) || !hmac.Equal([]byte(expected), []byte(response.Header.Get("X-Sgate-Auth"))) {
 		ws.Close()
 		return nil, nil, 0, errors.New("server authentication failed")
+	}
+	if probe {
+		request := tunnelRequest{id: id, nonce: nonce, timestamp: ts, credential: headers.Get(passwordHeader)}
+		result, verified := verifyProbeResponse(c.cfg.Key, response, request)
+		if !verified || result != probeCommandProtocol {
+			ws.Close()
+			if verified && result == "ok" {
+				return nil, nil, 0, errors.New("server does not support connectivity tests; upgrade the server")
+			}
+			return nil, nil, 0, errors.New("invalid connectivity test response")
+		}
 	}
 	crypt := newCodec(c.cfg.Key, id, nonce, serverNonce, true)
 	if window != "" {
@@ -148,6 +168,9 @@ type clientSessions struct {
 }
 
 func (c *Client) run(ctx context.Context, listener net.Listener, state *clientSessions) error {
+	running := *c
+	running.cfg.Options.Logf = mappingLogger(c.cfg.Options.Logf, listener.Addr().String(), c.cfg.URL)
+	c = &running
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	mu := &state.mu
@@ -193,7 +216,7 @@ func (c *Client) startLocalListener(
 			s := state.current
 			mu.Unlock()
 			if err = s.addLocal(conn); err != nil {
-				c.cfg.Options.Logf("TCP connection rejected: %v", err)
+				c.cfg.Options.Logf("TCP connection rejected: peer=%q reason=%v", conn.RemoteAddr(), err)
 			}
 		}
 	}()
@@ -269,7 +292,7 @@ func (c *Client) reconnect(ctx context.Context, state *clientSessions) {
 			resume = true
 			minimum, _, _ = c.reconnectSettings()
 			backoff = minimum
-			c.cfg.Options.Logf("tunnel connected")
+			c.cfg.Options.Logf("tunnel connected: session=%s", id)
 			err = state.current.transport(ws, crypt)
 			offlineSince = time.Now()
 		}
@@ -282,7 +305,7 @@ func (c *Client) reconnect(ctx context.Context, state *clientSessions) {
 		if remaining := time.Until(offlineSince.Add(c.cfg.OfflineTimeout)); delay > remaining {
 			delay = max(remaining, 0)
 		}
-		c.cfg.Options.Logf("tunnel unavailable: %v; retry in %s", err, delay)
+		c.cfg.Options.Logf("tunnel unavailable: session=%s reason=%v; retry in %s", id, err, delay)
 		timer := time.NewTimer(delay)
 		// 噪音更新不改变重连退避，只有退避参数变化才唤醒当前等待。
 		retryNow := false

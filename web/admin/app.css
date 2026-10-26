@@ -948,3 +948,8 @@ html[lang="en"] .header-actions {
 html[lang="en"] nav button span {
   white-space: normal;
 }
+
+.proxy-actions { display: flex; gap: 8px; align-items: center; }
+.proxy-test-result { grid-column: 1 / -1; overflow-wrap: anywhere; color: var(--green, #087e69); }
+.proxy-test-result.bad { color: var(--red, #c53030); }
+.proxy-test-result[hidden] { display: none; }

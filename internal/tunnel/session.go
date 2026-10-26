@@ -60,7 +60,8 @@ func decodeFrame(p []byte) (frame, error) {
 	}
 	if f.op > opReset || (f.op == opAck && (f.seq != 0 || f.stream != 0 || len(f.data) != 0)) ||
 		(f.op != opAck && (f.seq == 0 || f.stream == 0)) ||
-		(f.op != opData && len(f.data) != 0) ||
+		(f.op != opData && f.op != opReset && len(f.data) != 0) ||
+		(f.op == opReset && !validResetReason(f.data)) ||
 		(f.op == opData && len(f.data) == 0) {
 		return frame{}, errors.New("invalid frame fields")
 	}
@@ -86,7 +87,7 @@ type session struct {
 	incomingBytes                          int
 	accepted                               uint64
 	peerWindow                             int // 0 表示旧版未协商；非零时限制未确认的线帧总量。
-	resets                                 chan uint64
+	resets                                 chan streamReset
 	pending                                []frame
 	pendingBytes                           int
 	next, received, nextStream, lastOpened uint64
@@ -105,7 +106,7 @@ func newSession(parent context.Context, target string, opts Options) *session {
 		target:  target,
 		opts:    opts,
 		changed: make(chan struct{}),
-		resets:  make(chan uint64, opts.MaxStreams),
+		resets:  make(chan streamReset, opts.MaxStreams),
 		streams: make(map[uint64]*stream),
 	}
 	if opts.Stats != nil {
@@ -118,8 +119,12 @@ func newSession(parent context.Context, target string, opts Options) *session {
 			select {
 			case <-ctx.Done():
 				return
-			case id := <-s.resets:
-				if s.enqueue(opReset, id, nil) != nil {
+			case reset := <-s.resets:
+				var reason []byte
+				if s.opts.reportStreamErrors && reset.reason != 0 {
+					reason = []byte{reset.reason}
+				}
+				if s.enqueue(opReset, reset.id, reason) != nil {
 					return
 				}
 			}
@@ -220,12 +225,17 @@ func (s *session) reset(id uint64) {
 }
 
 func (s *session) enqueueReset(id uint64) {
+	s.enqueueResetReason(id, 0)
+}
+
+func (s *session) enqueueResetReason(id uint64, reason byte) {
 	// A full retransmission buffer must never block the transport reader's ACK processing.
 	select {
-	case s.resets <- id:
+	case s.resets <- streamReset{id: id, reason: reason}:
 	case <-s.ctx.Done():
 	default:
 		// Bound control work as well as data, even for a misbehaving authenticated peer.
+		s.opts.Logf("session closed: reset control queue limit reached")
 		s.close()
 	}
 }
@@ -268,12 +278,7 @@ func (s *session) readStream(id uint64, st *stream) {
 				}
 				s.halfDone(id, true)
 			} else {
-				s.mu.Lock()
-				exists := s.streams[id] != nil
-				s.mu.Unlock()
-				if exists {
-					s.reset(id)
-				}
+				s.failStream(id, "TCP read", err, resetReadFailed)
 			}
 			return
 		}
@@ -281,10 +286,15 @@ func (s *session) readStream(id uint64, st *stream) {
 }
 func (s *session) addLocal(c net.Conn) error {
 	s.mu.Lock()
-	if s.closed || s.ctx.Err() != nil || len(s.streams) >= s.opts.MaxStreams {
+	if s.closed || s.ctx.Err() != nil {
 		s.mu.Unlock()
 		c.Close()
-		return errors.New("session closed or stream limit reached")
+		return errSessionClosed
+	}
+	if len(s.streams) >= s.opts.MaxStreams {
+		s.mu.Unlock()
+		c.Close()
+		return errors.New("client stream limit reached")
 	}
 	s.nextStream++
 	id := s.nextStream
@@ -315,15 +325,16 @@ func (s *session) apply(f frame) error {
 		full := len(s.streams) >= s.opts.MaxStreams
 		s.mu.Unlock()
 		if full {
-			s.enqueueReset(f.stream)
+			s.opts.Logf("stream=%d target=%q backend connection rejected: stream limit reached", f.stream, s.target)
+			s.enqueueResetReason(f.stream, resetStreamLimit)
 			return nil
 		}
 		c, err := (&net.Dialer{Timeout: s.opts.DialTimeout, KeepAlive: 30 * time.Second}).DialContext(s.ctx, "tcp", s.target)
 		if err != nil {
 			if s.ctx.Err() == nil {
-				s.opts.Logf("backend connection failed: %v", err)
+				s.opts.Logf("stream=%d target=%q backend connection failed: %v", f.stream, s.target, err)
 			}
-			s.enqueueReset(f.stream)
+			s.enqueueResetReason(f.stream, dialResetReason(err))
 			return nil
 		}
 		s.mu.Lock()
@@ -360,7 +371,10 @@ func (s *session) apply(f frame) error {
 		for len(data) > 0 {
 			n, err := st.conn.Write(data)
 			if err != nil || n == 0 {
-				s.reset(f.stream)
+				if err == nil {
+					err = io.ErrNoProgress
+				}
+				s.failStream(f.stream, "TCP write", err, resetWriteFailed)
 				return nil
 			}
 			data = data[n:]
@@ -369,16 +383,19 @@ func (s *session) apply(f frame) error {
 	case opFin:
 		if c, ok := st.conn.(interface{ CloseWrite() error }); ok {
 			if err := c.CloseWrite(); err != nil {
-				s.reset(f.stream)
+				s.failStream(f.stream, "TCP half-close", err, resetWriteFailed)
 				return nil
 			}
 		} else {
-			s.reset(f.stream)
+			s.failStream(f.stream, "TCP half-close", errors.New("connection does not support half-close"), resetWriteFailed)
 			return nil
 		}
 		s.halfDone(f.stream, false)
 	case opReset:
-		s.drop(f.stream)
+		if s.drop(f.stream) {
+			s.opts.Logf("stream=%d local=%q peer=%q connection rejected/reset by remote: %s",
+				f.stream, st.conn.LocalAddr(), st.conn.RemoteAddr(), resetReasonText(f.data))
+		}
 	}
 	return nil
 }

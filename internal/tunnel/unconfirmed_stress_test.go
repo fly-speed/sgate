@@ -84,6 +84,13 @@ func (p *unconfirmedProbes) batch(ctx context.Context, f stressLifecycleContext,
 				cancel()
 				return
 			}
+			// Resume probes preserve the retained session's negotiated capabilities.
+			probeURL, _ := url.Parse(f.probeURL)
+			if e.entry.session.opts.reportStreamErrors {
+				query := probeURL.Query()
+				query.Set(streamErrorsQuery, "1")
+				probeURL.RawQuery = query.Encode()
+			}
 			var nonce, stamp string
 			var headers http.Header
 			var ws *websocket.Conn
@@ -99,14 +106,14 @@ func (p *unconfirmedProbes) batch(ctx context.Context, f stressLifecycleContext,
 			err := retryUnconfirmedUpgrade(ctx, e.idle.Add((*f.server).cfg.SessionTTL), minRetry, maxRetry, func(attemptCtx context.Context) error {
 				nonce, stamp = randomID(), strconv.FormatInt(time.Now().Unix(), 10)
 				var err error
-				headers, err = requestHeaders(f.serverConfig.Key, f.serverConfig.Password, e.id, nonce, stamp, "1", "/tunnel")
+				headers, err = requestHeaders(f.serverConfig.Key, f.serverConfig.Password, e.id, nonce, stamp, "1", probeURL.RequestURI())
 				if err != nil {
 					return err
 				}
 				f.probeNonces.Store(nonce, true)
 				defer f.probeNonces.Delete(nonce)
 				dialer := websocket.Dialer{TLSClientConfig: f.probeTLS, HandshakeTimeout: (*f.server).cfg.Options.DialTimeout}
-				ws, response, err = dialer.DialContext(attemptCtx, f.probeURL, headers)
+				ws, response, err = dialer.DialContext(attemptCtx, probeURL.String(), headers)
 				if err != nil && response != nil {
 					response.Body.Close()
 				}
