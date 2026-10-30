@@ -26,7 +26,14 @@ func TestInitRunRestartHijackedConnectionsAndRollback(t *testing.T) {
 	}
 	defer service.Close()
 	var accepted, closed atomic.Int64
-	service.AcceptHandler = func(net.Conn) { accepted.Add(1) }
+	service.AcceptHandler = func(c net.Conn) {
+		// Monitoring can follow the owner wrapper without bypassing its Close.
+		wrapped, ok := c.(interface{ NetConn() net.Conn })
+		if !ok || wrapped.NetConn() == nil {
+			t.Error("accepted socket does not expose the underlying transport")
+		}
+		accepted.Add(1)
+	}
 	service.CloseHandler = func(net.Conn) { closed.Add(1) }
 	service.GET("/*path", gin.WrapH(service.Handler()))
 	service.NoRoute(gin.WrapH(service.Handler()))

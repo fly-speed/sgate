@@ -12,6 +12,8 @@ import (
 // With shared server management, bytes and connections on that HTTP/TLS
 // listener also include management traffic.
 type Stats struct {
+	peersMu                sync.Mutex
+	peers                  map[string]*peerTraffic
 	mu                     sync.Mutex
 	noiseSessions          map[*session]int
 	sessions               map[*session]struct{}
@@ -28,6 +30,7 @@ type Stats struct {
 // BusinessTX/RX 是实际加密帧中的业务负载，包含重放，不代表应用重复交付。
 // NoiseActivity 是采样时刻的状态；Permitted 表示策略允许，不保证该秒有噪音帧。
 type TrafficSnapshot struct {
+	ByIP          []PeerTrafficSnapshot `json:"by_ip"`
 	BusinessTX    uint64                `json:"business_tx_bytes"`
 	BusinessRX    uint64                `json:"business_rx_bytes"`
 	NoiseActivity NoiseActivitySnapshot `json:"noise_activity"`
@@ -43,6 +46,7 @@ type TrafficSnapshot struct {
 func NewStats() *Stats { return &Stats{started: time.Now()} }
 func (s *Stats) Snapshot() TrafficSnapshot {
 	return TrafficSnapshot{
+		ByIP:       s.peerSnapshots(),
 		BusinessTX: s.businessTX.Load(), BusinessRX: s.businessRX.Load(), NoiseActivity: s.noiseActivity(),
 		NoiseTX: s.noiseTX.Load(), NoiseRX: s.noiseRX.Load(),
 		TX:          s.tx.Load(),
@@ -54,29 +58,40 @@ func (s *Stats) Snapshot() TrafficSnapshot {
 }
 func (s *Stats) Conn(c net.Conn) net.Conn {
 	s.active.Add(1)
-	return &trafficConn{Conn: c, stats: s}
+	return &trafficConn{Conn: c, stats: s, peer: s.openPeer(c.RemoteAddr())}
 }
 func (s *Stats) Listener(l net.Listener) net.Listener { return &trafficListener{Listener: l, stats: s} }
 
 type trafficConn struct {
 	net.Conn
 	stats *Stats
+	peer  *peerTraffic
 	once  sync.Once
 }
 
 func (c *trafficConn) Read(p []byte) (int, error) {
 	n, e := c.Conn.Read(p)
 	c.stats.rx.Add(uint64(n))
+	c.peer.rx.Add(uint64(n))
 	return n, e
 }
 func (c *trafficConn) Write(p []byte) (int, error) {
 	n, e := c.Conn.Write(p)
 	c.stats.tx.Add(uint64(n))
+	c.peer.tx.Add(uint64(n))
 	return n, e
 }
 func (c *trafficConn) Close() error {
 	e := c.Conn.Close()
-	c.once.Do(func() { c.stats.active.Add(-1) })
+	c.once.Do(func() {
+		c.stats.active.Add(-1)
+		c.stats.peersMu.Lock()
+		c.peer.active--
+		if c.peer.active == 0 {
+			c.peer.idle = time.Now()
+		}
+		c.stats.peersMu.Unlock()
+	})
 	return e
 }
 

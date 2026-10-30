@@ -1227,3 +1227,32 @@ test("failed automatic mapping restart never displays success", async () => {
  assert.doesNotMatch(elements.get("notice").textContent,/映射已生效/);
  assert.equal(vm.runInContext("serviceRestarting",context),false);
 });
+
+test("IP chart samples isolate peers, metrics and reset gaps without changing totals", async () => {
+  const { context, elements } = await page();
+  vm.runInContext(`
+    const beforeIP = {time_ms:1000, by_ip:[{ip:"127.0.0.1",tx_bytes:10,rx_bytes:20,noise_tx_bytes:2,noise_rx_bytes:3,business_tx_bytes:5,business_rx_bytes:7}]};
+    const afterIP = {time_ms:2000, by_ip:[{ip:"127.0.0.1",connections:2,tx_bytes:110,rx_bytes:220,noise_tx_bytes:12,noise_rx_bytes:23,business_tx_bytes:55,business_rx_bytes:77},{ip:"::1",connections:1,tx_bytes:30,rx_bytes:40}]};
+    points=[{time_ms:2000,tx:999,rx:888,byIP:peerTrafficRates(afterIP,beforeIP)}];
+    renderTrafficPeers(afterIP);
+  `, context);
+  const select = elements.get("traffic-ip");
+  assert.equal(select.children.length, 3);
+  select.value = "127.0.0.1";
+  const filtered = JSON.parse(vm.runInContext("JSON.stringify(chartSamples()[0])", context));
+  assert.equal(filtered.tx, 100);
+  assert.equal(filtered.rx, 200);
+  assert.equal(filtered.noiseTX, 10);
+  assert.equal(filtered.businessRX, 70);
+  vm.runInContext("renderTrafficScope(afterIP)", context);
+  assert.match(elements.get("traffic-ip-summary").textContent, /127\.0\.0\.1.*2 个连接/);
+  select.value = "::1";
+  assert.equal(vm.runInContext("chartSamples()[0].tx", context), undefined);
+  select.value = "";
+  assert.equal(vm.runInContext("chartSamples()[0].tx", context), 999);
+  assert.equal(vm.runInContext("peerTrafficRates({...afterIP,by_ip:[{ip:'127.0.0.1',tx_bytes:0,rx_bytes:0}]},beforeIP)['127.0.0.1']", context), null);
+  select.value = "127.0.0.1";
+  vm.runInContext("renderTrafficPeers({by_ip:[]})", context);
+  assert.equal(select.value, "127.0.0.1");
+  assert.match(select.children.at(-1).textContent, /已离线/);
+});

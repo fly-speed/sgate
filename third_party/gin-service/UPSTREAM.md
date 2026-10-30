@@ -197,3 +197,5 @@ test: hello world!
 status  service                                         type    proc    owner   conf
 200     |87, |88, |89, gin-server.sock            4       2      nobody    /opt/soft/gin-server/conf/gin-server.cf
 ```
+
+- `ownedConn.NetConn` exposes the underlying connection for transport counter attribution, including under TLS, without transferring lifecycle ownership.

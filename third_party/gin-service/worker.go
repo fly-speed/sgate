@@ -206,6 +206,10 @@ type ownedConn struct {
 	once   sync.Once
 }
 
+// NetConn exposes the wrapped socket for transport-level observability.
+// Callers must keep using ownedConn for I/O and lifecycle management.
+func (c *ownedConn) NetConn() net.Conn { return c.Conn }
+
 func (c *ownedConn) Close() error {
 	e := c.Conn.Close()
 	c.once.Do(func() {

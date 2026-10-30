@@ -858,6 +858,8 @@ function renderSignedOut() {
   servicePID = 0;
   previous = null;
   points = [];
+  $("traffic-ip").value = "";
+  renderTrafficPeers({ by_ip: [] });
   chartPointer = null;
   $("traffic-tooltip").hidden = true;
   $("config-fields").replaceChildren();
@@ -975,6 +977,8 @@ async function poll(run) {
     const data = await api("stats");
     if (run !== epoch) return;
     const rates = trafficRates(data, previous);
+    if (rates) rates.byIP = peerTrafficRates(data, previous);
+    renderTrafficPeers(data);
     if (!rates && previous) points = []; // 重启或计数回退后清除上一进程的时间序列。
     previous = data;
     if (rates) {
@@ -1001,6 +1005,54 @@ async function poll(run) {
   }
   if (run === epoch && state.authenticated)
     setTimeout(() => poll(run), document.hidden ? 5000 : 1000);
+}
+// IP filtering affects the chart; summary cards retain process totals.
+function peerTrafficRates(data, last) {
+  const before = new Map((last?.by_ip || []).map((peer) => [peer.ip, peer]));
+  const rates = Object.create(null);
+  for (const peer of data.by_ip || []) {
+    const old = before.get(peer.ip);
+    rates[peer.ip] = trafficRates(
+      { ...peer, time_ms: data.time_ms },
+      old ? { ...old, time_ms: last.time_ms } : null,
+    );
+  }
+  return rates;
+}
+function peerLabel(ip) {
+  return ip === "__other__" ? t("其他 IP（超出统计上限）")
+    : ip === "__unknown__" ? t("未知对端") : ip;
+}
+function renderTrafficPeers(data) {
+  const select = $("traffic-ip");
+  const selected = select.value || "";
+  select.replaceChildren();
+  const option = (value, text) => {
+    const node = document.createElement("option");
+    node.value = value;
+    localText(node, () => text());
+    select.append(node);
+  };
+  option("", () => t("全部连接 IP"));
+  const peers = data.by_ip || [];
+  for (const peer of peers) option(peer.ip, () => peerLabel(peer.ip) + " · " + peer.connections + t(" 个连接"));
+  if (selected && !peers.some((peer) => peer.ip === selected))
+    option(selected, () => peerLabel(selected) + t("（已离线）"));
+  select.value = selected;
+  renderTrafficScope(data);
+}
+function renderTrafficScope(data = previous) {
+  const ip = $("traffic-ip").value;
+  const peer = data?.by_ip?.find((peer) => peer.ip === ip);
+  localText($("traffic-ip-summary"), () => ip
+    ? peerLabel(ip) + " · " + (peer?.connections || 0) + t(" 个连接") +
+      t(" · 累计发送 ") + units(peer?.tx_bytes || 0) + t(" · 累计接收 ") + units(peer?.rx_bytes || 0)
+    : t("全部连接 IP"));
+}
+function chartSamples() {
+  const ip = $("traffic-ip").value;
+  if (!ip) return points;
+  return points.map((point) => point.byIP?.[ip] || { time_ms: point.time_ms });
 }
 // 独立计算细分负载速率，不能从总流量曲线的高度推断噪音有无。
 function trafficRates(data, last) {
@@ -1111,14 +1163,14 @@ function chartGeometry(w, h) {
   return { left, top, right, bottom, height: bottom - top, width: right - left };
 }
 // 统一使用采样时间映射横坐标；后台5秒采样和请求延迟不会压缩时间。
-function chartTimeRange(samples = points) {
+function chartTimeRange(samples = chartSamples()) {
   const end = samples.at(-1)?.time_ms ?? Date.now();
   return { start: end - 60000, end };
 }
 function chartPointX(point, geometry, range = chartTimeRange()) {
   return geometry.left + ((point.time_ms - range.start) / 60000) * geometry.width;
 }
-function chartPointIndex(pointer, geometry, samples = points) {
+function chartPointIndex(pointer, geometry, samples = chartSamples()) {
   if (
     !pointer ||
     !samples.length ||
@@ -1171,7 +1223,7 @@ function chartHoverRate(value) {
 function drawChartHover(c, geometry, metric, max) {
   const tooltip = $("traffic-tooltip");
   const index = chartPointIndex(chartPointer, geometry);
-  const point = points[index];
+  const point = chartSamples()[index];
   if (!point || !metric.keys.some((key) => Number.isFinite(point[key]))) {
     tooltip.hidden = true;
     return;
@@ -1260,7 +1312,7 @@ function drawChart() {
   const max =
     Math.max(
       1,
-      ...points.flatMap((v) => metric.keys.map((key) => v[key]).filter(Number.isFinite)),
+      ...chartSamples().flatMap((v) => metric.keys.map((key) => v[key]).filter(Number.isFinite)),
     ) * 1.18;
   c.font = "10px -apple-system, sans-serif";
   for (let i = 0; i < 5; i++) {
@@ -1282,7 +1334,7 @@ function drawChart() {
     [metric.keys[0], "#087e68"],
   ]) {
     const segments = [[]];
-    points.forEach((v) => {
+    chartSamples().forEach((v) => {
       if (!Number.isFinite(v[key]) || v.time_ms < chartTimeRange().start) {
         if (segments.at(-1).length) segments.push([]);
         return;
@@ -1315,6 +1367,11 @@ function drawChart() {
   drawChartHover(c, geometry, metric, max);
 }
 $("traffic-metric").addEventListener("change", drawChart);
+$("traffic-ip").addEventListener("change", () => {
+  clearChartHover();
+  renderTrafficScope();
+  drawChart();
+});
 $("login-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   localText($("auth-error"), () => "");

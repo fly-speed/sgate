@@ -51,6 +51,7 @@ func (s *session) writeNoise(ws *websocket.Conn, crypt *codec, size int) error {
 	}
 	if s.opts.Stats != nil {
 		s.opts.Stats.noiseTX.Add(uint64(size))
+		s.opts.Stats.peerPayload(ws.NetConn(), "noiseTX", size)
 	}
 	s.mu.Lock()
 	s.noiseSent++

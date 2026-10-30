@@ -103,6 +103,7 @@
           ><article class="chart-card"
             ><div class="chart-header"
               ><h3 id="traffic-chart-title"><span data-i18n="实时网络带宽">实时网络带宽</span></h3
+              ><select id="traffic-ip" aria-label="连接 IP" data-i18n-aria-label="连接 IP"><option value="" data-i18n="全部连接 IP">全部连接 IP</option></select
               ><select id="traffic-metric" aria-label="图表流量类型" data-i18n-aria-label="图表流量类型">
                 <option value="total" data-i18n="总流量">总流量</option
                 ><option value="noise" data-i18n="白噪音负载">白噪音负载</option
@@ -127,6 +128,8 @@
             <div class="chart-footer"
               ><span><span data-i18n="采样时间 · 每格 5 秒">采样时间 · 每格 5 秒</span></span><span><span data-i18n="鼠标悬停查看数值">鼠标悬停查看数值</span></span></div
             >
+            <p id="traffic-ip-summary" class="muted traffic-observation"></p>
+            <p class="muted traffic-observation" data-i18n="IP 筛选仅影响曲线；客户端按远程服务端 IP、服务端按接入对端 IP 合并统计，不按业务后端或 HTTP 转发头区分。断开后的 IP 统计保留一分钟，顶部数字仍为全部连接总量。">IP 筛选仅影响曲线；客户端按远程服务端 IP、服务端按接入对端 IP 合并统计，不按业务后端或 HTTP 转发头区分。断开后的 IP 统计保留一分钟，顶部数字仍为全部连接总量。</p>
             <p id="noise-observation" class="muted traffic-observation" aria-live="polite"
               ><span data-i18n="正在采样白噪音…">正在采样白噪音…</span></p
             >

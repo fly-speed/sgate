@@ -3,6 +3,15 @@
 // UI translations only: editable values and protocol/configuration keys are never translated.
 const sgateI18n = (() => {
   const messages = {
+  "连接 IP": "Connection IP",
+  "全部连接 IP": "All connection IPs",
+  "其他 IP（超出统计上限）": "Other IPs (tracking limit reached)",
+  "未知对端": "Unknown peer",
+  " 个连接": " connections",
+  "（已离线）": " (offline)",
+  " · 累计发送 ": " · Sent ",
+  " · 累计接收 ": " · Received ",
+  "IP 筛选仅影响曲线；客户端按远程服务端 IP、服务端按接入对端 IP 合并统计，不按业务后端或 HTTP 转发头区分。断开后的 IP 统计保留一分钟，顶部数字仍为全部连接总量。": "IP filtering affects only the chart: client peers are remote server IPs; server peers are incoming connection IPs. Backend addresses and HTTP forwarding headers are not used. Closed peers remain for one minute; top cards show all connections.",
   "支持在线修改": "Online changes supported",
   "保存后自动在线更新映射并同步 master_service，未修改映射的连接继续保留。清空时使用单代理 listen；托管模式端口变化会自动通过 acl_master 重启客户端，并中断当前业务连接。": "Saving updates mappings and master_service online, preserving unchanged mappings. Clearing uses the single-proxy listen address. Managed port changes automatically restart the client through acl_master, interrupting current business connections.",
   "无法确定客户端进程，配置已保存，请刷新后重试重启": "Cannot identify the client process; configuration saved. Refresh before retrying the restart.",

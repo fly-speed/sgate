@@ -210,6 +210,7 @@ func (s *session) writeTransport(ws *websocket.Conn, crypt *codec, done <-chan s
 					if next.op == opData {
 						if s.opts.Stats != nil {
 							s.opts.Stats.businessTX.Add(uint64(len(next.data)))
+							s.opts.Stats.peerPayload(ws.NetConn(), "businessTX", len(next.data))
 						}
 						s.noteBusiness()
 					}
@@ -308,6 +309,7 @@ func (s *session) readTransport(
 		if f.op == opData {
 			if s.opts.Stats != nil {
 				s.opts.Stats.businessRX.Add(uint64(len(f.data)))
+				s.opts.Stats.peerPayload(ws.NetConn(), "businessRX", len(f.data))
 			}
 			s.noteBusiness()
 		}
@@ -318,6 +320,7 @@ func (s *session) readTransport(
 			// Padding belongs only to this transport, never to reliable streams.
 			if s.opts.Stats != nil {
 				s.opts.Stats.noiseRX.Add(uint64(len(f.data)))
+				s.opts.Stats.peerPayload(ws.NetConn(), "noiseRX", len(f.data))
 			}
 			s.mu.Lock()
 			s.noiseReceived++
