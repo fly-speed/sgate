@@ -64,12 +64,17 @@ service sgate-client {
     # Local TCP listen address for application connections; master_service controls actual listening in managed mode.
     listen = 127.0.0.1:9000
     # Proxy mappings as a JSON array: each has listen, server and optional addr; empty keeps single-proxy behavior.
-    # A nonempty array replaces top-level listen/server/addr; password, key, TLS, reconnect, heartbeat and padding settings are shared.
+    # A nonempty array replaces top-level listen/server/addr; key, TLS, reconnect, heartbeat and padding settings are shared; each mapping can override username/password.
     # Local ports must differ between mappings; send-addr=false removes addr from every mapping URL.
     # Example: proxies = '[{"listen":"127.0.0.1:9001","server":"ws://127.0.0.1:8081/tunnel?addr=127.0.0.1:22"},{"listen":"127.0.0.1:9002","server":"ws://127.0.0.1:8081/tunnel?addr=127.0.0.1:8088"}]'
     # UI saves update mappings online and synchronize master_service; managed port changes automatically restart the client via master_ctl.
     # Manual file edits must keep master_service and mapping ports consistent; standalone updates preserve unchanged mappings.
-    proxies = '[{"listen":"127.0.0.1:9000","server":"ws://127.0.0.1:8081/tunnel","addr":"127.0.0.1:8080"}]'
+    proxies = ''
+    # Optional JSON array file; relative paths resolve from this .cf directory. Nonempty overrides inline proxies.
+    # On startup a missing file is created privately from inline proxies, or as [] to use single-proxy settings; existing files are preserved.
+    # Each mapping may specify username/password; omitted fields inherit the common credentials below.
+    # UI saves update this file and master_service together; an empty array uses single-proxy settings.
+    proxies-file = 'sgate-proxies.json'
     # Server WebSocket URL using ws:// or wss://; its path must match the server path setting.
     server = ws://127.0.0.1:8081/tunnel
     # Server-side backend; a nonempty value overrides addr in the server URL. Supports IP:port or domain:port.
@@ -79,8 +84,10 @@ service sgate-client {
     send-addr = true
     # Shared encryption key file for both endpoints; relative paths resolve from the process working directory.
     key-file = sgate.key
-    # Tunnel authentication password; must match on both endpoints and is separate from the Web administrator password.
+    # Tunnel authentication password; matches the selected server account, or the legacy server password when username is empty.
     password = 'replace-with-your-password'
+    # Tunnel account username; empty retains legacy password-only authentication. Used by mappings that omit their own username.
+    username = ''
     # Additional trusted CA PEM file for WSS; leave empty to use system trust. Server certificates are still verified.
     tls-ca =
     # Minimum client reconnect backoff interval; actual waits include random jitter.
@@ -101,13 +108,13 @@ service sgate-client {
     noise-interval = 0
     # Set random interval min/max to 1s/3s to send at random 1-3 second intervals.
     # Minimum random padding interval; set both bounds positive, such as 1s/3s, to enable it. The fixed interval must then be 0.
-    noise-interval-min = "10ms"
+    noise-interval-min = "100ms"
     # Maximum random padding interval, such as 3s; must be at least noise-interval-min.
     noise-interval-max = "1s"
     # Minimum random padding payload per burst, in bytes; must be at least 1.
-    noise-min-bytes = "100K"
+    noise-min-bytes = "1K"
     # Maximum random padding payload per burst, in bytes; must be at least the minimum and at most 10M (10485760 bytes). Supports K/M.
-    noise-max-bytes = "1000K"
+    noise-max-bytes = "10K"
     # Send padding during application traffic; true preserves the original behavior, false pauses it during traffic in either direction.
     noise-traffic = true
     # Send padding when application connections exist but neither direction has data; use the interval and size settings above.

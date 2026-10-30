@@ -2,6 +2,8 @@ package app
 
 import (
 	"errors"
+	"flag"
+	"sgate/internal/proxyconfig"
 	"slices"
 	"strings"
 
@@ -11,6 +13,24 @@ import (
 // proxyListeners 使用生效参数生成框架监听，保留命令行优先级。
 // master_args 是下一次托管启动的命令行，不能用旧进程的覆盖值掩盖其修改。
 func (c *controller) proxyListeners(path string) ([]string, error) {
+	return c.proxyListenersWithMappings(path, "", "")
+}
+func (c *controller) mappingCandidate(path, target, staged string) ([]string, error) {
+	if _, err := c.loadWithMappings(path, target, staged); err != nil {
+		return nil, err
+	}
+	return c.proxyListenersWithMappings(path, target, staged)
+}
+func useStagedMappings(fs *flag.FlagSet, target, staged string) {
+	if target == "" {
+		return
+	}
+	values := configValues{flags: fs}
+	if proxyconfig.Path(values.optionalText("config"), values.optionalText("proxies-file")) == target {
+		_ = fs.Set("proxies-file", staged)
+	}
+}
+func (c *controller) proxyListenersWithMappings(path, target, staged string) ([]string, error) {
 	fs := cli.CloneFlags(c.original)
 	args := append([]string(nil), c.args...)
 	if c.isManaged() {
@@ -32,6 +52,7 @@ func (c *controller) proxyListeners(path string) ([]string, error) {
 		// flag 的转换错误可能带出参数原值，不把凭据误当成诊断信息返回。
 		return nil, errors.New("无法解析生效监听参数，请检查命令行覆盖与 master_args")
 	}
+	useStagedMappings(fs, target, staged)
 	d, err := build(c.role, fs, nil)
 	if err != nil {
 		return nil, err

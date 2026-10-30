@@ -196,6 +196,9 @@ func (c *controller) apply() error {
 	return nil
 }
 func (c *controller) load(candidate string) (definition, error) {
+	return c.loadWithMappings(candidate, "", "")
+}
+func (c *controller) loadWithMappings(candidate, target, staged string) (definition, error) {
 	path := candidate
 	if path == "" {
 		path = c.path
@@ -207,7 +210,7 @@ func (c *controller) load(candidate string) (definition, error) {
 		}
 		if merged {
 			if candidate != "" && values["master_args"] != "" {
-				if err := c.validateMasterArgs(candidate, values["master_args"]); err != nil {
+				if err := c.validateMasterArgs(candidate, values["master_args"], target, staged); err != nil {
 					return definition{}, err
 				}
 			}
@@ -240,6 +243,7 @@ func (c *controller) load(candidate string) (definition, error) {
 	if e := cli.Parse(fs, args); e != nil {
 		return definition{}, e
 	}
+	useStagedMappings(fs, target, staged)
 	d, e := build(c.role, fs, c.stats)
 	d.managed = c.managed
 	d.tcp = c.tcp

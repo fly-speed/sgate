@@ -34,10 +34,12 @@ for selected in $roles; do
     scripts="$scripts sgate-$selected-start.sh sgate-$selected-stop.sh"
     sample_configs="$sample_configs ssh-$selected.cf vpn-$selected.cf"
     if [ "$selected" = client ]; then
-        sample_configs="$sample_configs web-client.cf"
+        configs="$configs sgate-proxies.json"
+        sample_configs="$sample_configs web-client.cf sgate-proxies.json"
         sample_scripts="$sample_scripts sshc-start.sh sshc-stop.sh"
     else
         sample_scripts="$sample_scripts sshd-start.sh sshd-stop.sh"
+        sample_configs="$sample_configs sgate-accounts.json"
         licenses="$licenses gin-service"
     fi
 done

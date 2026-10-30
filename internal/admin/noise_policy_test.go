@@ -47,6 +47,9 @@ func TestNoisePolicyFormSaveAndRollback(t *testing.T) {
 	config := object(t, request(h, "GET", "/api/config", nil, cookie, "", ""))
 	for _, raw := range config["fields"].([]any) {
 		field := raw.(map[string]any)
+		if field["group"] == "服务端连接认证" || field["key"] == "proxies-file" {
+			continue
+		}
 		rule := field["validation"].(map[string]any)
 		if rule["live"] != true || rule["hint"] == "" {
 			t.Fatal("missing online flag or hint", field)

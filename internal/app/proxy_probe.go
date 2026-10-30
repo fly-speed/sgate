@@ -25,7 +25,14 @@ func (c *controller) testProxy(ctx context.Context, mapping admin.ProxyMapping) 
 		c.mu.Unlock()
 		return proxyConfigFailure(mapping.Listen, "no effective client configuration")
 	}
+	config.Username, config.Password = c.current.commonUsername, c.current.commonPassword
 	c.mu.Unlock()
+	if mapping.Username != nil {
+		config.Username = *mapping.Username
+	}
+	if mapping.Password != nil {
+		config.Password = *mapping.Password
+	}
 	config.URL, config.Addr = mapping.Server, mapping.Addr
 	config.Options.Stats, config.Options.Live = nil, nil
 	client, err := tunnel.NewClient(config)

@@ -67,6 +67,7 @@
         ><nav
           ><button data-tab="overview" class="selected">◉ <span><span data-i18n="实时概览">实时概览</span></span></button
           ><button data-tab="configuration">☷ <span><span data-i18n="代理配置">代理配置</span></span></button
+          ><button id="tunnel-accounts-nav" data-tab="tunnel-accounts" hidden>♧ <span data-i18n="客户端账号">客户端账号</span></button
           ><button data-tab="account">◇ <span><span data-i18n="账号与会话">账号与会话</span></span></button></nav
         ><div class="aside-bottom"
           ><span class="pulse"></span><span id="side-role"><span data-i18n="代理管理">代理管理</span></span
@@ -180,6 +181,23 @@
             ><span data-i18n="整服务重启使用已保存的配置，会中断业务与管理连接。页面将自动等待服务恢复，登录会话按原有效期保留。未保存的编辑不会应用；若修改了管理地址或证书，请手动打开新地址。">整服务重启使用已保存的配置，会中断业务与管理连接。页面将自动等待服务恢复，登录会话按原有效期保留。未保存的编辑不会应用；若修改了管理地址或证书，请手动打开新地址。</span></p
           ><p id="runtime-state" class="muted"></p><p id="noise-totals" class="muted"></p
         ></section>
+
+        <section id="tunnel-accounts" class="tab" hidden>
+          <div class="section-heading"><div><h2 data-i18n="客户端账号">客户端账号</h2>
+            <p class="muted" data-i18n="管理连接服务端的隧道账号，与 Web 管理员账号相互独立。">管理连接服务端的隧道账号，与 Web 管理员账号相互独立。</p></div>
+            <div class="tunnel-account-actions"><button id="tunnel-accounts-refresh" class="secondary" type="button" data-i18n="刷新列表">刷新列表</button>
+            <button id="tunnel-accounts-reload" class="secondary" type="button" data-i18n="应用账号文件">应用账号文件</button></div>
+          </div>
+          <p id="tunnel-accounts-path" class="muted"></p>
+          <p data-i18n="保存后立即写入 JSON 并生效。修改密码、禁用或删除账号会断开该账号的旧隧道；其他账号不受影响。密码不会回显，留空保留原密码。">保存后立即写入 JSON 并生效。修改密码、禁用或删除账号会断开该账号的旧隧道；其他账号不受影响。密码不会回显，留空保留原密码。</p>
+          <p id="tunnel-accounts-help" class="muted" aria-live="polite"></p>
+          <form id="tunnel-account-create" class="info-card tunnel-account-create">
+            <label><span data-i18n="用户名">用户名</span><input id="tunnel-account-name" maxlength="128" autocomplete="off" required></label>
+            <label><span data-i18n="密码">密码</span><input id="tunnel-account-secret" type="password" maxlength="1024" autocomplete="new-password" required></label>
+            <button id="tunnel-account-add" class="primary" type="submit" data-i18n="新增客户端账号">新增客户端账号</button>
+          </form>
+          <div id="tunnel-account-list" class="info-card"></div>
+        </section>
         <section id="account" class="tab" hidden
           ><div class="section-heading"
             ><div

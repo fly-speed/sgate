@@ -60,7 +60,7 @@ func TestMultiProxyInvalidConfiguration(t *testing.T) {
 	for _, raw := range []string{
 		`[]`, `null`, `{}`, `[{"listen":"127.0.0.1:0","server":"ws://localhost/tunnel"}]`,
 		`[{"listen":"127.0.0.1:19001","server":"http://localhost/tunnel"}]`,
-		`[{"listen":"127.0.0.1:19001","server":"ws://localhost/tunnel","password":"secret"}]`,
+		`[{"listen":"127.0.0.1:19001","server":"ws://localhost/tunnel","password":""}]`,
 		`[{"listen":"127.0.0.1:19001","server":"ws://localhost/tunnel"},{"listen":"0.0.0.0:19001","server":"ws://localhost/tunnel"}]`,
 		`[{"listen":"127.0.0.1:19001","server":"ws://localhost/tunnel"}] {}`,
 	} {

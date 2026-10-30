@@ -14,3 +14,7 @@
 `make install` 把本目录安装到 `${PREFIX}/samples/`，正式配置仅放在 `${PREFIX}/conf/sgate-client.cf`、`${PREFIX}/conf/sgate-server.cf`；默认 `${PREFIX}` 为 `/opt/soft/sgate`。重复安装保留已存在的示例配置，更新模板另存为 `.cf.dist`。
 
 旧版本已安装在 `conf/` 的 SSH、VPN、Web 配置及旧启停脚本会保留，不会由安装程序自动删除。迁移前请先停止对应的旧服务，把需要的监听和后端映射合并到正式配置，再启用统一服务；确认后自行归档旧部署文件。
+
+`sgate-accounts.json` is a disabled example of server tunnel accounts (not Web administrator accounts). Copy it to a private configuration location, replace passwords, enable the required accounts, and set server `accounts-file` to that path. Client `username` and `password` select the account. Protect this file with mode 0600 and reload the server proxy after editing it.
+
+`sgate-proxies.json` is a client mapping-file example with independent credentials per mapping. Copy it to a private configuration directory, change its addresses/passwords, set mode 0600, and select it with `proxies-file`. It is not enabled automatically.

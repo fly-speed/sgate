@@ -490,3 +490,40 @@ Each client mapping has a **Test** button. It probes the row's draft addresses u
 
 
 The live traffic chart supports filtering total, business payload and noise payload by tunnel peer IP. Clients group by the remote server's TCP IP; servers group by the incoming peer IP. Connections from the same IP are combined; HTTP forwarding headers and backend addresses are not used. The filter affects the chart and its IP summary, while top cards retain process totals. Closed peers remain for one minute and are removed on subsequent sampling. Up to 1024 IPs are tracked individually; additional peers share an Other IPs bucket. Per-IP counters may restart after eviction, so rates require two valid consecutive samples.
+
+
+### Multiple tunnel accounts
+
+Set server `accounts-file = tunnel-accounts.json` to enable independent client identities. Relative paths resolve from the service `.cf` directory; `-accounts-file` overrides the file value. At startup, a missing configured account file is created as a version-1 document with an empty accounts array. New directories use mode 0700 and the file uses 0600. The server starts normally, and administrators can add accounts through Client accounts without restarting. The empty list rejects every tunnel and never falls back to the common password. Existing files, including invalid documents, are never overwritten. Leaving accounts-file empty retains legacy authentication. The local JSON schema is:
+
+```json
+{"version":1,"accounts":[{"username":"alice","password":"replace-alice-password"},{"username":"bob","password":"replace-bob-password","disabled":false}]}
+```
+
+Clients can enter credentials in Proxy configuration → Server connection authentication and click Save and apply. Both inputs are available for older configurations missing these keys; saving adds them to the configuration. Unedited passwords are preserved. Alternatively, set `username` and `password` in the `.cf`, or use `-username` and `-password` (CLI values take priority). Mapping entries without independent credentials inherit these settings. Usernames are case-sensitive, contain 1–128 UTF-8 bytes without whitespace or control characters, and passwords contain 1–1024 bytes. Multiple clients may use one account. Usernames and passwords travel together in a request-bound encrypted header using the existing shared `sgate.key`. Sessions are bound to the creating account; another account cannot resume them.
+
+A nonempty `accounts-file` disables legacy password-only authentication. An empty setting preserves the legacy behavior; legacy clients leave `username` empty. Tunnel accounts are separate from Web administrator users. Existing global backend allowlists and session limits still apply. The server-only Client accounts page supports adding users, changing passwords, enabling/disabling and deleting accounts. Saves atomically persist JSON and apply online without restarting the proxy. Password changes, disabling or deletion revoke only that account's existing sessions; other accounts continue. Blank password edits preserve the credential, and list responses never expose passwords. After external JSON edits, refresh the list and click Apply account file; proxy/process restart also reloads it. Saving a changed `accounts-file` loads the selected JSON online without restarting; saving unrelated settings does not reload external JSON. An empty accounts array rejects every account without falling back to the legacy password. Set `disabled: true` to disable an account. Unreadable or invalid files fail closed, and a failed apply retains the running instance.
+
+Protect the plaintext-password JSON like the legacy `.cf` (for example mode 0600), outside the Web asset directory and source control. The file is limited to 1 MiB and 4096 accounts; duplicate usernames and unknown fields are rejected. See `samples/sgate-accounts.json`; sample accounts are disabled. Full/server installation includes the sample without enabling it or overwriting existing account files.
+
+Changing and saving `accounts-file` loads it online, with a Takes effect immediately on save badge. Failed validation/loading retains the original configuration and authentication policy. Clearing it restores the already-active common password, and is rejected if no valid password is active. Mode changes revoke old-mode tunnels; switching files preserves sessions with unchanged credentials. Account management uses the effective CLI-selected accounts-file, requires authenticated same-origin CSRF-protected requests, rejects stale file revisions and restores the file on apply failure. For first use, enter credentials in Client accounts and click Add and enable multiple accounts. The server exclusively creates tunnel-accounts.json beside the .cf, persists accounts-file and enables authentication online without restarting the proxy. Legacy password-only tunnels disconnect on activation. Existing files are never overwritten; select and save an existing file in accounts-file to load it online. An explicit -accounts-file= CLI override remains authoritative and must be removed before UI initialization.
+
+
+### External mapping files and per-mapping credentials
+
+The default client now stores its original mapping in `sgate-proxies.json`, preserving its addresses and inherited credentials. Installation puts this file in `conf/` and preserves existing copies on reinstall. Inline mappings remain supported. Set `proxies-file = 'sgate-proxies.json'` in the client `.cf`, or use `-proxies-file /absolute/path/routes.json`. Relative paths resolve from the `.cf` directory. The JSON file is an array:
+
+```json
+[
+  {"listen":"127.0.0.1:9001","server":"wss://example.com/tunnel","addr":"127.0.0.1:22","username":"alice","password":"alice-password"},
+  {"listen":"127.0.0.1:9002","server":"wss://example.com/tunnel","addr":"127.0.0.1:8080","username":"bob","password":"bob-password"}
+]
+```
+
+A nonempty file option overrides inline `proxies`. An explicit CLI `-proxies` (including empty) overrides a file option from configuration; an explicitly supplied `-proxies-file` wins if both are supplied. Each mapping's username/password overrides the corresponding common credential; omitted fields inherit the common setting, including its CLI override. An explicit empty username selects legacy authentication; an explicit empty password is invalid. Key, TLS, heartbeat and noise settings remain shared.
+
+An empty array uses the single-proxy settings. On startup, a missing file is created from inline mappings, or as `[]` to use single-proxy settings. Relative paths still resolve from the `.cf` directory. New directories use mode 0700 and the file uses 0600; existing files are never overwritten. Permission errors or invalid files still fail with an error. Validation and online loading do not automatically create files. Limits are 1 MiB and 64 mappings. The UI supports independent authentication per mapping and never returns saved passwords. Blank edits preserve an existing independent password; otherwise they inherit the common password. Disable independent authentication to inherit both common credentials. Changing a mapping's listen address requires re-entering its independent password.
+
+Changing `proxies-file` in the UI migrates mappings to a new file or loads an existing file; clearing it migrates mappings back inline. Saves synchronize `master_service`, apply mapping and credential changes online, preserve unchanged mappings, and roll back both files on failure. Managed listener-port changes still restart through `master_ctl`. External JSON edits require reloading and saving/applying; files are not watched automatically.
+
+Protect JSON passwords with mode 0600 and keep the file outside Web assets and source control. UI-created files and backups use 0600. Installation includes the inactive `samples/sgate-proxies.json` example without overwriting existing files.

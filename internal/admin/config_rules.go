@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"sgate/internal/cli"
 )
@@ -58,8 +59,10 @@ func configurationRules() map[string]configRule {
 	add("allowed-targets", configRule{Type: "addresses", Hint: "逗号分隔的 IP或域名:端口；端口范围 1～65535；留空禁止客户端选后端。"})
 	add("master_service", configRule{Type: "listeners", Required: true, Hint: "框架监听格式：IP|端口，多项用逗号分隔，IPv6 用 [地址]|端口；TCP 端口范围 1～65535。unix 类型使用绝对套接字路径。"})
 	add("path", configRule{Type: "route", Hint: "以 / 开头的 URL 路径，不含 ? 或 #；留空使用 /tunnel；不能占用 /admin 管理路径。"})
+	add("username", configRule{Type: "username", Max: "128", Hint: "隧道认证用户名；1～128 个 UTF-8 字节，不含空白或控制字符；留空使用旧单密码模式。"})
 	add("password", configRule{Type: "password", Min: "1", Max: "1024", Hint: "1～1024 个 UTF-8 字节；留空不修改已保存的密码。"})
-	add("key-file tls-ca tls-cert tls-key admin-config admin_web_dir admin_users_file admin_session_dir admin_setup_token_file admin_tls_cert admin_tls_key admin_master_ctl admin_master_socket master_command master_home master_log master_stdout master_stderr tls_cert_file tls_key_file app_queue_dir", configRule{Type: "file", Hint: "文件或目录路径；相对路径按该参数原有规则解析，文件存在性和权限由服务端校验。"})
+	add("proxies-file accounts-file key-file tls-ca tls-cert tls-key admin-config admin_web_dir admin_users_file admin_session_dir admin_setup_token_file admin_tls_cert admin_tls_key admin_master_ctl admin_master_socket master_command master_home master_log master_stdout master_stderr tls_cert_file tls_key_file app_queue_dir", configRule{Type: "file", Hint: "文件或目录路径；相对路径按该参数原有规则解析，文件存在性和权限由服务端校验。"})
+	add("accounts-file", configRule{Type: "file", Hint: "账号 JSON 路径，相对本 .cf 目录解析；保存后在线加载，无需重启。清空恢复已生效的公共密码认证；命令行参数优先。"})
 	for _, key := range strings.Fields("admin_web_dir admin_users_file admin_session_dir admin_setup_token_file master_command") {
 		rule := rules[key]
 		rule.Required = true
@@ -166,6 +169,11 @@ func validateConfigEdit(key, value string) error {
 			return errors.New("需要不含查询参数或片段的绝对 URL 路径")
 		}
 		return nil
+	case "username":
+		if len(value) > 128 || strings.IndexFunc(value, func(c rune) bool { return unicode.IsSpace(c) || unicode.IsControl(c) }) >= 0 {
+			return errors.New("用户名不能超过 128 个 UTF-8 字节，且不能含空白或控制字符")
+		}
+		return nil
 	case "password":
 		if len(value) > 1024 {
 			return errors.New("密码不能超过 1024 个 UTF-8 字节")
@@ -203,8 +211,8 @@ func validateFormAddress(value string, listen bool) error {
 // 只发布参数类型，不包含命令行的真实取值或密码。
 func argumentOptions(role string) map[string]configRule {
 	options := map[string]configRule{}
-	clientOnly := " proxies server addr send-addr tls-ca reconnect-min reconnect-max offline-timeout "
-	serverOnly := " target allowed-targets path tls-cert tls-key session-ttl max-sessions "
+	clientOnly := " username proxies proxies-file server addr send-addr tls-ca reconnect-min reconnect-max offline-timeout "
+	serverOnly := " accounts-file target allowed-targets path tls-cert tls-key session-ttl max-sessions "
 	for key, rule := range configRules {
 		if strings.Contains(key, "_") || key == "master_args" || strings.HasPrefix(key, "app_") {
 			continue

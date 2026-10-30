@@ -8,13 +8,17 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"sgate/internal/proxyconfig"
 )
 
 // ProxyMapping 是表单中的一个映射对；JSON 配置的编码只在服务端进行。
 type ProxyMapping struct {
-	Listen string `json:"listen"`
-	Server string `json:"server"`
-	Addr   string `json:"addr,omitempty"`
+	Listen   string  `json:"listen"`
+	Server   string  `json:"server"`
+	Addr     string  `json:"addr,omitempty"`
+	Username *string `json:"username,omitempty"`
+	Password *string `json:"password,omitempty"`
 }
 
 // Keep internal configuration helpers using the same mapping representation.
@@ -23,8 +27,12 @@ type proxyMapping = ProxyMapping
 func proxyMappings(raw string) ([]proxyMapping, error) {
 	mappings := []proxyMapping{}
 	if strings.TrimSpace(raw) != "" {
-		if err := json.Unmarshal([]byte(raw), &mappings); err != nil {
-			return nil, errors.New("代理映射格式错误，请检查 proxies 配置")
+		parsed, err := proxyconfig.Decode([]byte(raw))
+		if err != nil {
+			return nil, errors.New("代理映射格式错误，请检查 JSON、用户名和密码")
+		}
+		for _, m := range parsed {
+			mappings = append(mappings, proxyMapping{Listen: m.Listen, Server: m.Server, Addr: m.Addr, Username: m.Username, Password: m.Password})
 		}
 	}
 	for i := range mappings {
@@ -58,6 +66,9 @@ func encodeProxyMappings(mappings []proxyMapping) (string, error) {
 	seen := map[int]bool{}
 	for i := range mappings {
 		m := &mappings[i]
+		if err := proxyconfig.Credentials(proxyconfig.Mapping{Username: m.Username, Password: m.Password}); err != nil {
+			return "", err
+		}
 		m.Listen, m.Server, m.Addr = strings.TrimSpace(m.Listen), strings.TrimSpace(m.Server), strings.TrimSpace(m.Addr)
 		_, port, err := net.SplitHostPort(m.Listen)
 		number, portErr := net.LookupPort("tcp", port)
@@ -84,12 +95,23 @@ func encodeProxyMappings(mappings []proxyMapping) (string, error) {
 		}
 	}
 	data, err := json.Marshal(mappings)
+	if len(data) > proxyconfig.MaxBytes {
+		return "", errors.New("proxy mappings exceed 1 MiB")
+	}
 	return string(data), err
 }
 
 func updateMappingFields(current []byte, fields map[string]string, mappings []proxyMapping) (string, error) {
 	if _, exists := fields["proxies"]; exists {
 		return "", errors.New("不能同时提交原始 proxies 值和映射表单")
+	}
+	previous, _, err := mappingConfig(current)
+	if err != nil {
+		return "", err
+	}
+	mappings, err = restoreMappingPasswords(mappings, previous)
+	if err != nil {
+		return "", err
 	}
 	value, err := encodeProxyMappings(mappings)
 	if err != nil {

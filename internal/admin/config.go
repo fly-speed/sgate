@@ -113,16 +113,18 @@ func (c Config) validate() error {
 }
 
 type View struct {
-	Role, AppConfigPath string
-	Stats               *tunnel.Stats
-	Validate            func(path string) error
-	ProxyListeners      func(path string) ([]string, error)
-	TestProxy           func(context.Context, ProxyMapping) (tunnel.ProbeResult, error)
-	Apply               func() error
-	ApplyLive           func([]string) error
-	LiveFields          []string
-	Runtime             func() any
-	RestartService      func(control, socket string, expectedPID int) error
+	Role, AppConfigPath  string
+	Stats                *tunnel.Stats
+	Validate             func(path string) error
+	ProxyListeners       func(path string) ([]string, error)
+	MappingCandidate     func(path, target, staged string) ([]string, error)
+	TestProxy            func(context.Context, ProxyMapping) (tunnel.ProbeResult, error)
+	ManageTunnelAccounts func(*TunnelAccountChange) (TunnelAccountsSnapshot, error)
+	Apply                func() error
+	ApplyLive            func([]string) error
+	LiveFields           []string
+	Runtime              func() any
+	RestartService       func(control, socket string, expectedPID int) error
 }
 
 // Shared creates only a handler and session reaper. The proxy's HTTP service

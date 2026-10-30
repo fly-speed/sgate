@@ -82,7 +82,17 @@ func verifyPassword(key []byte, password, token, id, nonce, ts, resume, uri stri
 }
 
 func requestHeaders(key []byte, password, id, nonce, ts, resume, uri string) (http.Header, error) {
-	token, err := encryptPassword(key, password, id, nonce, ts, resume, uri)
+	return accountRequestHeaders(key, "", password, id, nonce, ts, resume, uri)
+}
+
+func accountRequestHeaders(key []byte, username, password, id, nonce, ts, resume, uri string) (http.Header, error) {
+	var token string
+	var err error
+	if username == "" {
+		token, err = encryptPassword(key, password, id, nonce, ts, resume, uri)
+	} else {
+		token, err = encryptAccount(key, username, password, id, nonce, ts, resume, uri)
+	}
 	if err != nil {
 		return nil, err
 	}

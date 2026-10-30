@@ -115,8 +115,18 @@ func (c *controller) applyLive(keys []string) error {
 	if _, err = tunnel.NewLiveSettings(value); err != nil {
 		return err
 	}
-	if slices.Contains(keys, "proxies") || slices.Contains(keys, "master_service") {
+	if slices.Contains(keys, "proxies-file") || slices.Contains(keys, "proxies") || slices.Contains(keys, "master_service") {
 		if err = c.replaceClientMappings(next); err != nil {
+			return err
+		}
+	}
+	if c.role == "server" && slices.Contains(keys, "accounts-file") {
+		if next.accountsFile == "" {
+			err = c.worker.server.UseLegacyAuthentication()
+		} else {
+			err = c.worker.server.UpdateAccounts(next.server.Accounts)
+		}
+		if err != nil {
 			return err
 		}
 	}
@@ -129,6 +139,10 @@ func (c *controller) applyLive(keys []string) error {
 		return err
 	}
 	c.current = c.current.withLiveConfig(value)
+	if c.role == "server" && slices.Contains(keys, "accounts-file") {
+		c.current.accountsFile = next.accountsFile
+		c.current.server.Accounts = slices.Clone(next.server.Accounts)
+	}
 	if c.role == "server" && slices.Contains(keys, "allowed-targets") {
 		c.current.server.AllowedTargets = slices.Clone(next.server.AllowedTargets)
 	}
@@ -139,10 +153,10 @@ func (c *controller) applyLive(keys []string) error {
 func (c *controller) liveFields() []string {
 	fields := tunnel.LiveFields()
 	if c.role == "client" && c.tcp != nil {
-		fields = append(fields, "proxies", "master_service")
+		fields = append(fields, "proxies", "proxies-file", "master_service")
 	}
 	if c.role == "server" {
-		fields = append(fields, "allowed-targets")
+		fields = append(fields, "allowed-targets", "accounts-file")
 		fields = slices.DeleteFunc(fields, func(key string) bool { return key == "reconnect-min" || key == "reconnect-max" })
 	}
 	return fields

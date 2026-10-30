@@ -29,6 +29,8 @@ func setRoute(service *mastergin.GinService, proxyPath string, management http.H
 			group.POST("/api/login", admin)
 			group.POST("/api/logout", admin)
 			group.PUT("/api/account", admin)
+			group.GET("/api/tunnel-accounts", admin)
+			group.PUT("/api/tunnel-accounts", admin)
 			group.GET("/api/stats", admin)
 			group.GET("/api/config", admin)
 			group.PUT("/api/config", admin)

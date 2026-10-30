@@ -14,6 +14,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"sgate/internal/proxyconfig"
 )
 
 const secretMarker = "__SGATE_KEEP_EXISTING_PASSWORD__"
@@ -126,6 +128,8 @@ func (h *Handler) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch {
+	case r.URL.Path == "/api/tunnel-accounts" && (r.Method == "GET" || r.Method == "PUT"):
+		h.tunnelAccounts(w, r)
 	case r.URL.Path == "/api/stats" && r.Method == "GET":
 		reply(w, 200, h.view.Stats.Snapshot())
 	case r.URL.Path == "/api/config" && r.Method == "GET":
@@ -227,6 +231,7 @@ func (h *Handler) applyProxy(w http.ResponseWriter, r *http.Request) {
 	b, e := regularRead(h.view.AppConfigPath, 1<<20)
 	if e == nil {
 		h.startupRevision = h.restartDigest(b)
+		h.startupContent = append([]byte(nil), b...)
 	}
 	reply(w, 200, map[string]any{"applied": true})
 }
@@ -417,6 +422,22 @@ func secretConfigKey(line string) string {
 func redactConfig(b []byte) string {
 	lines := strings.Split(string(b), "\n")
 	for i, line := range lines {
+		key, raw, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if ok && strings.TrimSpace(key) == "proxies" {
+			value, _, err := fieldValue(raw, true)
+			mappings, parseErr := proxyMappings(value)
+			if err == nil && parseErr == nil {
+				if value == "" {
+					continue
+				}
+				data, _ := json.Marshal(maskedMappings(mappings))
+				prefix, _, _ := strings.Cut(line, "=")
+				lines[i] = prefix + "= " + strconv.Quote(string(data))
+			} else {
+				lines[i] = "proxies = " + strconv.Quote(secretMarker)
+			}
+			continue
+		}
 		if secretConfigKey(line) != "" {
 			key, _, _ := strings.Cut(line, "=")
 			lines[i] = key + "= " + strconv.Quote(secretMarker)
@@ -443,7 +464,33 @@ func restoreSecret(content string, current []byte) (string, error) {
 			}
 		}
 	}
-	return strings.Join(lines, "\n"), nil
+	restored := strings.Join(lines, "\n")
+	mappings, _, err := mappingConfig([]byte(restored))
+	if err != nil {
+		return "", err
+	}
+	hasMarker := false
+	for _, m := range mappings {
+		if m.Password != nil && *m.Password == secretMarker {
+			hasMarker = true
+		}
+	}
+	if hasMarker {
+		previous, _, err := mappingConfig(current)
+		if err != nil {
+			return "", err
+		}
+		mappings, err = restoreMappingPasswords(mappings, previous)
+		if err != nil {
+			return "", err
+		}
+		raw, err := encodeProxyMappings(mappings)
+		if err != nil {
+			return "", err
+		}
+		return updateConfigFields([]byte(restored), map[string]string{"proxies": raw})
+	}
+	return restored, nil
 }
 func (h *Handler) getConfig(w http.ResponseWriter) {
 	h.mu.Lock()
@@ -477,23 +524,49 @@ func (h *Handler) getConfig(w http.ResponseWriter) {
 			fields[i].Validation.Options = argumentOptions(h.view.Role)
 		}
 	}
+	configRevision := digest(b)
 	if h.view.Role == "client" {
+		fields = clientCredentialFields(fields)
+		mappings, mappingPath, snapshotRevision, err := h.mappingSnapshot(b)
+		if err != nil {
+			problem(w, 500, err.Error())
+			return
+		}
+		configRevision = snapshotRevision
+		hasFile, hasMappings := false, false
+		for _, field := range fields {
+			if field.Key == "proxies-file" {
+				hasFile = true
+			}
+			if field.Key == "proxies" {
+				hasMappings = true
+			}
+		}
+		if !hasFile {
+			fields = append(fields, configField{Key: "proxies-file", Group: "代理与通道", Validation: ruleForConfig("proxies-file"), Description: "独立 JSON 映射文件；相对路径按客户端配置文件目录解析，留空使用内联 proxies。"})
+		}
+		if !hasMappings && mappingPath != "" {
+			fields = append(fields, configField{Key: "proxies", Group: "代理与通道", Validation: ruleForConfig("proxies")})
+		}
 		for i := range fields {
-			if fields[i].Key != "proxies" {
-				continue
+			if fields[i].Key == "proxies-file" && slices.Contains(h.view.LiveFields, "proxies-file") && h.view.ApplyLive != nil {
+				fields[i].Validation.Live = true
 			}
-			fields[i].Mappings, e = proxyMappings(fields[i].Value)
-			if e != nil {
-				problem(w, 500, e.Error())
-				return
+		}
+		for i := range fields {
+			if fields[i].Key == "proxies" {
+				fields[i].Kind = "proxies"
+				fields[i].Value = ""
+				fields[i].Mappings = maskedMappings(mappings)
+				fields[i].Validation.Live = h.view.ApplyLive != nil
 			}
-			fields[i].Kind, fields[i].Value = "proxies", ""
 		}
 	}
+
 	v := map[string]any{
 		"fields":               fields,
 		"content":              redactConfig(b),
-		"revision":             digest(b),
+		"revision":             configRevision,
 		"requires_restart":     h.restartDigest(b) != h.startupRevision || h.mappingRestartPending,
 		"path":                 h.view.AppConfigPath,
 		"role":                 h.view.Role,
@@ -533,23 +606,55 @@ func (h *Handler) putConfig(w http.ResponseWriter, r *http.Request) {
 		problem(w, 500, "无法读取代理配置")
 		return
 	}
-	if input.Revision == "" || input.Revision != digest(current) {
+	if input.Revision == "" || input.Revision != h.configRevision(current) {
 		problem(w, 409, "配置已被其他操作修改，请重新加载后再编辑")
 		return
 	}
+	if h.view.Role == "client" && input.Proxies == nil {
+		if path, changed := input.Fields["proxies-file"]; changed {
+			mappings, _, err := h.savedMappings(current)
+			if err != nil {
+				problem(w, 400, err.Error())
+				return
+			}
+			if path != "" {
+				raw, readErr := regularRead(proxyconfig.Path(h.view.AppConfigPath, path), proxyconfig.MaxBytes)
+				if readErr == nil {
+					mappings, err = proxyMappings(string(raw))
+				} else if !os.IsNotExist(readErr) {
+					err = errors.New("无法读取映射文件，请检查路径和权限")
+				}
+				if err != nil {
+					problem(w, 400, err.Error())
+					return
+				}
+			}
+			input.Proxies = &mappings
+		}
+	}
+	var mappingSave *mappingFileSave
+	defer func() { mappingSave.cleanup() }()
 	if input.Fields != nil || input.Proxies != nil {
 		if input.Content != "" {
 			problem(w, 400, "不能同时提交表单和文件内容")
 			return
+		}
+		editable := current
+		if h.view.Role == "client" {
+			editable, e = prepareClientConfigEdits(current, input.Fields)
+			if e != nil {
+				problem(w, 400, e.Error())
+				return
+			}
 		}
 		if input.Proxies != nil {
 			if h.view.Role != "client" {
 				problem(w, 400, "只有客户端支持代理映射")
 				return
 			}
-			input.Content, e = updateMappingFields(current, input.Fields, *input.Proxies)
+			input.Content, mappingSave, e = h.prepareMappingFile(editable, input.Fields, *input.Proxies)
 		} else {
-			input.Content, e = updateConfigFields(current, input.Fields)
+			input.Content, e = updateConfigFields(editable, input.Fields)
 		}
 		if e != nil {
 			problem(w, 400, e.Error())
@@ -580,7 +685,15 @@ func (h *Handler) putConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	var synced map[string]string
 	if input.Proxies != nil {
-		content, synced, e = h.syncMappingListeners(name, content, input.Fields, *input.Proxies)
+		if mappingSave != nil && h.view.MappingCandidate != nil {
+			var addresses []string
+			addresses, e = h.view.MappingCandidate(name, mappingSave.path, mappingSave.staged)
+			if e == nil {
+				content, synced, e = h.syncMappingListeners(name, content, input.Fields, *input.Proxies, addresses)
+			}
+		} else {
+			content, synced, e = h.syncMappingListeners(name, content, input.Fields, *input.Proxies)
+		}
 		if e != nil {
 			problem(w, 400, e.Error())
 			return
@@ -592,18 +705,30 @@ func (h *Handler) putConfig(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if e = h.view.Validate(name); e != nil {
+	if mappingSave != nil && h.view.MappingCandidate != nil {
+		_, e = h.view.MappingCandidate(name, mappingSave.path, mappingSave.staged)
+	} else {
+		e = h.view.Validate(name)
+	}
+	if e != nil {
 		problem(w, 400, "配置校验失败："+e.Error())
 		return
 	}
 	// A validator may perform slow certificate/key reads. Detect external edits
 	// made during that work before committing the candidate.
 	latest, readErr := regularRead(h.view.AppConfigPath, 1<<20)
-	if readErr != nil || digest(latest) != input.Revision {
+	if readErr != nil || h.configRevision(latest) != input.Revision {
 		problem(w, 409, "校验期间配置发生变化，请重新加载后再编辑")
 		return
 	}
-	h.commitConfig(w, current, content, input.Apply, synced)
+	if mappingSave != nil {
+		content, e = updateConfigFields([]byte(content), map[string]string{"proxies-file": mappingSave.configured})
+		if e != nil {
+			problem(w, 400, e.Error())
+			return
+		}
+	}
+	h.commitConfig(w, current, content, input.Apply, synced, mappingSave)
 }
 
 // commitConfig 在 h.mu 持有期间执行：先备份并保存，应用失败则恢复原文件。
@@ -613,20 +738,38 @@ func (h *Handler) commitConfig(
 	content string,
 	apply bool,
 	synced map[string]string,
+	mappings ...*mappingFileSave,
 ) {
+	var mappingSave *mappingFileSave
+	if len(mappings) > 0 {
+		mappingSave = mappings[0]
+	}
+	fail := func(status int, message string) {
+		if rollbackErr := mappingSave.rollback(); rollbackErr != nil {
+			message += "；映射文件回滚失败，请检查备份"
+		}
+		problem(w, status, message)
+	}
+	if e := mappingSave.write(); e != nil {
+		problem(w, 409, e.Error())
+		return
+	}
 	var e error
 	if e = atomicFile(h.view.AppConfigPath+".bak", current); e != nil {
-		problem(w, 500, "无法保存配置备份")
+		fail(500, "无法保存配置备份")
 		return
 	}
 	if e = atomicFile(h.view.AppConfigPath, []byte(content)); e != nil {
-		problem(w, 500, "配置保存失败")
+		fail(500, "配置保存失败")
 		return
 	}
 	live := h.changedLiveFields(current, content)
+	if mappingSave != nil && h.view.ApplyLive != nil && !slices.Contains(live, "proxies") {
+		live = append(live, "proxies")
+	}
 	requiresRestart := h.restartDigest([]byte(content)) != h.startupRevision || h.mappingRestartPending
 	// 有非热参数待应用时保持原重启流程，否则不触碰现有隧道和业务连接。
-	mappingLive := slices.Contains(live, "proxies") || slices.Contains(live, "master_service")
+	mappingLive := slices.Contains(live, "proxies-file") || slices.Contains(live, "proxies") || slices.Contains(live, "master_service")
 	restart := apply && (h.view.ApplyLive == nil || requiresRestart || len(live) == 0)
 	if restart {
 		if h.view.Apply == nil {
@@ -645,10 +788,10 @@ func (h *Handler) commitConfig(
 	}
 	if e != nil {
 		if restoreErr := atomicFile(h.view.AppConfigPath, current); restoreErr != nil {
-			problem(w, 500, "应用失败，且无法恢复配置文件："+e.Error())
+			fail(500, "应用失败，且无法恢复配置文件："+e.Error())
 			return
 		}
-		problem(w, 409, e.Error())
+		fail(409, e.Error())
 		return
 	}
 	if mappingLive {
@@ -657,14 +800,20 @@ func (h *Handler) commitConfig(
 	}
 	if restart {
 		h.startupRevision = h.restartDigest([]byte(content))
+		h.startupContent = []byte(content)
 		requiresRestart = false
 	}
 	result := map[string]any{
-		"revision": digest([]byte(content)), "requires_restart": requiresRestart,
+		"revision": h.configRevision([]byte(content)), "requires_restart": requiresRestart,
 		"applied": restart, "live_applied": live, "service_restart_required": serviceRestart,
 	}
 	if len(synced) > 0 {
 		result["synced_fields"] = synced
+	}
+	if h.view.Role == "client" && (mappingSave != nil || mappingLive) {
+		if mappings, _, err := h.savedMappings([]byte(content)); err == nil {
+			result["proxy_mappings"] = maskedMappings(mappings)
+		}
 	}
 	if h.view.Runtime != nil {
 		result["runtime"] = h.view.Runtime()

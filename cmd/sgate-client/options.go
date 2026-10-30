@@ -16,10 +16,12 @@ type clientOptions struct {
 	listen           string
 	server           string
 	proxies          string
+	proxiesFile      string
 	addr             string
 	sendAddr         bool
 	keyFile          string
 	password         string
+	username         string
 	ca               string
 	minRetry         time.Duration
 	maxRetry         time.Duration
@@ -51,6 +53,7 @@ func parseClientOptions() (clientOptions, error) {
 	)
 	flag.StringVar(&options.listen, "listen", "127.0.0.1:9000", "local TCP listen address")
 	flag.StringVar(&options.server, "server", "", "server WebSocket URL (required unless proxies is set)")
+	flag.StringVar(&options.proxiesFile, "proxies-file", "", "external JSON mapping file; relative to the application config; created on startup if missing; overrides inline proxies")
 	flag.StringVar(&options.proxies, "proxies", "", "JSON array of listen/server/addr mappings; empty uses single-proxy settings")
 	flag.BoolVar(
 		&options.sendAddr,
@@ -60,6 +63,7 @@ func parseClientOptions() (clientOptions, error) {
 	)
 	flag.StringVar(&options.addr, "addr", "", "optional server-side backend host:port; overrides server URL addr when nonempty")
 	flag.StringVar(&options.keyFile, "key-file", "", "shared key file (defaults to SGATE_KEY environment variable)")
+	flag.StringVar(&options.username, "username", "", "tunnel account username; empty uses legacy single-password authentication")
 	flag.StringVar(&options.password, "password", "", "connection authentication password (required)")
 	flag.StringVar(&options.ca, "tls-ca", "", "additional trusted CA PEM file")
 	flag.DurationVar(&options.minRetry, "reconnect-min", 250*time.Millisecond, "minimum reconnect interval")

@@ -228,7 +228,7 @@ func (s *Server) serveProbe(w http.ResponseWriter, r *http.Request, request tunn
 	s.mu.Lock()
 	s.reapLocked(time.Now())
 	_, replay := s.nonces[request.nonce]
-	allowed := !s.closed && !replay && len(s.nonces) < 100000
+	allowed := !s.closed && s.authorizedLocked(request) && !replay && len(s.nonces) < 100000
 	if allowed {
 		s.nonces[request.nonce] = time.Now()
 	}
@@ -266,6 +266,13 @@ func (s *Server) executeProbeCommand(ctx context.Context, ws *websocket.Conn, cr
 	}
 	if command.Command != probeConnectCommand || command.TestID != request.id {
 		s.rejectProbeCommand(ctx, ws, crypt, request, errors.New("invalid command or test ID"))
+		return
+	}
+	s.mu.Lock()
+	allowed := !s.closed && s.authorizedLocked(request)
+	s.mu.Unlock()
+	if !allowed {
+		s.rejectProbeCommand(ctx, ws, crypt, request, errors.New("authentication policy changed; retry the test"))
 		return
 	}
 	s.cfg.Options.Logf("test_id=%s command=%s received: peer=%q target=%q", request.id, probeConnectCommand, peer, request.target)

@@ -40,6 +40,7 @@ class Case(noise.Case):
                 elif key in [
                     "admin-config",
                     "addr",
+                    "proxies-file",
                     "tls-cert",
                     "tls-key",
                     "tls-ca",

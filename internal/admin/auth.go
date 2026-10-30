@@ -55,6 +55,7 @@ type Handler struct {
 	view                  View
 	cookie                string
 	startupRevision       string
+	startupContent        []byte
 	mappingRestartPending bool
 	mu                    sync.Mutex
 	attempts              map[string]attempt
@@ -174,6 +175,7 @@ func New(c Config, v View) (*Handler, error) {
 	h.cookie = "sgate_admin_" + digest([]byte(identity))[:12]
 	if b, e := regularRead(v.AppConfigPath, 1<<20); e == nil {
 		h.startupRevision = h.restartDigest(b)
+		h.startupContent = append([]byte(nil), b...)
 	} else {
 		return nil, e
 	}

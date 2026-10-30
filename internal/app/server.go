@@ -19,6 +19,9 @@ func NewServer(ctx context.Context, fs *flag.FlagSet, args []string, adminPath s
 	if err != nil {
 		return nil, err
 	}
+	if err := c.initializeAccountsFile(); err != nil {
+		return nil, err
+	}
 	next, err := c.load("")
 	if err != nil {
 		return nil, err

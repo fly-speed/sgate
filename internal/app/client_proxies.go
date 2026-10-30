@@ -1,42 +1,50 @@
 package app
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"strings"
 	"sync"
 
+	"sgate/internal/proxyconfig"
 	"sgate/internal/tunnel"
 )
 
 // 每个监听端口拥有自己的会话、重放缓存和远程 URL；通用安全及心跳参数共用。
 type clientProxy struct {
-	Listen string `json:"listen"`
-	Server string `json:"server"`
-	Addr   string `json:"addr,omitempty"`
-	config tunnel.ClientConfig
-	port   string
+	Listen   string  `json:"listen"`
+	Server   string  `json:"server"`
+	Addr     string  `json:"addr,omitempty"`
+	Username *string `json:"username,omitempty"`
+	Password *string `json:"password,omitempty"`
+	config   tunnel.ClientConfig
+	port     string
 }
 
 func (v configValues) multiClientConfigs(secret []byte, options tunnel.Options) ([]clientProxy, error) {
-	flag := v.flags.Lookup("proxies")
-	if flag == nil || strings.TrimSpace(flag.Value.String()) == "" {
+	raw := v.optionalText("proxies")
+	path := proxyconfig.Path(v.optionalText("config"), v.optionalText("proxies-file"))
+	if path != "" {
+		data, err := proxyconfig.Read(path)
+		if err != nil {
+			return nil, err
+		}
+		raw = string(data)
+	}
+	if strings.TrimSpace(raw) == "" && path == "" {
 		return nil, nil
 	}
-	var routes []clientProxy
-	decoder := json.NewDecoder(strings.NewReader(flag.Value.String()))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&routes); err != nil {
-		return nil, errors.New("proxies must be a JSON array of listen/server/addr mappings")
+	mappings, err := proxyconfig.Decode([]byte(raw))
+	if err != nil {
+		return nil, err
 	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		return nil, errors.New("unexpected data after proxies")
-	}
-	if len(routes) == 0 || len(routes) > 64 {
+	if len(mappings) == 0 && path == "" {
 		return nil, errors.New("proxies requires 1 to 64 mappings")
+	}
+	routes := make([]clientProxy, len(mappings))
+	for i, m := range mappings {
+		routes[i] = clientProxy{Listen: m.Listen, Server: m.Server, Addr: m.Addr, Username: m.Username, Password: m.Password}
 	}
 	seen := make(map[string]bool)
 	tlsConfig, err := clientTLSConfig(v.text("tls-ca"))
@@ -60,6 +68,12 @@ func (v configValues) multiClientConfigs(secret []byte, options tunnel.Options) 
 		route.Listen = address.String()
 		route.config = common
 		route.config.URL, route.config.Addr = route.Server, route.Addr
+		if route.Username != nil {
+			route.config.Username = *route.Username
+		}
+		if route.Password != nil {
+			route.config.Password = *route.Password
+		}
 		if _, err := tunnel.NewClient(route.config); err != nil {
 			return nil, fmt.Errorf("proxies[%d]: %w", index, err)
 		}

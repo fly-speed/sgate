@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "accounts": [
+    {
+      "username": "alice",
+      "password": "replace-with-a-unique-password-for-alice",
+      "disabled": true
+    },
+    {
+      "username": "bob",
+      "password": "replace-with-a-unique-password-for-bob",
+      "disabled": true
+    }
+  ]
+}

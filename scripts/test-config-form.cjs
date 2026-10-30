@@ -1256,3 +1256,205 @@ test("IP chart samples isolate peers, metrics and reset gaps without changing to
   assert.equal(select.value, "127.0.0.1");
   assert.match(select.children.at(-1).textContent, /已离线/);
 });
+
+test("tunnel usernames validate UTF-8 length and whitespace in both languages", async () => {
+  const { context, elements } = await page();
+  elements.get("traffic-chart").clientWidth = 0;
+  for (const lang of ["zh-CN", "en"]) {
+    vm.runInContext(`sgateI18n.setLanguage(${JSON.stringify(lang)})`, context);
+    assert.equal(vm.runInContext('configValueError("username", "客户A", {type:"username"}, {})', context), "");
+    assert.equal(vm.runInContext('configValueError("username", "", {type:"username"}, {})', context), "");
+    assert.notEqual(vm.runInContext('configValueError("username", "two names", {type:"username"}, {})', context), "");
+    assert.notEqual(vm.runInContext('configValueError("username", "界".repeat(43), {type:"username"}, {})', context), "");
+  }
+});
+
+test("tunnel account rows hide existing passwords and retain other drafts across live saves", async () => {
+  const { context, elements } = await page();
+  context.accountsView = {enabled:true,path:"/private/accounts.json",revision:"v1",accounts:[{username:"alice",disabled:false},{username:"bob",disabled:false}]};
+  vm.runInContext('state={authenticated:true,role:"server"}; renderTunnelAccounts(accountsView)', context);
+  assert.equal(vm.runInContext('tunnelAccountRows[0].password.value',context), "");
+  assert.equal(vm.runInContext('tunnelAccountRows[0].saveButton.disabled',context), true);
+  vm.runInContext('tunnelAccountRows[1].password.value="bob-unsaved-secret"; tunnelAccountRows[1].password.listeners.input()',context);
+  let payload;
+  context.api = async (path,options) => {
+    assert.equal(path,"tunnel-accounts");
+    payload=JSON.parse(options.body);
+    return {...context.accountsView,revision:"v2",accounts:[{username:"alice",disabled:true},{username:"bob",disabled:false}]};
+  };
+  await vm.runInContext('saveTunnelAccount({action:"update",username:"alice",password:"",disabled:true})',context);
+  assert.equal(payload.revision,"v1");
+  assert.equal(payload.password,"");
+  assert.equal(vm.runInContext('tunnelAccountRows[1].password.value',context),"bob-unsaved-secret");
+  assert.equal(vm.runInContext('tunnelAccountRows[0].enabled.checked',context),false);
+  assert.equal(vm.runInContext('tunnelAccountsRevision',context),"v2");
+  assert.match(elements.get("notice").textContent,/已保存并立即生效/);
+});
+
+test("tunnel account failures preserve drafts and never report success", async () => {
+  const { context,elements }=await page();
+  context.accountsView={enabled:true,revision:"old",accounts:[{username:"alice",disabled:false}]};
+  vm.runInContext('state={authenticated:true,role:"server"}; renderTunnelAccounts(accountsView); tunnelAccountRows[0].password.value="unsaved-secret"',context);
+  context.api=async()=>{throw new Error("客户端账号文件已变化，请刷新列表后重试")};
+  await vm.runInContext('saveTunnelAccount({action:"update",username:"alice",password:"unsaved-secret"})',context);
+  assert.equal(vm.runInContext('tunnelAccountRows[0].password.value',context),"unsaved-secret");
+  assert.equal(vm.runInContext('tunnelAccountsRevision',context),"old");
+  assert.equal(vm.runInContext('tunnelAccountRows[0].saveButton.disabled',context),false);
+  assert.match(elements.get("notice").textContent,/刷新列表/);
+});
+
+test("tunnel account deletion needs confirmation and client pages never load server identities", async () => {
+  const { context }=await page();
+  context.accountsView={enabled:true,revision:"v1",accounts:[{username:"alice",disabled:false}]};
+  vm.runInContext('state={authenticated:true,role:"server"}; renderTunnelAccounts(accountsView)',context);
+  let calls=0;
+  context.api=async()=>{calls++;return {enabled:true,revision:"v2",accounts:[]}};
+  vm.runInContext('tunnelAccountRows[0].deleteButton.listeners.click()',context);
+  assert.equal(calls,0);
+  vm.runInContext('tunnelAccountRows[0].deleteButton.listeners.click()',context);
+  await new Promise(setImmediate);
+  assert.equal(calls,1);
+  assert.equal(vm.runInContext('tunnelAccountRows.length',context),0);
+  vm.runInContext('state.role="client"',context);
+  await vm.runInContext('loadTunnelAccounts()',context);
+  assert.equal(calls,1);
+});
+
+test("logout clears client-account secrets and ignores a delayed account list", async () => {
+  const { context,elements }=await page();
+  let finish;
+  context.api=()=>new Promise(resolve=>{finish=resolve});
+  vm.runInContext('state={authenticated:true,role:"server"}',context);
+  const pending=vm.runInContext('loadTunnelAccounts()',context);
+  elements.get("tunnel-account-secret").value="new-account-draft";
+  vm.runInContext('epoch++;state={authenticated:false};renderSignedOut()',context);
+  finish({enabled:true,revision:"late",accounts:[{username:"alice",disabled:false}]});
+  await pending;
+  assert.equal(elements.get("tunnel-account-secret").value,"");
+  assert.equal(vm.runInContext('tunnelAccountRows.length',context),0);
+  assert.equal(elements.get("tunnel-account-list").children.length,0);
+});
+
+test("first client account has editable inputs and creates and enables its JSON from the page", async () => {
+  const { context,elements }=await page();
+  context.setupView={enabled:false,can_create:true,revision:"config-v1",path:"/private/tunnel-accounts.json",accounts:[]};
+  vm.runInContext('state={authenticated:true,role:"server"}; fields.push({key:"accounts-file",value:"",group:"代理与通道"}); renderConfigFields(fields,{},"server"); renderTunnelAccounts(setupView)',context);
+  assert.equal(elements.get("tunnel-account-name").disabled,false);
+  assert.equal(elements.get("tunnel-account-secret").disabled,false);
+  assert.equal(elements.get("tunnel-account-add").disabled,false);
+  assert.equal(elements.get("tunnel-accounts-reload").disabled,true);
+  assert.match(elements.get("tunnel-account-add").textContent,/启用多账号/);
+  vm.runInContext('configInputs.find(row=>row.key==="target").input.value="unsaved-other-target"; configInputs.find(row=>row.key==="target").input.listeners.input()',context);
+  elements.get("tunnel-account-name").value="alice";
+  elements.get("tunnel-account-secret").value="new-secret";
+  let payload;
+  context.api=async(_,options)=>{
+    payload=JSON.parse(options.body);
+    return {enabled:true,revision:"json-v1",config_changed:true,config_revision:"config-v2",path:"/private/tunnel-accounts.json",accounts:[{username:"alice",disabled:false}]};
+  };
+  await vm.runInContext('saveTunnelAccount({action:"create",username:"alice",password:"new-secret"})',context);
+  assert.equal(payload.revision,"config-v1");
+  assert.equal(vm.runInContext('revision',context),"config-v2");
+  assert.equal(vm.runInContext('configInputs.find(row=>row.key==="accounts-file").input.value',context),"/private/tunnel-accounts.json");
+  assert.equal(vm.runInContext('configInputs.find(row=>row.key==="target").input.value',context),"unsaved-other-target");
+  assert.equal(elements.get("tunnel-account-secret").value,"");
+  assert.equal(elements.get("tunnel-accounts-reload").disabled,false);
+});
+
+test("explicit disabled accounts show the reason while username and password stay editable", async () => {
+  const { context,elements }=await page();
+  context.setupView={enabled:false,can_create:false,setup_message:"命令行将 accounts-file 设为空，请移除此覆盖并重启后再新增账号",accounts:[]};
+  vm.runInContext('renderTunnelAccounts(setupView)',context);
+  assert.equal(elements.get("tunnel-account-name").disabled,false);
+  assert.equal(elements.get("tunnel-account-secret").disabled,false);
+  assert.equal(elements.get("tunnel-account-add").disabled,true);
+  assert.match(elements.get("tunnel-accounts-help").textContent,/命令行/);
+});
+
+
+test("client credentials are editable, grouped, masked and saved together with CLI badges", async () => {
+  const { context, elements } = await page();
+  context.credentials = [
+    {key:"username",value:"alice",group:"服务端连接认证",validation:{type:"username",max:"128"}},
+    {key:"password",value:"__SGATE_KEEP_EXISTING_PASSWORD__",secret:true,group:"服务端连接认证",validation:{type:"password",min:"1",max:"1024"}},
+  ];
+  vm.runInContext('renderConfigFields(credentials, {cli_overrides:["username"]}, "client")', context);
+  const username = vm.runInContext('configInputs.find(e => e.key === "username")', context);
+  const password = vm.runInContext('configInputs.find(e => e.key === "password")', context);
+  assert.equal(username.input.disabled, false);
+  assert.equal(password.input.disabled, false);
+  assert.equal(password.input.type, "password");
+  assert.equal(password.input.value, "");
+  const group = elements.get("config-fields").children.find(g => g.children[0].textContent === "服务端连接认证");
+  assert.ok(group);
+  assert.equal(group.children[1].children[0].children[0].textContent, "服务端账号 (username)");
+  assert.equal(group.children[1].children[0].children[2].textContent, "命令行优先");
+  assert.equal(vm.runInContext('JSON.stringify(configEdits())', context), "{}");
+  username.input.value = "bad user";
+  username.input.listeners.input();
+  assert.match(username.input.validationMessage, /空白/);
+  username.input.value = "bob";
+  username.input.listeners.input();
+  password.input.value = "bob-secret";
+  password.input.listeners.input();
+  let payload;
+  context.api = async (_, options) => {
+    if (options) { payload = JSON.parse(options.body); return {applied:true}; }
+    return {fields:context.credentials,role:"client",revision:"saved"};
+  };
+  vm.runInContext('revision="before"; state.authenticated=true', context);
+  await vm.runInContext('saveConfig(true)', context);
+  assert.deepEqual(payload, {fields:{username:"bob",password:"bob-secret"},revision:"before",apply:true});
+  assert.equal(vm.runInContext('configInputs.find(e => e.key === "password").input.value', context), "");
+});
+
+test("mapping credentials stay private across redraw/save, preserve markers, and can inherit common credentials", async () => {
+  const {context} = await page();
+  vm.runInContext('renderConfigFields([{key:"proxies",kind:"proxies",group:"代理与通道",mappings:[{listen:"127.0.0.1:9001",server:"ws://localhost/tunnel",username:"alice",password:"__SGATE_KEEP_EXISTING_PASSWORD__"}]}],{},"client");revision="before"',context);
+  const entry=vm.runInContext('configInputs[0]',context);
+  let row=entry.rows[0];
+  assert.equal(row.auth.checked,true);
+  assert.equal(row.password.type,"password");
+  assert.equal(row.password.value,"");
+  assert.equal(entry.read()[0].password,"__SGATE_KEEP_EXISTING_PASSWORD__");
+  row.password.value="draft-secret"; row.password.listeners.input();
+  entry.controls[0].listeners.click();
+  assert.equal(entry.rows[0].password.value,"draft-secret");
+  entry.rows[1].listen.value="127.0.0.1:9002";
+  entry.rows[1].server.value="ws://localhost/tunnel";
+  row=entry.rows[0];
+  let request;
+  context.api=async(_,options)=>{request=JSON.parse(options.body);return {revision:"after",live_applied:["proxies"],requires_restart:false}};
+  await vm.runInContext('saveConfigField(configInputs[0])',context);
+  assert.equal(request.proxies[0].username,"alice");
+  assert.equal(request.proxies[0].password,"draft-secret");
+  assert.equal(row.password.value,"");
+  assert.equal(entry.read()[0].password,"__SGATE_KEEP_EXISTING_PASSWORD__");
+  row.auth.checked=false;row.auth.listeners.change();
+  await vm.runInContext('saveConfigField(configInputs[0])',context);
+  assert.equal(request.proxies[0].username,undefined);
+  assert.equal(request.proxies[0].password,undefined);
+  row.auth.checked=true;row.auth.listeners.change();
+  row.username.value="bob";row.username.listeners.input();
+  assert.equal(entry.read()[0].password,undefined,"new blank password should inherit common credentials");
+  row.password.value="x".repeat(1025);row.password.listeners.input();
+  request=null;
+  await vm.runInContext('saveConfigField(configInputs[0])',context);
+  assert.equal(request,null,"invalid mapping credentials must not be submitted");
+});
+
+test("server accounts-file shows live status and single-row save preserves unrelated drafts", async () => {
+  const {context,elements}=await page();
+  vm.runInContext('renderConfigFields([{key:"accounts-file",value:"",group:"代理与通道",validation:{type:"file",live:true}},{key:"target",value:"localhost:8080",group:"代理与通道"}],{cli_overrides:["accounts-file"]},"server");revision="old"',context);
+  const group=elements.get("config-fields").children[0];
+  assert.match(group.children[1].children[0].children.at(-1).textContent,/即时生效.*命令行已覆盖/);
+  vm.runInContext('configInputs[0].input.value="tunnel-accounts.json";configInputs[0].input.listeners.input();configInputs[1].input.value="localhost:8088";configInputs[1].input.listeners.input()',context);
+  let payload;
+  context.api=async(_,options)=>{payload=JSON.parse(options.body);return {revision:"new",live_applied:["accounts-file"],requires_restart:false,runtime:{cli_overrides:["accounts-file"]}}};
+  await vm.runInContext('saveConfigField(configInputs[0])',context);
+  assert.deepEqual(payload,{fields:{"accounts-file":"tunnel-accounts.json"},revision:"old",apply:false});
+  assert.equal(vm.runInContext('configInputs[1].input.value',context),"localhost:8088");
+  assert.equal(vm.runInContext('configInputs[1].dirty',context),true);
+  assert.match(elements.get("notice").textContent,/无需重启代理/);
+  assert.match(elements.get("notice").textContent,/命令行覆盖项仍使用启动值/);
+});

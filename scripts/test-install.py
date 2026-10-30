@@ -22,6 +22,7 @@ class InstallTests(unittest.TestCase):
         names += [str(p.relative_to(ROOT)) for p in ROOT.glob("sgate-*-*.sh")]
         names += [str(p.relative_to(ROOT)) for p in (ROOT / "samples").glob("*.cf")]
         names += [str(p.relative_to(ROOT)) for p in (ROOT / "samples").glob("*.sh")]
+        names += ["sgate-proxies.json", "samples/sgate-accounts.json", "samples/sgate-proxies.json"]
         names += ["third_party/" + role + "/LICENSE" for role in ["go-service", "gin-service"]]
         for name in names:
             dest = self.root / name
@@ -52,6 +53,12 @@ class InstallTests(unittest.TestCase):
             self.assertEqual((self.target / "web/admin" / name).read_bytes(),
                              (self.root / "web/admin" / name).read_bytes())
         self.assertTrue((self.target / "conf/sgate.key").is_file())
+        if role == "server":
+            self.assertTrue((self.target / "samples/sgate-accounts.json").is_file())
+        else:
+            self.assertTrue((self.target / "samples/sgate-proxies.json").is_file())
+            self.assertTrue((self.target / "conf/sgate-proxies.json").is_file())
+            self.assertTrue((self.target / "conf/sgate-proxies.json.dist").is_file())
 
     def test_default_installs_both(self):
         self.install("install")
@@ -81,7 +88,7 @@ class InstallTests(unittest.TestCase):
     def test_repeat_and_cross_role_install_preserve_user_state_and_other_program(self):
         self.install("install")
         keep = ["conf/sgate-client.cf", "conf/sgate-server.cf", "conf/sgate.key",
-                "conf/admin-client-users.json", "conf/admin-server-sessions/session.json",
+                "conf/tunnel-accounts.json", "conf/sgate-proxies.json", "samples/sgate-accounts.json", "samples/sgate-proxies.json", "conf/admin-client-users.json", "conf/admin-server-sessions/session.json",
                 "sbin/sgate-client", "bin/sgate-client-start.sh", "samples/ssh-client.cf"]
         for name in keep:
             p = self.target / name

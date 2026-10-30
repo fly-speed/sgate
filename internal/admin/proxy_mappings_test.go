@@ -28,7 +28,14 @@ func TestProxyMappingFormSaveAndRollback(t *testing.T) {
 	}
 	after := get()
 	fields := after["fields"].([]any)
-	proxy := fields[len(fields)-1].(map[string]any)
+	var proxy map[string]any
+	for _, raw := range fields {
+		field := raw.(map[string]any)
+		if field["key"] == "proxies" {
+			proxy = field
+			break
+		}
+	}
 	if proxy["kind"] != "proxies" || proxy["value"] != "" || len(proxy["mappings"].([]any)) != 1 {
 		t.Fatal(proxy)
 	}

@@ -13,7 +13,7 @@ import (
 
 // Parse applies defaults, file settings, then explicitly supplied flags.
 // Register all application flags before calling Parse.
-func Parse(fs *flag.FlagSet, args []string) error {
+func Parse(fs *flag.FlagSet, args []string) (result error) {
 	path := fs.String("config", "", "application configuration file (command-line flags override file settings)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -30,6 +30,13 @@ func Parse(fs *flag.FlagSet, args []string) error {
 	}
 	explicit := make(map[string]bool)
 	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+	// An explicitly supplied inline mapping (including empty) overrides a file
+	// selected on disk. An explicit file option wins when both options are supplied.
+	defer func() {
+		if result == nil && explicit["proxies"] && !explicit["proxies-file"] && fs.Lookup("proxies-file") != nil {
+			_ = fs.Set("proxies-file", "")
+		}
+	}()
 	values, merged, err := serviceconfig.Read(*path)
 	if err != nil {
 		return err

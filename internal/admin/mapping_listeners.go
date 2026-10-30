@@ -13,6 +13,7 @@ func (h *Handler) syncMappingListeners(
 	path, content string,
 	edits map[string]string,
 	mappings []proxyMapping,
+	staged ...[]string,
 ) (string, map[string]string, error) {
 	fields, err := configFields(content)
 	if err != nil {
@@ -33,7 +34,9 @@ func (h *Handler) syncMappingListeners(
 			addresses = append(addresses, mapping.Listen)
 		}
 	}
-	if h.view.ProxyListeners != nil {
+	if len(staged) > 0 {
+		addresses = staged[0]
+	} else if h.view.ProxyListeners != nil {
 		addresses, err = h.view.ProxyListeners(path)
 		if err != nil {
 			return "", nil, err

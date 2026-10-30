@@ -5,7 +5,7 @@ service sgate-server {
     # acl_master service type; sock lets the framework manage listening sockets.
     master_type = sock
     # acl_master listen address in IP|port format; omit the IP to listen on all interfaces.
-    master_service = |8081
+    master_service = |1080
     # Enable SO_REUSEPORT; no lets acl_master own and pass listening sockets to child processes.
     master_reuseport = no
     # Maximum child process count; the current configuration uses one process to maintain tunnel sessions.
@@ -30,7 +30,6 @@ service sgate-server {
     master_args =
     # Working directory used by acl_master for the child process; relative application paths resolve from here.
     master_home = /opt/soft/sgate/var
-
 
 # Framework monitoring, notifications and logging: resource monitoring is disabled in this generic example; logs use the install directory.
     # Collect child process file descriptor statistics; this generic example keeps the framework default of disabled.
@@ -64,7 +63,7 @@ service sgate-server {
     # Standalone proxy listen address; shared management allows HTTP on any interface. Set tls-cert/tls-key for HTTPS/WSS.
     listen = 127.0.0.1:8081
     # Default backend TCP address forwarded by the server, in host:port format.
-    target = 127.0.0.1:9001
+    target = 127.0.0.1:8080
     # Comma-separated allowed backends selectable through client addr; exact host:port matching, with IPs or domain names.
     # Empty disallows client-selected backends; requests without addr still use target above. Example: 127.0.0.1:8088,example.com:443
     # Saved changes apply immediately to new tunnels and reconnects; existing tunnels continue. Explicit CLI values take priority.
@@ -73,8 +72,15 @@ service sgate-server {
     path = /tunnel
     # Shared encryption key file for both endpoints; relative paths resolve from the process working directory.
     key-file = sgate.key
-    # Tunnel authentication password; must match on both endpoints and is separate from the Web administrator password.
+    # Legacy tunnel authentication password, used only when accounts-file is empty; separate from Web administrator credentials.
     password = 'replace-with-your-password'
+    # Optional tunnel-account JSON, relative to this .cf; the Web interface can initialize it on the first account addition. Nonempty disables legacy password authentication.
+    # A missing configured file is created on startup with version 1 and accounts: []; add users through the Web interface.
+    # Empty account lists deny all tunnel connections and never fall back to the legacy password.
+    # Saving a changed path loads it online without restarting; invalid files retain the existing policy. Explicit CLI options take priority.
+    # Clearing restores the already-active legacy password; revoked accounts lose their tunnels, while unchanged accounts keep theirs.
+    # accounts-file = '/opt/soft/sgate/conf/tunnel-accounts.json'
+    accounts-file = ''
     # HTTPS/WSS certificate PEM file; set together with tls-key. Leave both empty for HTTP/WS.
     tls-cert =
     # HTTPS/WSS certificate private key PEM file; set together with tls-cert.
@@ -97,20 +103,19 @@ service sgate-server {
     # Minimum random padding interval; set both bounds positive, such as 1s/3s, to enable it. The fixed interval must then be 0.
     noise-interval-min = "100ms"
     # Maximum random padding interval, such as 3s; must be at least noise-interval-min.
-    noise-interval-max = "1000ms"
+    noise-interval-max = "2000ms"
     # Minimum random padding payload per burst, in bytes; must be at least 1.
-    noise-min-bytes = "1M"
+    noise-min-bytes = "10K"
     # Maximum random padding payload per burst, in bytes; must be at least the minimum and at most 10M (10485760 bytes). Supports K/M.
-    noise-max-bytes = "10M"
+    noise-max-bytes = "500K"
     # Send padding during application traffic; true preserves the original behavior, false pauses it during traffic in either direction.
     noise-traffic = "false"
     # Send padding when application connections exist but neither direction has data; use the interval and size settings above.
     noise-idle = "true"
     # Send padding when the tunnel is online with no application connections; true sends, false pauses. Heartbeats are unaffected.
-    noise-empty = "false"
+    noise-empty = "true"
     # A connection is idle after this duration without application data in either direction. Units: ms/s/m/h. 0 uses 1s; new unused connections are idle immediately.
     noise-idle-after = 1s
-
 
     # Optional separate management configuration file; a nonempty value loads that file and enables management.
     # Leave empty to enable this .cf file's management settings through admin_enabled or -admin-enabled.

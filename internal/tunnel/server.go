@@ -3,6 +3,7 @@ package tunnel
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/sha256"
 	"errors"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 type ServerConfig struct {
 	Key            []byte
 	Password       string
+	Accounts       []Account
 	Target         string
 	AllowedTargets []string
 	Path           string
@@ -23,14 +25,17 @@ type ServerConfig struct {
 	Options        Options
 }
 type serverEntry struct {
-	session *session
-	inUse   bool
-	idle    time.Time
+	username string
+	session  *session
+	inUse    bool
+	idle     time.Time
 }
 
 // Server.mu 保护会话索引、nonce 防重放表和占用标志。
 // 业务流与确认序列属于各自 session，使用 session.mu 单独保护。
 type Server struct {
+	accountMode    bool
+	accounts       map[string]accountVerifier
 	cfg            ServerConfig
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -46,7 +51,15 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	if len(cfg.Key) != 32 {
 		return nil, errors.New("server key must contain 32 bytes")
 	}
-	if err := validatePassword(cfg.Password); err != nil {
+	var accounts map[string]accountVerifier
+	if cfg.Accounts != nil {
+		var err error
+		accounts, err = accountVerifiers(cfg.Accounts)
+		if err != nil {
+			return nil, err
+		}
+		cfg.Accounts = nil // The running server retains only password digests.
+	} else if err := validatePassword(cfg.Password); err != nil {
 		return nil, err
 	}
 	if _, _, err := net.SplitHostPort(cfg.Target); err != nil {
@@ -84,6 +97,8 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
 		cfg:            cfg,
+		accounts:       accounts,
+		accountMode:    accounts != nil,
 		ctx:            ctx,
 		cancel:         cancel,
 		sessions:       make(map[string]*serverEntry),
@@ -218,6 +233,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type tunnelRequest struct {
 	id, nonce, timestamp, resume, credential string
 	target                                   string
+	username                                 string
+	accountDigest                            [sha256.Size]byte
 	peerWindow                               int
 	reportStreamErrors                       bool
 }
@@ -235,11 +252,24 @@ func (s *Server) authenticateRequest(r *http.Request) (tunnelRequest, bool) {
 		!hmac.Equal([]byte(expected), []byte(r.Header.Get("X-Sgate-Auth"))) {
 		return tunnelRequest{}, false
 	}
-	if len(r.Header.Values(passwordHeader)) != 1 ||
-		!verifyPassword(s.cfg.Key, s.cfg.Password, credential, id, nonce, ts, resume, r.URL.RequestURI()) {
+	if len(r.Header.Values(passwordHeader)) != 1 {
 		return tunnelRequest{}, false
 	}
-	request := tunnelRequest{id: id, nonce: nonce, timestamp: ts, resume: resume, credential: credential}
+	var username string
+	var accountDigest [sha256.Size]byte
+	s.mu.Lock()
+	accountMode := s.accountMode
+	s.mu.Unlock()
+	if accountMode {
+		var ok bool
+		username, accountDigest, ok = s.authenticateAccount(credential, id, nonce, ts, resume, r.URL.RequestURI())
+		if !ok {
+			return tunnelRequest{}, false
+		}
+	} else if !verifyPassword(s.cfg.Key, s.cfg.Password, credential, id, nonce, ts, resume, r.URL.RequestURI()) {
+		return tunnelRequest{}, false
+	}
+	request := tunnelRequest{id: id, nonce: nonce, timestamp: ts, resume: resume, credential: credential, username: username, accountDigest: accountDigest}
 	if values, ok := r.URL.Query()[receiveWindowQuery]; ok {
 		if len(values) != 1 {
 			return tunnelRequest{}, false
@@ -269,6 +299,11 @@ func (s *Server) acquireSession(w http.ResponseWriter, r *http.Request, request 
 	id, nonce, ts, resume, credential := request.id, request.nonce, request.timestamp, request.resume, request.credential
 	s.mu.Lock()
 	s.reapLocked(time.Now())
+	if !s.authorizedLocked(request) {
+		s.mu.Unlock()
+		http.NotFound(w, r)
+		return nil, time.Time{}, false
+	}
 	if s.closed {
 		s.mu.Unlock()
 		s.rejectHandshake(w, r, request, "unavailable", http.StatusServiceUnavailable)
@@ -312,12 +347,17 @@ func (s *Server) acquireSession(w http.ResponseWriter, r *http.Request, request 
 		}
 		opts := s.cfg.Options
 		opts.reportStreamErrors = request.reportStreamErrors
-		logf, target := opts.Logf, request.target
+		logf, target, username := opts.Logf, request.target, request.username
 		opts.Logf = func(format string, args ...any) {
-			logf("session=%s target=%q "+format, append([]any{id, target}, args...)...)
+			logf("session=%s account=%q target=%q "+format, append([]any{id, username, target}, args...)...)
 		}
-		e = &serverEntry{session: newSession(s.ctx, request.target, opts), idle: time.Now()}
+		e = &serverEntry{username: request.username, session: newSession(s.ctx, request.target, opts), idle: time.Now()}
 		s.sessions[id] = e
+	}
+	if e.username != request.username {
+		s.mu.Unlock()
+		s.rejectHandshake(w, r, request, "session account mismatch", http.StatusConflict)
+		return nil, time.Time{}, false
 	}
 	// 会话内所有流始终属于首次选择的后端；重连不能把旧缓存送给另一个服务。
 	if e.session.target != request.target {

@@ -9,6 +9,8 @@ let state = {},
   chartPointer = null,
   servicePID = 0,
   serviceRestarting = false;
+let tunnelAccountsLoad = 0;
+let tunnelAccountsRevision = "", tunnelAccountRows = [], tunnelAccountsBusy = false, tunnelAccountsEnabled = false, tunnelAccountsCanCreate = false;
 let configRole = "";
 // Keep each role's expanded sections across saves and language changes.
 const configGroupOpen = new Map();
@@ -48,7 +50,7 @@ function renderConfigFields(fields, runtime, role) {
       groups.set(field.group, group);
     }
     if (field.kind === "proxies") {
-      renderProxyMappings(group, field, overrides.has("proxies"));
+      renderProxyMappings(group, field, overrides.has("proxies") || overrides.has("proxies-file"));
       continue;
     }
     const row = document.createElement("div");
@@ -58,7 +60,10 @@ function renderConfigFields(fields, runtime, role) {
     label.htmlFor = id;
     const name = document.createElement("span");
     name.className = "config-key";
-    localText(name, () => field.key);
+    localText(name, () => configRole === "client" && field.key === "username"
+      ? t("服务端账号") + " (username)"
+      : configRole === "client" && field.key === "password"
+        ? t("服务端密码") + " (password)" : field.key);
     const description = document.createElement("small");
     description.id = id + "-help";
     localText(description, () => ((t(field.description) || t("配置项：") + field.key) +
@@ -324,6 +329,8 @@ function configValueError(key, value, rule = {}, values = {}) {
       }
     } else if (rule.type === "route" && (!value.startsWith("/") || /[?#\s]/.test(value)))
       return t("路径须以 / 开头，不含空白、查询参数或片段");
+    else if (rule.type === "username" && (configByteLength(value) > 128 || /[\s\p{Cc}\p{Z}]/u.test(value)))
+      return t("用户名不能超过 128 个 UTF-8 字节，且不能含空白或控制字符");
     else if (rule.type === "password" && configByteLength(value) > Number(rule.max))
       return t("密码不能超过 ") + rule.max + t(" 个 UTF-8 字节");
   } catch (error) {
@@ -451,6 +458,11 @@ function validateConfigForm(single = null, report = true) {
           setConfigError(row[key], error, row.errors?.[key]);
           if (error && !first) first = { input: row[key], key: "proxies", error };
         }
+      for (const row of entry.rows) {
+        const error = row.auth?.checked ? mappingCredentialError(row) : "";
+        setConfigError(row.password,error,row.errors?.password);
+        if (error && !first) first={input:row.password,key:"proxies",error};
+      }
       if (entry.rows.length > 64 && !first) first = { key: "proxies", error: t("最多允许 64 个映射") };
     } else {
       const error =
@@ -507,8 +519,9 @@ function renderProxyMappings(group, field, overridden) {
   const help = document.createElement("p");
   help.className = "muted";
   localText(help, () => (t("每行将一个本地端口映射到远程服务。后端地址可选，须在服务端允许列表内；没有映射时使用下面的单代理配置。") +
-    (overridden ? t(" 当前由命令行 proxies 覆盖，保存后仍以命令行为准。") : "") +
-    " " + t("测试使用本行地址及当前生效的密码、密钥、TLS 和 send-addr 设置；不保存、不监听本地端口，仅验证隧道及后端 TCP 连通性。") +
+    (overridden ? t(" 当前映射来源受命令行覆盖，保存配置不会移除启动时的覆盖参数。") : "") +
+    " " + t("每个映射可使用独立账号密码；关闭独立认证则继承公共凭据。测试使用本行认证和地址，密钥、TLS 和 send-addr 沿用生效设置。密码不会回显，留空保留已保存密码。") +
+    " " + t("配置 proxies-file 后映射保存在独立 JSON 文件；留空继续使用内联 proxies。更改文件路径时自动迁移当前映射，已有文件则加载其映射。") +
     " " + t("保存后自动在线更新映射并同步 master_service，未修改映射的连接继续保留。清空时使用单代理 listen；托管模式端口变化会自动通过 acl_master 重启客户端，并中断当前业务连接。")));
   const saveButton = document.createElement("button");
   saveButton.type = "button";
@@ -534,6 +547,10 @@ function renderProxyMappings(group, field, overridden) {
       listen: row.listen.value,
       server: row.server.value,
       ...(row.addr.value ? { addr: row.addr.value } : {}),
+      ...(row.auth.checked ? {
+        ...(row.inheritUsername && !row.username.value ? {} : {username:row.username.value}),
+        ...(row.password.value || row.savedPassword ? {password:row.password.value || row.savedPassword} : {}),
+      } : {}),
     }));
   const changed = () => {
     entry.dirty = JSON.stringify(entry.read()) !== entry.original;
@@ -586,6 +603,48 @@ function renderProxyMappings(group, field, overridden) {
         label.append(input, error);
         row.append(label);
       }
+      const authLabel = document.createElement("label");
+      const auth = document.createElement("input");
+      auth.type = "checkbox";
+      auth.checked = value.username !== undefined || value.password !== undefined;
+      controls.auth = auth;
+      controls.inheritUsername = value.username === undefined && value.password !== undefined;
+      localText(authLabel, () => t("独立认证（关闭时继承公共账号密码）"));
+      authLabel.append(auth);
+      entry.controls.push(auth);
+      row.append(authLabel);
+      controls.savedPassword = value.password === "__SGATE_KEEP_EXISTING_PASSWORD__" ? value.password : "";
+      for (const [key, name] of [["username", t("认证账号")], ["password", t("认证密码")]]) {
+        const label = document.createElement("label");
+        localText(label, () => t(name));
+        const input = document.createElement("input");
+        input.type = key === "password" ? "password" : "text";
+        input.autocomplete = "off";
+        input.value = key === "password" && controls.savedPassword ? "" : value[key] || "";
+        localAttr(input, "placeholder", () => key === "password"
+          ? controls.savedPassword ? t("留空保留原密码") : t("留空继承公共密码")
+          : controls.inheritUsername ? t("留空继承公共账号") : t("留空使用旧单密码模式"));
+        localAttr(input, "aria-label", () => t(name));
+        controls[key] = input;
+        controls.errors[key] = document.createElement("small");
+        controls.errors[key].className = "config-error";
+        controls.errors[key].hidden = true;
+        input.addEventListener("input", () => {
+          controls.auth.checked = true;
+          if (key === "username") controls.inheritUsername=false;
+          controls.testVersion = (controls.testVersion || 0) + 1;
+          controls.result.hidden = true;
+          changed();
+        });
+        entry.controls.push(input);
+        label.append(input, controls.errors[key]);
+        row.append(label);
+      }
+      auth.addEventListener("change", () => {
+        controls.testVersion = (controls.testVersion || 0) + 1;
+        controls.result.hidden = true;
+        changed();
+      });
       const remove = document.createElement("button");
       remove.type = "button";
       remove.className = "secondary proxy-remove";
@@ -618,6 +677,15 @@ function renderProxyMappings(group, field, overridden) {
       list.append(row);
     }
   };
+  entry.replaceMappings = (mappings) => { draw(mappings); entry.original=JSON.stringify(entry.read());entry.dirty=false; };
+  entry.saved = () => {
+    for (const row of entry.rows) {
+      if (!row.auth.checked) row.savedPassword="";
+      else if (row.password.value) row.savedPassword="__SGATE_KEEP_EXISTING_PASSWORD__";
+      row.password.value="";
+    }
+    entry.original=JSON.stringify(entry.read());
+  };
   draw(field.mappings || []);
   entry.original = JSON.stringify(entry.read());
   add.addEventListener("click", () => {
@@ -637,6 +705,14 @@ function renderProxyMappings(group, field, overridden) {
   group.append(section);
 }
 
+function mappingCredentialError(row) {
+  const username = configValueError("username",row.username.value,{type:"username"});
+  if (username) return username;
+  const password=row.password.value || row.savedPassword;
+  if (!password) return "";
+  return configValueError("password",password,{type:"password",max:"1024"});
+}
+
 // Keep testing separate from saving: unrelated drafts and mapping overrides
 // must not be submitted, persisted, or silently substituted into the probe.
 async function testProxyMapping(row) {
@@ -645,6 +721,10 @@ async function testProxyMapping(row) {
     if (!configAddress(row.listen.value, true)) throw new Error(t("映射监听端口须为 1～65535，且不能重复"));
     configURL(row.server.value, !row.addr.value);
     if (row.addr.value) configAddress(row.addr.value);
+    if (row.auth?.checked) {
+      const error = mappingCredentialError(row);
+      if (error) throw new Error(error);
+    }
   } catch (error) {
     row.result.hidden = false;
     row.result.classList.toggle("bad", true);
@@ -661,7 +741,11 @@ async function testProxyMapping(row) {
   try {
     const result = await api("proxy-test", {
       method: "POST",
-      body: JSON.stringify({ listen: row.listen.value, server: row.server.value, addr: row.addr.value }),
+      body: JSON.stringify({ listen: row.listen.value, server: row.server.value, addr: row.addr.value,
+        ...(row.auth?.checked ? {
+          ...(row.inheritUsername && !row.username.value ? {} : {username:row.username.value}),
+          ...(row.password.value || row.savedPassword ? {password:row.password.value || row.savedPassword} : {}),
+        } : {}) }),
     });
     if ((row.testVersion || 0) !== version) return;
     row.result.classList.toggle("bad", !result.ok);
@@ -739,6 +823,10 @@ async function saveConfigField(entry) {
       body: JSON.stringify(configPayload({ [entry.key]: value }, false)),
     });
     revision = result.revision;
+    if (result.proxy_mappings) {
+      const mappings = configInputs.find(item => item.kind === "proxies");
+      if (mappings && mappings !== entry && !mappings.dirty) mappings.replaceMappings(result.proxy_mappings);
+    }
     // 后端把框架监听与映射一起保存；只刷新关联值，保留其他行的草稿。
     for (const [key, saved] of Object.entries(result.synced_fields || {})) {
       const linked = configInputs.find((item) => item.key === key);
@@ -748,7 +836,7 @@ async function saveConfigField(entry) {
       linked.dirty = linked.input.value !== saved;
       updateConfigSaveButton(linked, configSaving || serviceRestarting);
     }
-    if (entry.kind === "proxies") entry.original = JSON.stringify(value);
+    if (entry.kind === "proxies") entry.saved();
     else entry.original = entry.input.value = entry.secret ? "" : value;
     entry.dirty = false;
     const pending = result.requires_restart !== false;
@@ -831,6 +919,7 @@ async function refreshAuth() {
     renderSignedOut();
     return;
   }
+  $("tunnel-accounts-nav").hidden = state.role !== "server";
   localText($("role-title"), () => state.role === "server" ? "SERVER" : "CLIENT");
   localText($("side-role"), () => state.role === "server" ? t("服务端代理") : t("客户端代理"));
   localText($("user-label"), () => state.username);
@@ -852,6 +941,15 @@ async function refreshAuth() {
 }
 
 function renderSignedOut() {
+  tunnelAccountsLoad++;
+  tunnelAccountsRevision = "";
+  tunnelAccountRows = [];
+  tunnelAccountsEnabled = false;
+  tunnelAccountsCanCreate = false;
+  $("tunnel-accounts-nav").hidden = true;
+  $("tunnel-account-list").replaceChildren();
+  $("tunnel-account-name").value = $("tunnel-account-secret").value = "";
+  localText($("tunnel-accounts-path"), () => "");
   // 退出后也清除隐藏页面中的配置草稿、密码和统计，避免共享浏览器继续显示。
   configInputs = [];
   revision = "";
@@ -1406,7 +1504,9 @@ document.querySelectorAll("[data-tab]").forEach((b) =>
       overview: t("实时概览"),
       configuration: t("代理配置"),
       account: t("账号与会话"),
+      "tunnel-accounts":t("客户端账号"),
     }[b.dataset.tab]));
+    if (b.dataset.tab === "tunnel-accounts") loadTunnelAccounts().catch((e) => notice(() => errorText(e), true));
     drawChart();
   }),
 );
@@ -1567,4 +1667,130 @@ sgateI18n.init(() => {
 refreshAuth().catch((e) => {
   localText($("auth-title"), () => t("无法连接管理服务"));
   localText($("auth-help"), () => errorText(e));
+});
+
+
+// Account JSON stays on the server. List responses contain no password values.
+function tunnelAccountDirty(row) {
+  return row.password.value !== "" || row.enabled.checked !== !row.originalDisabled;
+}
+function setTunnelAccountsBusy(busy) {
+  tunnelAccountsBusy = busy;
+  for (const row of tunnelAccountRows) {
+    row.password.disabled = row.enabled.disabled = row.deleteButton.disabled = busy;
+    row.saveButton.disabled = busy || !tunnelAccountDirty(row);
+  }
+  for (const id of ["tunnel-account-name", "tunnel-account-secret"]) $(id).disabled = busy;
+  $("tunnel-account-add").disabled = busy || !tunnelAccountsCanCreate;
+  $("tunnel-accounts-reload").disabled = busy || !tunnelAccountsEnabled;
+  $("tunnel-accounts-refresh").disabled = busy;
+}
+function renderTunnelAccounts(data, savedName) {
+  const drafts = new Map(tunnelAccountRows.filter((row) => row.username !== savedName && tunnelAccountDirty(row))
+    .map((row) => [row.username, {password:row.password.value, enabled:row.enabled.checked}]));
+  tunnelAccountsRevision = data.revision || "";
+  tunnelAccountsEnabled = !!data.enabled;
+  tunnelAccountsCanCreate = !!data.enabled || !!data.can_create;
+  localText($("tunnel-account-add"), () => data.enabled ? t("新增客户端账号") : t("新增并启用多账号"));
+  localText($("tunnel-accounts-path"), () => data.path || "");
+  localText($("tunnel-accounts-help"), () => data.enabled
+    ? t("账号数量：") + (data.accounts || []).length + (data.pending ? t(" · 文件有未应用修改，请点击应用账号文件。") : "")
+    : data.setup_message ? t(data.setup_message)
+      : data.can_create ? t("首次新增会自动创建账号 JSON、同步 accounts-file 并启用多账号；旧单密码隧道会断开，客户端需配置用户名。")
+      : t("无法初始化账号，请刷新列表并检查服务端是否已更新。"));
+  $("tunnel-account-list").replaceChildren();
+  tunnelAccountRows = [];
+  for (const account of data.accounts || []) {
+    const element = document.createElement("div");
+    element.className = "tunnel-account-row";
+    const name = document.createElement("strong");
+    name.textContent = account.username;
+    const password = document.createElement("input");
+    password.type = "password";
+    password.autocomplete = "new-password";
+    password.maxLength = 1024;
+    localAttr(password, "placeholder", () => t("留空保留原密码"));
+    localAttr(password, "aria-label", () => t("修改客户端密码：") + account.username);
+    const enabled = document.createElement("input");
+    enabled.type = "checkbox";
+    enabled.checked = !account.disabled;
+    const label = document.createElement("label");
+    const labelText = document.createElement("span");
+    localText(labelText, () => t("启用"));
+    label.append(enabled, labelText);
+    const saveButton = document.createElement("button");
+    saveButton.type = "button";
+    saveButton.className = "secondary";
+    localText(saveButton, () => t("保存"));
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "secondary";
+    localText(deleteButton, () => t("删除"));
+    const row = {username:account.username, password, enabled, originalDisabled:account.disabled, saveButton, deleteButton};
+    const draft = drafts.get(account.username);
+    if (draft) { password.value = draft.password; enabled.checked = draft.enabled; }
+    const changed = () => { saveButton.disabled = tunnelAccountsBusy || !tunnelAccountDirty(row); };
+    password.addEventListener("input", changed);
+    enabled.addEventListener("change", changed);
+    saveButton.addEventListener("click", () => saveTunnelAccount({action:"update",username:row.username,password:password.value,disabled:!enabled.checked}));
+    deleteButton.addEventListener("click", () => {
+      if (!row.confirmDelete) {
+        row.confirmDelete = true;
+        localText(deleteButton, () => t("再次点击确认删除"));
+      } else saveTunnelAccount({action:"delete",username:row.username});
+    });
+    element.append(name, password, label, saveButton, deleteButton);
+    $("tunnel-account-list").append(element);
+    tunnelAccountRows.push(row);
+  }
+  setTunnelAccountsBusy(tunnelAccountsBusy);
+}
+async function loadTunnelAccounts() {
+  if (tunnelAccountsBusy || state.role !== "server") return;
+  const run = epoch;
+  const load = ++tunnelAccountsLoad;
+  const data = await api("tunnel-accounts");
+  if (load === tunnelAccountsLoad && run === epoch && state.authenticated) renderTunnelAccounts(data);
+}
+async function saveTunnelAccount(change) {
+  if (tunnelAccountsBusy || state.role !== "server" || !state.authenticated) return;
+  if (change.password && configByteLength(change.password) > 1024) {
+    notice(() => t("密码不能超过 1024 个 UTF-8 字节"), true); return;
+  }
+  const run = epoch;
+  tunnelAccountsLoad++;
+  setTunnelAccountsBusy(true);
+  try {
+    const data = await api("tunnel-accounts", {method:"PUT",body:JSON.stringify({...change,revision:tunnelAccountsRevision})});
+    if (run !== epoch || !state.authenticated) return;
+    renderTunnelAccounts(data, change.username);
+    if (data.config_changed) {
+      revision = data.config_revision || revision;
+      const entry = configInputs.find((item) => item.key === "accounts-file");
+      if (entry) {
+        if (!entry.dirty) entry.input.value = data.path;
+        entry.original = data.path;
+        entry.dirty = entry.input.value !== entry.original;
+        updateConfigSaveButton(entry);
+      }
+      localText($("pending-label"), () => Object.keys(configEdits()).length ? t("有未保存修改")
+        : data.requires_restart ? t("已保存 · 待应用") : t("配置文件已同步"));
+    }
+    if (change.action === "create") $("tunnel-account-name").value = $("tunnel-account-secret").value = "";
+    notice(() => t("客户端账号已保存并立即生效"));
+  } catch (error) {
+    if (run === epoch && state.authenticated) notice(() => errorText(error), true);
+  } finally {
+    setTunnelAccountsBusy(false);
+  }
+}
+$("tunnel-accounts-refresh").addEventListener("click", () => loadTunnelAccounts().catch((error) => notice(() => errorText(error), true)));
+$("tunnel-accounts-reload").addEventListener("click", () => saveTunnelAccount({action:"reload"}));
+$("tunnel-account-create").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const username = $("tunnel-account-name").value;
+  const password = $("tunnel-account-secret").value;
+  const error = configValueError("username",username,{type:"username",required:true},{});
+  if (error || !password) { notice(() => error || t("不能为空"), true); return; }
+  saveTunnelAccount({action:"create",username,password});
 });

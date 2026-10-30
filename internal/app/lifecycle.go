@@ -34,6 +34,15 @@ func run(
 	if err != nil {
 		return err
 	}
+	if role == "client" {
+		if err := c.initializeProxyFile(); err != nil {
+			return err
+		}
+	} else if role == "server" {
+		if err := c.initializeAccountsFile(); err != nil {
+			return err
+		}
+	}
 	next, err := c.load("")
 	if err != nil {
 		return err
@@ -116,13 +125,15 @@ func (c *controller) managementView() admin.View {
 			_, e := c.load(path)
 			return e
 		},
-		Apply:          c.apply,
-		ProxyListeners: c.proxyListeners,
-		TestProxy:      c.testProxy,
-		ApplyLive:      c.applyLive,
-		LiveFields:     c.liveFields(),
-		Runtime:        c.status,
-		RestartService: c.restartService,
+		Apply:                c.apply,
+		ProxyListeners:       c.proxyListeners,
+		MappingCandidate:     c.mappingCandidate,
+		TestProxy:            c.testProxy,
+		ManageTunnelAccounts: c.manageTunnelAccounts,
+		ApplyLive:            c.applyLive,
+		LiveFields:           c.liveFields(),
+		Runtime:              c.status,
+		RestartService:       c.restartService,
 	}
 }
 

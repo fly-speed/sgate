@@ -46,6 +46,8 @@ func appFlags(role string) *flag.FlagSet {
 	cli.ByteSizeVar(fs, new(int), "noise-max-bytes", 10240, "")
 	if role == "client" {
 		fs.String("proxies", "", "")
+		fs.String("proxies-file", "", "")
+		fs.String("username", "", "")
 		fs.String("server", "", "")
 		fs.String("addr", "", "")
 		fs.Bool("send-addr", true, "")
@@ -55,6 +57,7 @@ func appFlags(role string) *flag.FlagSet {
 		fs.Duration("offline-timeout", 2*time.Minute, "")
 	} else {
 		fs.String("target", "", "")
+		fs.String("accounts-file", "", "")
 		fs.String("allowed-targets", "", "")
 		fs.String("path", "/tunnel", "")
 		fs.String("tls-cert", "", "")

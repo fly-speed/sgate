@@ -49,7 +49,7 @@ func (g *clientProxyGroup) replace(routes []clientProxy, update func() error) er
 	var added, removed []*proxyWorker
 	for _, route := range routes {
 		old := g.routes[route.port]
-		if old != nil && old.route.Listen == route.Listen && proxyRouteEndpoint(old.route.config) == proxyRouteEndpoint(route.config) {
+		if old != nil && old.route.Listen == route.Listen && old.route.config.Username == route.config.Username && old.route.config.Password == route.config.Password && proxyRouteEndpoint(old.route.config) == proxyRouteEndpoint(route.config) {
 			next[route.port] = old
 			continue
 		}

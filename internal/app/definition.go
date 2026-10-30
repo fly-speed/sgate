@@ -7,6 +7,7 @@ import (
 	"flag"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +20,12 @@ import (
 // 配置文件与命令行的优先级仍由 cli.Parse 统一决定。
 type configValues struct{ flags *flag.FlagSet }
 
+func (v configValues) optionalText(name string) string {
+	if flag := v.flags.Lookup(name); flag != nil {
+		return flag.Value.String()
+	}
+	return ""
+}
 func (v configValues) text(name string) string { return v.flags.Lookup(name).Value.String() }
 func (v configValues) boolean(name string) bool {
 	value, _ := strconv.ParseBool(v.text(name))
@@ -36,7 +43,11 @@ func (v configValues) duration(name string) time.Duration {
 func build(role string, fs *flag.FlagSet, stats *tunnel.Stats) (definition, error) {
 	values := configValues{flags: fs}
 	d := definition{listen: values.text("listen")}
-	if role == "client" && fs.Lookup("proxies") != nil && strings.TrimSpace(values.text("proxies")) != "" {
+	if role == "client" {
+		d.commonUsername = values.optionalText("username")
+		d.commonPassword = values.text("password")
+	}
+	if role == "client" && (strings.TrimSpace(values.optionalText("proxies")) != "" || values.optionalText("proxies-file") != "") {
 		secret, err := cli.LoadKey(values.text("key-file"))
 		if err != nil {
 			return d, err
@@ -49,8 +60,10 @@ func build(role string, fs *flag.FlagSet, stats *tunnel.Stats) (definition, erro
 		for index, route := range d.proxies {
 			addresses[index] = route.Listen
 		}
-		d.listen = strings.Join(addresses, ",")
-		return d, nil
+		if len(addresses) > 0 {
+			d.listen = strings.Join(addresses, ",")
+			return d, nil
+		}
 	}
 	_, port, err := net.SplitHostPort(d.listen)
 	if err != nil {
@@ -68,6 +81,7 @@ func build(role string, fs *flag.FlagSet, stats *tunnel.Stats) (definition, erro
 		d.client, err = values.clientConfig(secret, options)
 	} else {
 		d.server, d.tls, err = values.serverConfig(secret, options)
+		d.accountsFile = values.accountPath()
 	}
 	return d, err
 }
@@ -108,6 +122,7 @@ func (v configValues) clientSettings(secret []byte, options tunnel.Options) tunn
 	return tunnel.ClientConfig{
 		Key:            secret,
 		Password:       v.text("password"),
+		Username:       v.optionalText("username"),
 		URL:            v.text("server"),
 		Addr:           v.text("addr"),
 		OmitAddr:       v.text("send-addr") == "false",
@@ -152,6 +167,12 @@ func (v configValues) serverConfig(secret []byte, options tunnel.Options) (*tunn
 		MaxSessions: v.integer("max-sessions"),
 		Options:     options,
 	}
+	if path := v.accountPath(); path != "" {
+		config.Accounts, err = tunnel.LoadAccounts(path)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
 	if raw := strings.TrimSpace(v.text("allowed-targets")); raw != "" {
 		for _, target := range strings.Split(raw, ",") {
 			config.AllowedTargets = append(config.AllowedTargets, strings.TrimSpace(target))
@@ -178,4 +199,18 @@ func serverTLSConfig(certPath, keyPath string) (*tls.Config, error) {
 		return nil, err
 	}
 	return &tls.Config{Certificates: []tls.Certificate{pair}, MinVersion: tls.VersionTLS12}, nil
+}
+
+func (v configValues) accountPath() string {
+	path := v.optionalText("accounts-file")
+	if path != "" && !filepath.IsAbs(path) && v.optionalText("config") != "" {
+		path = filepath.Join(filepath.Dir(v.optionalText("config")), path)
+	}
+	// Retain the same file if the service framework changes its working directory.
+	if path != "" {
+		if absolute, err := filepath.Abs(path); err == nil {
+			path = absolute
+		}
+	}
+	return path
 }

@@ -14,16 +14,18 @@ import (
 
 // definition 是一次配置加载的结果；instance 拥有这次运行需要释放的资源。
 type definition struct {
-	listen   string
-	client   *tunnel.ClientConfig
-	proxies  []clientProxy
-	server   *tunnel.ServerConfig
-	tls      *tls.Config
-	managed  *aclservice.Pool
-	wrapHTTP func(net.Listener, http.Handler) http.Handler
-	service  HTTPService
-	tcp      TCPService
-	shared   *sharedServer
+	accountsFile                   string
+	commonUsername, commonPassword string
+	listen                         string
+	client                         *tunnel.ClientConfig
+	proxies                        []clientProxy
+	server                         *tunnel.ServerConfig
+	tls                            *tls.Config
+	managed                        *aclservice.Pool
+	wrapHTTP                       func(net.Listener, http.Handler) http.Handler
+	service                        HTTPService
+	tcp                            TCPService
+	shared                         *sharedServer
 }
 type instance struct {
 	proxies  *clientProxyGroup

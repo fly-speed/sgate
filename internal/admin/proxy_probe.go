@@ -16,7 +16,17 @@ func (h *Handler) testProxy(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &mapping, 8192) {
 		return
 	}
-	mappings := []ProxyMapping{mapping}
+	h.mu.Lock()
+	previous, _, readErr := h.savedMappingsMustRead()
+	var mappings []ProxyMapping
+	if readErr == nil {
+		mappings, readErr = restoreMappingPasswords([]ProxyMapping{mapping}, previous)
+	}
+	h.mu.Unlock()
+	if readErr != nil {
+		problem(w, 400, readErr.Error())
+		return
+	}
 	if _, err := encodeProxyMappings(mappings); err != nil {
 		log.Printf("mapping connectivity test rejected: stage=validation reason=%q", err.Error())
 		problem(w, http.StatusBadRequest, err.Error())

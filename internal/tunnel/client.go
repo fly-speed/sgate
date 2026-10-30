@@ -20,6 +20,7 @@ import (
 type ClientConfig struct {
 	Key      []byte
 	Password string
+	Username string
 	URL      string
 	Addr     string
 	// OmitAddr 强制使用服务端默认后端，但不修改保存的地址配置。
@@ -38,6 +39,11 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	}
 	if err := validatePassword(cfg.Password); err != nil {
 		return nil, err
+	}
+	if cfg.Username != "" {
+		if err := validateUsername(cfg.Username); err != nil {
+			return nil, err
+		}
 	}
 	endpoint, err := clientEndpoint(cfg.URL, cfg.Addr, cfg.OmitAddr)
 	if err != nil {
@@ -82,7 +88,7 @@ func (c *Client) dial(ctx context.Context, id string, resume bool) (*websocket.C
 	query.Set(receiveWindowQuery, strconv.Itoa(c.cfg.Options.BufferBytes))
 	u.RawQuery = query.Encode()
 	probe := query.Get(probeQuery) == "1"
-	headers, err := requestHeaders(c.cfg.Key, c.cfg.Password, id, nonce, ts, r, u.RequestURI())
+	headers, err := accountRequestHeaders(c.cfg.Key, c.cfg.Username, c.cfg.Password, id, nonce, ts, r, u.RequestURI())
 	if err != nil {
 		return nil, nil, 0, err
 	}

@@ -82,11 +82,20 @@ func (c *controller) replaceClientMappings(next definition) error {
 		for n := range current.proxies {
 			cfg := *base
 			cfg.URL, cfg.Addr = next.proxies[n].config.URL, next.proxies[n].config.Addr
+			// Mapping credentials are live; unrelated common credential edits stay pending.
+			cfg.Username, cfg.Password = c.current.commonUsername, c.current.commonPassword
+			if current.proxies[n].Username != nil {
+				cfg.Username = *current.proxies[n].Username
+			}
+			if current.proxies[n].Password != nil {
+				cfg.Password = *current.proxies[n].Password
+			}
 			current.proxies[n].config = cfg
 		}
 	} else {
 		cfg := *base
 		cfg.URL, cfg.Addr = next.client.URL, next.client.Addr
+		cfg.Username, cfg.Password = c.current.commonUsername, c.current.commonPassword
 		current.client = &cfg
 	}
 	routes := current.withLiveSettings(c.worker.live).clientRoutes(current.listen)
