@@ -509,6 +509,61 @@ Protect the plaintext-password JSON like the legacy `.cf` (for example mode 0600
 Changing and saving `accounts-file` loads it online, with a Takes effect immediately on save badge. Failed validation/loading retains the original configuration and authentication policy. Clearing it restores the already-active common password, and is rejected if no valid password is active. Mode changes revoke old-mode tunnels; switching files preserves sessions with unchanged credentials. Account management uses the effective CLI-selected accounts-file, requires authenticated same-origin CSRF-protected requests, rejects stale file revisions and restores the file on apply failure. For first use, enter credentials in Client accounts and click Add and enable multiple accounts. The server exclusively creates tunnel-accounts.json beside the .cf, persists accounts-file and enables authentication online without restarting the proxy. Legacy password-only tunnels disconnect on activation. Existing files are never overwritten; select and save an existing file in accounts-file to load it online. An explicit -accounts-file= CLI override remains authoritative and must be removed before UI initialization.
 
 
+### Account-based reverse TCP proxy
+
+Add optional `reverse_mappings` to each server-side account in `tunnel-accounts.json`:
+
+```json
+{
+  "version": 1,
+  "accounts": [{
+    "username": "alice",
+    "password": "replace-with-a-unique-password",
+    "reverse_mappings": [
+      {"listen": "127.0.0.1:10022", "target": "127.0.0.1:22"},
+      {"listen": "0.0.0.0:18080", "target": "192.168.1.20:8080"}
+    ]
+  }]
+}
+```
+
+`listen` binds on the **server** and requires an explicit literal IP and numeric port 1–65535; IPv6 uses `[::1]:10022`. `target` is dialed from the **client's network** and accepts a loopback address, another IP, or a hostname with a numeric port. Duplicate listen addresses are rejected. Limits are 256 mappings per account, 4096 per server, and the existing 1 MiB account document limit.
+
+In server **Client accounts**, use **Reverse proxy port mappings** under each account to add, edit or remove rows, then click that account’s **Save** to apply them online. New accounts can include mappings during creation. Removing every row and saving clears the account’s mappings. The form validates listen IPs, port ranges, duplicate addresses and the 256-mapping limit. Failed saves retain drafts; saving another account preserves unsaved edits.
+
+Set server `accounts-file = tunnel-accounts.json`, configure the client with the same key, server URL, username and password, explicitly opt in on the intended client mapping, and start both normally. The client establishes its WebSocket proactively; no incoming forward TCP connection is needed. Forward and reverse proxying can coexist. Upgrade both endpoints for reverse support. Legacy anonymous/password-only clients and clients without the authenticated reverse capability are never selected. If an account has multiple confirmed online sessions, the server chooses the first in session-ID order. Assign different accounts to different devices to make target routing unambiguous.
+
+Each row in client **Proxy configuration → Multiple port proxy mappings** has an independent **Allow server reverse proxy** checkbox, disabled by default. Older mappings without the field also deny reverse access. Saving a checked row allows only that row’s tunnel to advertise and receive reverse commands; other rows using the same account do not inherit permission. Set the Boolean `allow_reverse` in external or inline mappings:
+
+```json
+[
+  {"listen":"127.0.0.1:9001","server":"wss://example.com/tunnel","username":"alice","password":"replace-password","allow_reverse":true},
+  {"listen":"127.0.0.1:9002","server":"wss://example.com/tunnel","username":"alice","password":"replace-password","allow_reverse":false}
+]
+```
+
+Revoking and saving replaces only that mapping’s worker and closes its existing forward and reverse streams. An online client sends a transport-bound authenticated close notification to release retained server sockets; ordinary network failures retain resumability. URL query parameters cannot enable consent, and disabled clients reject forced reverse commands without dialing targets. Legacy single-proxy mode has an explicit `allow-reverse = true` / `-allow-reverse=true` switch, default false; it never grants consent to JSON mapping rows. Upgrade both endpoints for these controls.
+
+Saving account mappings synchronizes `tunnel-accounts.json` and `master_service` in the captured server service `.cf`, preserving HTTP listeners and removing deleted or disabled reverse listeners. In managed mode, listener changes automatically run the server stop script, wait for the old process to exit, then run the start script. All business connections are interrupted. The page verifies a new running PID and every expected listener before reporting success, retaining other drafts. Target/password changes with unchanged listeners remain live. Framework sockets reserved for reverse mappings are leased as raw TCP and never served as HTTP/TLS. Preflight or live-apply failure rolls back both files; restart failures retain saved configuration and show an error for retry.
+
+After external JSON edits, refresh Client accounts and click Apply account file to synchronize listeners and perform any required service restart. For manual deployment, also update `master_service`, then run `sgate-server-stop.sh` followed by `sgate-server-start.sh`. Account create/update API operations also accept `reverse_mappings`; omission preserves existing mappings, and `[]` clears them. Mapping changes revoke that account's tunnels and business connections, allowing automatic reconnection under the new configuration; other accounts remain connected. New binds must succeed before policy changes commit. Disabled/deleted accounts and switching to legacy authentication release their listeners. Shared HTTP proxy replacement transfers matching listeners. Offline accounts reject new TCP connections immediately.
+
+Reverse commands and data use the existing authenticated encrypted channel, separate stream-ID ranges, bounded buffers, stream limits, heartbeats, half-close/reset and reconnect replay. Existing business sockets survive brief transport outages within the configured retention window. Target dial failures reset only their stream. Grant reverse permission only to trusted servers: opted-in clients follow their reverse target commands. Wildcard binds expose the mapped service on network interfaces; use explicit interfaces, firewalls and service authentication as appropriate. External-to-server and client-to-target TCP segments rely on the target service's own security protocol. WSS is recommended. See `samples/sgate-reverse-accounts.json`, whose sample account is disabled by default.
+
+
+### Reverse proxy stress and boundary tests
+
+The normal reverse suite uses real TCP and WS/WSS connections: 64 concurrent streams across four waves, byte-exact echoes and half-close; eight retained streams across four outages with full replay buffers; shutdown while the target stops reading; repeated account disable/enable under concurrent admissions while another account keeps transferring; sender/receiver stream limits, exact buffer capacity and ACK recovery, final stream ID, 256/4096 mapping limits, expired-session rejection, and malformed commands. Stress fixtures check goroutine/file-descriptor recovery and session, stream and queue release.
+
+```bash
+GOPROXY=off go test -mod=mod -race ./internal/tunnel -run '^TestReverse' -count=3 -timeout=3m
+SGATE_REVERSE_STRESS=1 GOPROXY=off go test -mod=mod -race ./internal/tunnel -run '^TestReverse' -count=1 -timeout=5m -v
+GOPROXY=off go test -mod=mod ./internal/tunnel -run '^$' -fuzz '^FuzzReverseOpenFrame$' -fuzztime=30s -parallel=2
+```
+
+Extended mode runs 128 concurrent streams across eight waves at 256 KiB per stream, 32 retained streams across 12 outages, and 48 account disable/enable cycles for both WS and WSS. It changes test load only. Mapping-count boundaries validate configuration without binding thousands of ports. These commands select local replacements from `go.mod` and prohibit dependency downloads; dependencies must already be cached.
+
+
 ### External mapping files and per-mapping credentials
 
 The default client now stores its original mapping in `sgate-proxies.json`, preserving its addresses and inherited credentials. Installation puts this file in `conf/` and preserves existing copies on reinstall. Inline mappings remain supported. Set `proxies-file = 'sgate-proxies.json'` in the client `.cf`, or use `-proxies-file /absolute/path/routes.json`. Relative paths resolve from the `.cf` directory. The JSON file is an array:

@@ -35,13 +35,13 @@ func (c *controller) restartService(control, socket string, expectedPID int) err
 	}
 	program := control
 	rebind := false
-	if c.tcp != nil {
+	if c.tcp != nil || c.service != nil {
 		settings, err := processSettings(c.servicePath)
 		if err != nil {
 			return err
 		}
 		if !sameClientAddresses(settings["master_service"], c.serviceListen) {
-			stop, start, err := clientRestartScripts(c.servicePath)
+			stop, start, err := serviceRestartScripts(c.servicePath, c.role)
 			if err != nil {
 				return err
 			}
@@ -67,7 +67,7 @@ func (c *controller) restartService(control, socket string, expectedPID int) err
 	c.restartPending = true
 	failure := "master_ctl 重启未完成，请检查服务日志和管理套接字权限"
 	if rebind {
-		failure = "客户端停止/启动脚本重启未完成，请检查脚本、服务日志和管理套接字权限"
+		failure = "停止/启动脚本重启未完成，请检查脚本、服务日志和管理套接字权限"
 	}
 	go func() {
 		defer cancel()
@@ -79,6 +79,13 @@ func (c *controller) restartService(control, socket string, expectedPID int) err
 // Installed services keep their scripts beside conf/ in bin/. Source-tree
 // services use scripts beside the .cf. Always pass the captured service path.
 func clientRestartScripts(servicePath string) (string, string, error) {
+	return serviceRestartScripts(servicePath, "client")
+}
+
+func serviceRestartScripts(servicePath, role string) (string, string, error) {
+	if role != "server" {
+		role = "client"
+	}
 	dir := filepath.Dir(servicePath)
 	// acl_master may scan conf/service/ instead of conf/ directly.
 	if filepath.Base(dir) == "service" && filepath.Base(filepath.Dir(dir)) == "conf" {
@@ -87,14 +94,14 @@ func clientRestartScripts(servicePath string) (string, string, error) {
 	if filepath.Base(dir) == "conf" {
 		dir = filepath.Join(filepath.Dir(dir), "bin")
 	}
-	stop, start := filepath.Join(dir, "sgate-client-stop.sh"), filepath.Join(dir, "sgate-client-start.sh")
+	stop, start := filepath.Join(dir, "sgate-"+role+"-stop.sh"), filepath.Join(dir, "sgate-"+role+"-start.sh")
 	for _, path := range []string{stop, start} {
 		info, err := os.Stat(path)
 		if err != nil {
-			return "", "", fmt.Errorf("客户端重启脚本不存在或不可访问：%s", path)
+			return "", "", fmt.Errorf("服务重启脚本不存在或不可访问：%s", path)
 		}
 		if !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
-			return "", "", fmt.Errorf("客户端重启脚本不可执行：%s", path)
+			return "", "", fmt.Errorf("服务重启脚本不可执行：%s", path)
 		}
 	}
 	return stop, start, nil
@@ -105,28 +112,28 @@ func clientRebindArguments(stop, start, control, socket, path string, oldPID int
 	return []string{"-c", `stop=$1; start=$2; old=$3
 MASTER_CTL=$4; MASTER_SOCKET=$5; SGATE_CONFIG=$6; MASTER_CTL_TIMEOUT=30000
 export MASTER_CTL MASTER_SOCKET SGATE_CONFIG MASTER_CTL_TIMEOUT
-printf 'client listener restart: running stop script; old_pid=%s service=%s\n' "$old" "$SGATE_CONFIG" >&2
+printf 'service listener restart: running stop script; old_pid=%s service=%s\n' "$old" "$SGATE_CONFIG" >&2
 "$stop"
 status=$?
 if [ "$status" -ne 0 ]; then
-  printf '%s\n' 'client listener restart: stop script failed; start skipped' >&2
+  printf '%s\n' 'service listener restart: stop script failed; start skipped' >&2
   exit "$status"
 fi
-printf '%s\n' 'client listener restart: stop script completed; waiting for old process exit' >&2
+printf '%s\n' 'service listener restart: stop script completed; waiting for old process exit' >&2
 attempt=0
 while kill -0 "$old" 2>/dev/null; do
   attempt=$((attempt+1))
   if [ "$attempt" -gt 300 ]; then
-    printf '%s\n' 'client listener restart: old process did not exit; start skipped' >&2
+    printf '%s\n' 'service listener restart: old process did not exit; start skipped' >&2
     exit 1
   fi
   sleep 0.1
 done
-printf '%s\n' 'client listener restart: running start script' >&2
+printf '%s\n' 'service listener restart: running start script' >&2
 "$start"
 status=$?
 if [ "$status" -ne 0 ]; then
-  printf '%s\n' 'client listener restart: start script failed' >&2
+  printf '%s\n' 'service listener restart: start script failed' >&2
 fi
 exit "$status"`, "sgate-client-rebind", stop, start, strconv.Itoa(oldPID), control, socket, path}
 }

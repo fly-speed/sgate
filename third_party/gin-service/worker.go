@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -95,8 +96,17 @@ func (s *GinService) configureLocked(config ServerConfig) (*Worker, error) {
 		}
 		s.addresses = config.Addresses
 	}
+	// Unclaimed inherited ports must never silently become HTTP endpoints.
+	for _, pool := range s.pools {
+		if !pool.raw && !matchesHTTPAddress(config.Addresses, pool.listeners[0].Addr().String(), !s.Alone) {
+			return nil, errors.New("inherited listener is neither HTTP nor reserved TCP: " + pool.listeners[0].Addr().String())
+		}
+	}
 	w := &Worker{service: s, config: config, connections: make(map[*ownedConn]struct{}), done: make(chan struct{})}
 	for i, pool := range s.pools {
+		if pool.raw {
+			continue
+		}
 		if err := w.addListener(pool, s.Servers[i].Engine); err != nil {
 			for _, listener := range w.listeners {
 				listener.Close()
@@ -105,6 +115,9 @@ func (s *GinService) configureLocked(config ServerConfig) (*Worker, error) {
 		}
 	}
 
+	if len(w.listeners) == 0 {
+		return nil, errors.New("HTTP listener required")
+	}
 	s.worker = w
 	if s.running {
 		w.start()
@@ -265,4 +278,36 @@ func (w *Worker) addListener(pool *listenerPool, engine *gin.Engine) error {
 	// disposable lease. Closing a lease never closes framework-owned sockets.
 	w.transports = append(w.transports, transport)
 	return nil
+}
+
+func matchesHTTPAddress(addresses, bound string, inherited bool) bool {
+	bh, bp, err := net.SplitHostPort(bound)
+	if err != nil {
+		return false
+	}
+	bi := net.ParseIP(bh)
+	for _, address := range strings.FieldsFunc(addresses, func(r rune) bool { return r == ',' || r == ';' }) {
+		ah, ap, err := net.SplitHostPort(strings.ReplaceAll(strings.TrimSpace(address), "|", ":"))
+		if err != nil {
+			continue
+		}
+		// acl_master owns the bind addresses and may expand one service port
+		// across IPv4, IPv6 and scoped interfaces. The application's listen IP
+		// cannot narrow already inherited sockets; classify them by service port.
+		// Unrelated ports still require an explicit raw TCP reservation.
+		if inherited {
+			if ap == bp {
+				return true
+			}
+			continue
+		}
+		if ap != "0" && ap != bp {
+			continue
+		}
+		ai := net.ParseIP(ah)
+		if ah == "" || ah == bh || (ai != nil && (ai.IsUnspecified() || ai.Equal(bi))) || (ah == "localhost" && bi != nil && bi.IsLoopback()) {
+			return true
+		}
+	}
+	return false
 }

@@ -51,6 +51,7 @@ func appFlags(role string) *flag.FlagSet {
 		fs.String("server", "", "")
 		fs.String("addr", "", "")
 		fs.Bool("send-addr", true, "")
+		fs.Bool("allow-reverse", false, "")
 		fs.String("tls-ca", "", "")
 		fs.Duration("reconnect-min", 250*time.Millisecond, "")
 		fs.Duration("reconnect-max", 10*time.Second, "")

@@ -4,13 +4,15 @@
     "server": "wss://example.com:443/tunnel",
     "addr": "127.0.0.1:22",
     "username": "alice",
-    "password": "replace-with-alice-password"
+    "password": "replace-with-alice-password",
+    "allow_reverse": false
   },
   {
     "listen": "127.0.0.1:9002",
     "server": "wss://example.com:443/tunnel",
     "addr": "127.0.0.1:8080",
     "username": "bob",
-    "password": "replace-with-bob-password"
+    "password": "replace-with-bob-password",
+    "allow_reverse": false
   }
 ]

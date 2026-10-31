@@ -14,6 +14,8 @@ import (
 )
 
 type ServerConfig struct {
+	// ReverseListen optionally leases listeners owned by the service framework.
+	ReverseListen  func(network, address string) (net.Listener, error)
 	Key            []byte
 	Password       string
 	Accounts       []Account
@@ -28,23 +30,27 @@ type serverEntry struct {
 	username string
 	session  *session
 	inUse    bool
+	reverse  bool
+	ready    bool
 	idle     time.Time
 }
 
 // Server.mu 保护会话索引、nonce 防重放表和占用标志。
 // 业务流与确认序列属于各自 session，使用 session.mu 单独保护。
 type Server struct {
-	accountMode    bool
-	accounts       map[string]accountVerifier
-	cfg            ServerConfig
-	ctx            context.Context
-	cancel         context.CancelFunc
-	mu             sync.Mutex
-	sessions       map[string]*serverEntry
-	nonces         map[string]time.Time
-	closed         bool
-	allowedTargets map[string]struct{}
-	probeGate      chan struct{}
+	reverseStarted   bool
+	reverseListeners map[string]*reverseListener
+	accountMode      bool
+	accounts         map[string]accountVerifier
+	cfg              ServerConfig
+	ctx              context.Context
+	cancel           context.CancelFunc
+	mu               sync.Mutex
+	sessions         map[string]*serverEntry
+	nonces           map[string]time.Time
+	closed           bool
+	allowedTargets   map[string]struct{}
+	probeGate        chan struct{}
 }
 
 func NewServer(cfg ServerConfig) (*Server, error) {
@@ -117,6 +123,7 @@ func (s *Server) Close() {
 	}
 	s.closed = true
 	s.cancel()
+	s.closeReverseLocked()
 	for _, e := range s.sessions {
 		e.session.close()
 	}
@@ -199,6 +206,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		s.mu.Lock()
 		entry.inUse = false
+		entry.ready = false
 		// A failed upgrade or an abandoned resume must not renew an old session.
 		if confirmed {
 			entry.idle = time.Now()
@@ -224,8 +232,20 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ws,
 		crypt,
 		resumeDeadline,
-		func() { confirmed = true },
+		func() {
+			confirmed = true
+			s.mu.Lock()
+			entry.ready = true
+			s.mu.Unlock()
+		},
 	)
+	if errors.Is(err, errPeerSessionClosed) {
+		s.mu.Lock()
+		if s.sessions[id] == entry {
+			delete(s.sessions, id)
+		}
+		s.mu.Unlock()
+	}
 	entry.session.opts.Logf("tunnel disconnected: peer=%q reason=%v", r.RemoteAddr, err)
 }
 
@@ -236,6 +256,7 @@ type tunnelRequest struct {
 	username                                 string
 	accountDigest                            [sha256.Size]byte
 	peerWindow                               int
+	reverse                                  bool
 	reportStreamErrors                       bool
 }
 
@@ -285,6 +306,12 @@ func (s *Server) authenticateRequest(r *http.Request) (tunnelRequest, bool) {
 			return tunnelRequest{}, false
 		}
 		request.reportStreamErrors = true
+	}
+	if values, ok := r.URL.Query()[reverseQuery]; ok {
+		if len(values) != 1 || values[0] != "1" || username == "" {
+			return tunnelRequest{}, false
+		}
+		request.reverse = true
 	}
 	return request, true
 }
@@ -351,7 +378,7 @@ func (s *Server) acquireSession(w http.ResponseWriter, r *http.Request, request 
 		opts.Logf = func(format string, args ...any) {
 			logf("session=%s account=%q target=%q "+format, append([]any{id, username, target}, args...)...)
 		}
-		e = &serverEntry{username: request.username, session: newSession(s.ctx, request.target, opts), idle: time.Now()}
+		e = &serverEntry{username: request.username, reverse: request.reverse, session: newSession(s.ctx, request.target, opts), idle: time.Now()}
 		s.sessions[id] = e
 	}
 	if e.username != request.username {
@@ -365,7 +392,7 @@ func (s *Server) acquireSession(w http.ResponseWriter, r *http.Request, request 
 		s.rejectHandshake(w, r, request, "session target mismatch", http.StatusConflict)
 		return nil, time.Time{}, false
 	}
-	if e.session.opts.reportStreamErrors != request.reportStreamErrors {
+	if e.reverse != request.reverse || e.session.opts.reportStreamErrors != request.reportStreamErrors {
 		s.mu.Unlock()
 		s.rejectHandshake(w, r, request, "session diagnostic capability mismatch", http.StatusConflict)
 		return nil, time.Time{}, false

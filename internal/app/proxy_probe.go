@@ -34,6 +34,7 @@ func (c *controller) testProxy(ctx context.Context, mapping admin.ProxyMapping) 
 		config.Password = *mapping.Password
 	}
 	config.URL, config.Addr = mapping.Server, mapping.Addr
+	config.AllowReverse = mapping.AllowReverse
 	config.Options.Stats, config.Options.Live = nil, nil
 	client, err := tunnel.NewClient(config)
 	if err != nil {

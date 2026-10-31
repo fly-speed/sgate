@@ -18,3 +18,7 @@
 `sgate-accounts.json` is a disabled example of server tunnel accounts (not Web administrator accounts). Copy it to a private configuration location, replace passwords, enable the required accounts, and set server `accounts-file` to that path. Client `username` and `password` select the account. Protect this file with mode 0600 and reload the server proxy after editing it.
 
 `sgate-proxies.json` is a client mapping-file example with independent credentials per mapping. Copy it to a private configuration directory, change its addresses/passwords, set mode 0600, and select it with `proxies-file`. It is not enabled automatically.
+
+`sgate-reverse-accounts.json` demonstrates multiple server-side reverse TCP listeners for one account. `listen` binds on the server; `target` is reached from the authenticated client network. The example account is disabled. Replace its password and addresses, enable it, and apply it through server `accounts-file`. Both endpoints need reverse proxy support.
+
+Client mappings deny server reverse proxy access by default. In the client mapping form, explicitly check Allow server reverse proxy for each intended row (`"allow_reverse": true` in JSON). Other rows do not inherit it. Legacy single-proxy mode uses `allow-reverse = true`, default false.

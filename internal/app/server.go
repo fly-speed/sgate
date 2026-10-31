@@ -41,6 +41,13 @@ func (s *Server) ProxyPath() string {
 func (s *Server) Configure(service HTTPService) error {
 	c := s.controller
 	c.service, c.ctx = service, service.Context()
+	if service.Managed() {
+		settings, err := processSettings(c.servicePath)
+		if err != nil {
+			return err
+		}
+		c.serviceListen = settings["master_service"]
+	}
 	next := s.initial
 	next.service = service
 	stopAdmin, err := c.prepareSharedManagement(s.adminPath, &next, c.managementView())

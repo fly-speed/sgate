@@ -31,6 +31,8 @@ type Options struct {
 	NoiseMaxBytes        int
 	Logf                 func(string, ...any)
 
+	closeSessionOnStop bool // Named clients end their own server session on intentional shutdown.
+	receiveReverse     bool // Only clients may accept authenticated reverse OPEN commands.
 	reportStreamErrors bool // Negotiated per session; never enabled for legacy peers.
 }
 

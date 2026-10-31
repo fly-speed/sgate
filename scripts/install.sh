@@ -39,7 +39,7 @@ for selected in $roles; do
         sample_scripts="$sample_scripts sshc-start.sh sshc-stop.sh"
     else
         sample_scripts="$sample_scripts sshd-start.sh sshd-stop.sh"
-        sample_configs="$sample_configs sgate-accounts.json"
+        sample_configs="$sample_configs sgate-accounts.json sgate-reverse-accounts.json"
         licenses="$licenses gin-service"
     fi
 done

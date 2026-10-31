@@ -3,6 +3,7 @@ package app
 import (
 	"crypto/tls"
 	"errors"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -72,7 +73,15 @@ func (c *controller) replaceShared(next definition) error {
 		return e
 	}
 	next = next.withLiveSettings(live)
-	proxy, e := tunnel.NewServer(*next.server)
+	cfg := *next.server
+	if c.service != nil && c.service.Managed() {
+		if provider, ok := c.service.(interface {
+			ReverseListener(string, string) (net.Listener, error)
+		}); ok {
+			cfg.ReverseListen = provider.ReverseListener
+		}
+	}
+	proxy, e := tunnel.NewServer(cfg)
 	if e != nil {
 		return e
 	}
@@ -82,7 +91,13 @@ func (c *controller) replaceShared(next definition) error {
 		proxy.Close()
 		return errors.New("process is stopping")
 	}
-	old := c.shared.proxy.Swap(proxy)
+	old := c.shared.proxy.Load()
+	if e := proxy.StartReverseFrom(old); e != nil {
+		c.shared.mu.Unlock()
+		proxy.Close()
+		return e
+	}
+	c.shared.proxy.Store(proxy)
 	if next.tls != nil {
 		c.shared.tls.Store(next.tls)
 	}

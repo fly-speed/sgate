@@ -57,6 +57,8 @@ func freshTimestamp(value string) bool {
 }
 
 type codec struct {
+	client         bool
+	closeProof     string // Bound to this authenticated transport; independent of data counters.
 	peerWindow     int
 	tx, rx         cipher.AEAD
 	sent, received uint64
@@ -69,7 +71,7 @@ func newCodec(key []byte, sessionID, clientNonce, serverNonce string, client boo
 		aead, _ := cipher.NewGCM(block)
 		return aead
 	}
-	c := &codec{tx: derive("client-to-server"), rx: derive("server-to-client")}
+	c := &codec{tx: derive("client-to-server"), rx: derive("server-to-client"), client: client, closeProof: mac(key, protocol, sessionID, clientNonce, serverNonce, "client-session-close")}
 	if !client {
 		c.tx, c.rx = c.rx, c.tx
 	}

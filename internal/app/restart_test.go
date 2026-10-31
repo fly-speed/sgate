@@ -148,74 +148,76 @@ func TestTCPFrameworkRestartAuthorization(t *testing.T) {
 }
 
 func TestTCPPortChangeRecreatesFrameworkListeners(t *testing.T) {
-	for _, failStop := range []bool{false, true} {
-		t.Run(fmt.Sprint("fail-stop-", failStop), func(t *testing.T) {
-			dir := t.TempDir()
-			if err := os.MkdirAll(filepath.Join(dir, "conf"), 0700); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.MkdirAll(filepath.Join(dir, "bin"), 0700); err != nil {
-				t.Fatal(err)
-			}
-			for _, name := range []string{"sgate-client-stop.sh", "sgate-client-start.sh"} {
-				data, err := os.ReadFile(filepath.Join("../..", name))
+	for _, role := range []string{"client", "server"} {
+		for _, failStop := range []bool{false, true} {
+			t.Run(fmt.Sprint(role, "/fail-stop-", failStop), func(t *testing.T) {
+				dir := t.TempDir()
+				if err := os.MkdirAll(filepath.Join(dir, "conf"), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.MkdirAll(filepath.Join(dir, "bin"), 0700); err != nil {
+					t.Fatal(err)
+				}
+				for _, name := range []string{"sgate-" + role + "-stop.sh", "sgate-" + role + "-start.sh"} {
+					data, err := os.ReadFile(filepath.Join("../..", name))
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(filepath.Join(dir, "bin", name), data, 0700); err != nil {
+						t.Fatal(err)
+					}
+				}
+				service := dir + "/bin/../conf/client ; ' literal.cf"
+				if err := os.WriteFile(service, []byte("service client {\nmaster_service = 127.0.0.1|9002\n}\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				control := filepath.Join(dir, "control ; ' literal")
+				// 每次记录精确参数；stop 失败时不得继续 start。
+				script := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$0.args\"\n"
+				if failStop {
+					script += "exit 7\n"
+				}
+				if err := os.WriteFile(control, []byte(script), 0700); err != nil {
+					t.Fatal(err)
+				}
+				old := exec.Command("/bin/sleep", "0.2")
+				if err := old.Start(); err != nil {
+					t.Fatal(err)
+				}
+				reaped := make(chan struct{})
+				go func() { _ = old.Wait(); close(reaped) }()
+				stop, start, err := serviceRestartScripts(service, role)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(filepath.Join(dir, "bin", name), data, 0700); err != nil {
-					t.Fatal(err)
+				command := exec.Command("/bin/sh", clientRebindArguments(stop, start, control, "/test/socket ' ; literal", service, old.Process.Pid)...)
+				if err := command.Run(); (err != nil) != failStop {
+					t.Fatalf("stop result: %v", err)
 				}
-			}
-			service := dir + "/bin/../conf/client ; ' literal.cf"
-			if err := os.WriteFile(service, []byte("service client {\nmaster_service = 127.0.0.1|9002\n}\n"), 0600); err != nil {
-				t.Fatal(err)
-			}
-			control := filepath.Join(dir, "control ; ' literal")
-			// 每次记录精确参数；stop 失败时不得继续 start。
-			script := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$0.args\"\n"
-			if failStop {
-				script += "exit 7\n"
-			}
-			if err := os.WriteFile(control, []byte(script), 0700); err != nil {
-				t.Fatal(err)
-			}
-			old := exec.Command("/bin/sleep", "0.2")
-			if err := old.Start(); err != nil {
-				t.Fatal(err)
-			}
-			reaped := make(chan struct{})
-			go func() { _ = old.Wait(); close(reaped) }()
-			stop, start, err := clientRestartScripts(service)
-			if err != nil {
-				t.Fatal(err)
-			}
-			command := exec.Command("/bin/sh", clientRebindArguments(stop, start, control, "/test/socket ' ; literal", service, old.Process.Pid)...)
-			if err := command.Run(); (err != nil) != failStop {
-				t.Fatalf("stop result: %v", err)
-			}
-			if !failStop {
-				select {
-				case <-reaped:
-				default:
-					t.Fatal("start ran before old process was reaped")
+				if !failStop {
+					select {
+					case <-reaped:
+					default:
+						t.Fatal("start ran before old process was reaped")
+					}
 				}
-			}
-			<-reaped
-			suffix := "\n-t\n30000\n-s\n/test/socket ' ; literal\n"
-			want := "-f\n" + service + "\n-a\nstop" + suffix
-			if !failStop {
-				want += "-f\n" + service + "\n-a\nstart" + suffix
-			}
-			deadline := time.Now().Add(3 * time.Second)
-			for time.Now().Before(deadline) {
-				b, _ := os.ReadFile(control + ".args")
-				if string(b) == want {
-					return
+				<-reaped
+				suffix := "\n-t\n30000\n-s\n/test/socket ' ; literal\n"
+				want := "-f\n" + service + "\n-a\nstop" + suffix
+				if !failStop {
+					want += "-f\n" + service + "\n-a\nstart" + suffix
 				}
-				time.Sleep(10 * time.Millisecond)
-			}
-			t.Fatal("listener replacement did not preserve arguments or stop/start ordering")
-		})
+				deadline := time.Now().Add(3 * time.Second)
+				for time.Now().Before(deadline) {
+					b, _ := os.ReadFile(control + ".args")
+					if string(b) == want {
+						return
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+				t.Fatal("listener replacement did not preserve arguments or stop/start ordering")
+			})
+		}
 	}
 }
 

@@ -13,13 +13,14 @@ import (
 
 // 每个监听端口拥有自己的会话、重放缓存和远程 URL；通用安全及心跳参数共用。
 type clientProxy struct {
-	Listen   string  `json:"listen"`
-	Server   string  `json:"server"`
-	Addr     string  `json:"addr,omitempty"`
-	Username *string `json:"username,omitempty"`
-	Password *string `json:"password,omitempty"`
-	config   tunnel.ClientConfig
-	port     string
+	AllowReverse bool    `json:"allow_reverse,omitempty"`
+	Listen       string  `json:"listen"`
+	Server       string  `json:"server"`
+	Addr         string  `json:"addr,omitempty"`
+	Username     *string `json:"username,omitempty"`
+	Password     *string `json:"password,omitempty"`
+	config       tunnel.ClientConfig
+	port         string
 }
 
 func (v configValues) multiClientConfigs(secret []byte, options tunnel.Options) ([]clientProxy, error) {
@@ -44,7 +45,7 @@ func (v configValues) multiClientConfigs(secret []byte, options tunnel.Options) 
 	}
 	routes := make([]clientProxy, len(mappings))
 	for i, m := range mappings {
-		routes[i] = clientProxy{Listen: m.Listen, Server: m.Server, Addr: m.Addr, Username: m.Username, Password: m.Password}
+		routes[i] = clientProxy{Listen: m.Listen, Server: m.Server, Addr: m.Addr, Username: m.Username, Password: m.Password, AllowReverse: m.AllowReverse}
 	}
 	seen := make(map[string]bool)
 	tlsConfig, err := clientTLSConfig(v.text("tls-ca"))
@@ -68,6 +69,7 @@ func (v configValues) multiClientConfigs(secret []byte, options tunnel.Options) 
 		route.Listen = address.String()
 		route.config = common
 		route.config.URL, route.config.Addr = route.Server, route.Addr
+		route.config.AllowReverse = route.AllowReverse // Explicit per mapping; never inherit the single-proxy switch.
 		if route.Username != nil {
 			route.config.Username = *route.Username
 		}

@@ -125,7 +125,15 @@ func (c *controller) status() any {
 	if c.pendingListeners != "" {
 		pending = strings.Split(c.pendingListeners, ",")
 	}
+	var websocketListeners []string
+	if c.role == "server" {
+		websocketListeners = strings.Split(c.current.listen, ",")
+		if c.worker != nil {
+			websocketListeners = append(websocketListeners, c.worker.listener.Addr().String())
+		}
+	}
 	return map[string]any{
+		"websocket_listeners":       websocketListeners,
 		"pending_listeners":         pending,
 		"noise":                     c.current.noiseStatus(),
 		"generation":                c.generation,

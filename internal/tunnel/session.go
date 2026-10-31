@@ -19,6 +19,7 @@ const (
 	opFin
 	opReset
 	opNoise
+	opReverseOpen
 	chunkSize   = 16 * 1024
 	frameHeader = 25
 )
@@ -58,10 +59,11 @@ func decodeFrame(p []byte) (frame, error) {
 		}
 		return f, nil
 	}
-	if f.op > opReset || (f.op == opAck && (f.seq != 0 || f.stream != 0 || len(f.data) != 0)) ||
+	if (f.op > opReset && f.op != opReverseOpen) || (f.op == opAck && (f.seq != 0 || f.stream != 0 || len(f.data) != 0)) ||
 		(f.op != opAck && (f.seq == 0 || f.stream == 0)) ||
-		(f.op != opData && f.op != opReset && len(f.data) != 0) ||
+		(f.op != opData && f.op != opReset && f.op != opReverseOpen && len(f.data) != 0) ||
 		(f.op == opReset && !validResetReason(f.data)) ||
+		(f.op == opReverseOpen && (f.stream <= reverseStreamBase || validateSelectableTarget(string(f.data)) != nil)) ||
 		(f.op == opData && len(f.data) == 0) {
 		return frame{}, errors.New("invalid frame fields")
 	}
@@ -93,6 +95,7 @@ type session struct {
 	next, received, nextStream, lastOpened uint64
 	streams                                map[uint64]*stream
 	active                                 *websocket.Conn
+	activeCloseProof                       string
 	closed                                 bool
 	transportMu                            sync.Mutex
 	noiseSent, noiseReceived               uint64 // Protected by mu; transport-only diagnostics.
@@ -141,6 +144,11 @@ func (s *session) close() {
 	defer s.mu.Unlock()
 	if s.closed {
 		return
+	}
+	// Notify before canceling the writer. The proof is specific to this
+	// authenticated transport; ordinary/forged Close frames keep retention.
+	if s.active != nil && s.activeCloseProof != "" && s.ctx.Err() == nil {
+		_ = s.active.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, sessionClosePrefix+s.activeCloseProof), time.Now().Add(100*time.Millisecond))
 	}
 	s.closed = true
 	if s.opts.Stats != nil {
@@ -296,6 +304,11 @@ func (s *session) addLocal(c net.Conn) error {
 		c.Close()
 		return errors.New("client stream limit reached")
 	}
+	if s.nextStream >= reverseStreamBase-1 {
+		s.mu.Unlock()
+		c.Close()
+		return errors.New("stream IDs exhausted")
+	}
 	s.nextStream++
 	id := s.nextStream
 	st := &stream{conn: c}
@@ -312,8 +325,17 @@ func (s *session) addLocal(c net.Conn) error {
 	return nil
 }
 func (s *session) apply(f frame) error {
-	if f.op == opOpen {
-		if s.target == "" {
+	if f.op == opOpen || f.op == opReverseOpen {
+		target := s.target
+		if f.op == opReverseOpen {
+			if !s.opts.receiveReverse || s.target != "" || f.stream <= reverseStreamBase || validateSelectableTarget(string(f.data)) != nil {
+				return errors.New("reverse OPEN not permitted")
+			}
+			target = string(f.data)
+		} else if f.stream >= reverseStreamBase {
+			return errors.New("invalid forward stream ID")
+		}
+		if target == "" {
 			return errors.New("server cannot open client streams")
 		}
 		s.mu.Lock()
@@ -325,14 +347,14 @@ func (s *session) apply(f frame) error {
 		full := len(s.streams) >= s.opts.MaxStreams
 		s.mu.Unlock()
 		if full {
-			s.opts.Logf("stream=%d target=%q backend connection rejected: stream limit reached", f.stream, s.target)
+			s.opts.Logf("stream=%d target=%q backend connection rejected: stream limit reached", f.stream, target)
 			s.enqueueResetReason(f.stream, resetStreamLimit)
 			return nil
 		}
-		c, err := (&net.Dialer{Timeout: s.opts.DialTimeout, KeepAlive: 30 * time.Second}).DialContext(s.ctx, "tcp", s.target)
+		c, err := (&net.Dialer{Timeout: s.opts.DialTimeout, KeepAlive: 30 * time.Second}).DialContext(s.ctx, "tcp", target)
 		if err != nil {
 			if s.ctx.Err() == nil {
-				s.opts.Logf("stream=%d target=%q backend connection failed: %v", f.stream, s.target, err)
+				s.opts.Logf("stream=%d target=%q backend connection failed: %v", f.stream, target, err)
 			}
 			s.enqueueResetReason(f.stream, dialResetReason(err))
 			return nil
@@ -342,6 +364,13 @@ func (s *session) apply(f frame) error {
 			s.mu.Unlock()
 			c.Close()
 			return errSessionClosed
+		}
+		// A local admission can race the backend dial in a bidirectional session.
+		if len(s.streams) >= s.opts.MaxStreams {
+			s.mu.Unlock()
+			c.Close()
+			s.enqueueResetReason(f.stream, resetStreamLimit)
+			return nil
 		}
 		st := &stream{conn: c}
 		if len(s.streams) == 0 {

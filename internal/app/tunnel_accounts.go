@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"sgate/internal/admin"
 	"sgate/internal/cli"
@@ -19,18 +20,74 @@ func (c *controller) manageTunnelAccounts(change *admin.TunnelAccountChange) (ad
 		return admin.TunnelAccountsSnapshot{}, errors.New("客户端账号管理仅在服务端可用")
 	}
 	var apply func([]tunnel.Account) error
+	var serviceRestart, listenersChanged bool
+	var syncedListeners string
 	if change != nil {
 		if c.ctx.Err() != nil || c.restartPending || c.worker == nil || c.worker.server == nil {
 			return admin.TunnelAccountsSnapshot{}, errors.New("代理未运行，不能更新客户端账号")
 		}
+		if change.ReverseMappings != nil {
+			candidate := []tunnel.Account{{ReverseMappings: *change.ReverseMappings}}
+			if err := admin.ValidateReverseTunnelPorts(candidate, c.current.listen, c.worker.listener.Addr().String()); err != nil {
+				return admin.TunnelAccountsSnapshot{}, err
+			}
+		}
+		previous := []admin.TunnelAccountInfo{}
+		if c.current.accountsFile != "" {
+			saved, err := admin.ManageTunnelAccountsFile(c.current.accountsFile, nil, nil)
+			if err != nil {
+				return admin.TunnelAccountsSnapshot{}, err
+			}
+			previous = saved.Accounts
+		}
+		// Include the effective policy when a prior saved port change is pending.
+		for _, account := range c.current.server.Accounts {
+			previous = append(previous, admin.TunnelAccountInfo{Disabled: account.Disabled, ReverseMappings: account.ReverseMappings})
+		}
 		apply = func(accounts []tunnel.Account) error {
-			if err := c.worker.server.UpdateAccounts(accounts); err != nil {
+			if err := admin.ValidateReverseTunnelPorts(accounts, c.current.listen, c.worker.listener.Addr().String()); err != nil {
 				return err
 			}
-			current := *c.current.server
-			current.Accounts = slices.Clone(accounts)
-			c.current.server = &current
-			return nil
+			path := c.servicePath
+			if path == "" {
+				path = c.path
+			}
+			var err error
+			syncedListeners, listenersChanged, err = admin.SyncReverseListeners(path, previous, accounts, func(addresses string, changed bool) error {
+				serviceRestart = c.isManaged() && addresses != "" && !sameClientAddresses(addresses, c.serviceListen)
+				if serviceRestart {
+					if c.servicePath == "" || c.service == nil {
+						return errors.New("缺少 acl_master 服务文件，无法自动重启")
+					}
+					if _, _, err := serviceRestartScripts(c.servicePath, "server"); err != nil {
+						return err
+					}
+					if err := checkManagedMappingPorts(strings.ReplaceAll(strings.ReplaceAll(addresses, "|", ":"), " ", ""), c.service.Addresses()); err != nil {
+						return err
+					}
+					return nil
+				}
+				if err := c.worker.server.UpdateAccounts(accounts); err != nil {
+					return err
+				}
+				current := *c.current.server
+				current.Accounts = slices.Clone(accounts)
+				c.current.server = &current
+				if addresses != "" {
+					if c.controls == nil {
+						c.controls = map[string]string{}
+					}
+					c.controls["master_service"] = addresses
+				}
+				return nil
+			})
+			if err == nil {
+				c.pendingListeners = ""
+				if serviceRestart {
+					c.pendingListeners = strings.ReplaceAll(strings.ReplaceAll(syncedListeners, "|", ":"), " ", "")
+				}
+			}
+			return err
 		}
 	}
 	var snapshot admin.TunnelAccountsSnapshot
@@ -51,6 +108,11 @@ func (c *controller) manageTunnelAccounts(change *admin.TunnelAccountChange) (ad
 		snapshot, err = admin.ManageTunnelAccountsFile(c.current.accountsFile, change, apply)
 	}
 	if err == nil && snapshot.Enabled {
+		snapshot.ServiceRestartRequired = c.pendingListeners != "" && c.isManaged()
+		snapshot.ListenersChanged = listenersChanged
+		if listenersChanged {
+			snapshot.SyncedFields = map[string]string{"master_service": syncedListeners}
+		}
 		canonical, _ := tunnel.EncodeAccounts(c.current.server.Accounts)
 		sum := sha256.Sum256(canonical)
 		snapshot.Pending = hex.EncodeToString(sum[:]) != snapshot.PolicyRevision
@@ -75,4 +137,16 @@ func (c *controller) initialAccountPath() (string, string, error) {
 		path = configured
 	}
 	return path, "", nil
+}
+
+func reverseAddresses(accounts []tunnel.Account) []string {
+	var addresses []string
+	for _, account := range accounts {
+		if !account.Disabled {
+			for _, mapping := range account.ReverseMappings {
+				addresses = append(addresses, mapping.Listen)
+			}
+		}
+	}
+	return addresses
 }

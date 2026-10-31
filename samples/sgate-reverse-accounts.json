@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "accounts": [
+    {
+      "username": "alice",
+      "password": "replace-with-a-unique-password-for-alice",
+      "disabled": true,
+      "reverse_mappings": [
+        {"listen": "127.0.0.1:10022", "target": "127.0.0.1:22"},
+        {"listen": "127.0.0.1:18080", "target": "192.168.1.20:8080"}
+      ]
+    }
+  ]
+}

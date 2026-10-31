@@ -2,6 +2,7 @@ package admin
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 
@@ -11,28 +12,34 @@ import (
 var ErrTunnelAccountsConflict = errors.New("客户端账号文件已变化，请刷新列表后重试")
 
 type TunnelAccountInfo struct {
-	Username string `json:"username"`
-	Disabled bool   `json:"disabled"`
+	ReverseMappings []tunnel.ReverseMapping `json:"reverse_mappings,omitempty"`
+	Username        string                  `json:"username"`
+	Disabled        bool                    `json:"disabled"`
 }
 type TunnelAccountsSnapshot struct {
-	CanCreate       bool                `json:"can_create"`
-	SetupMessage    string              `json:"setup_message,omitempty"`
-	ConfigChanged   bool                `json:"config_changed,omitempty"`
-	ConfigRevision  string              `json:"config_revision,omitempty"`
-	RequiresRestart bool                `json:"requires_restart,omitempty"`
-	Pending         bool                `json:"pending"`
-	PolicyRevision  string              `json:"-"`
-	Enabled         bool                `json:"enabled"`
-	Path            string              `json:"path"`
-	Revision        string              `json:"revision"`
-	Accounts        []TunnelAccountInfo `json:"accounts"`
+	ServiceRestartRequired bool                `json:"service_restart_required,omitempty"`
+	ListenersChanged       bool                `json:"listeners_changed,omitempty"`
+	SyncedFields           map[string]string   `json:"synced_fields,omitempty"`
+	Runtime                any                 `json:"runtime,omitempty"`
+	CanCreate              bool                `json:"can_create"`
+	SetupMessage           string              `json:"setup_message,omitempty"`
+	ConfigChanged          bool                `json:"config_changed,omitempty"`
+	ConfigRevision         string              `json:"config_revision,omitempty"`
+	RequiresRestart        bool                `json:"requires_restart,omitempty"`
+	Pending                bool                `json:"pending"`
+	PolicyRevision         string              `json:"-"`
+	Enabled                bool                `json:"enabled"`
+	Path                   string              `json:"path"`
+	Revision               string              `json:"revision"`
+	Accounts               []TunnelAccountInfo `json:"accounts"`
 }
 type TunnelAccountChange struct {
-	Revision string `json:"revision"`
-	Action   string `json:"action"`
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Disabled *bool  `json:"disabled,omitempty"`
+	ReverseMappings *[]tunnel.ReverseMapping `json:"reverse_mappings,omitempty"`
+	Revision        string                   `json:"revision"`
+	Action          string                   `json:"action"`
+	Username        string                   `json:"username"`
+	Password        string                   `json:"password"`
+	Disabled        *bool                    `json:"disabled,omitempty"`
 }
 
 // ManageTunnelAccountsFile is called under the app controller lock, binding
@@ -76,7 +83,7 @@ func accountSnapshot(path string, raw []byte, accounts []tunnel.Account) TunnelA
 	canonical, _ := tunnel.EncodeAccounts(accounts)
 	snapshot := TunnelAccountsSnapshot{Enabled: true, CanCreate: true, Path: path, Revision: digest(raw), PolicyRevision: digest(canonical), Accounts: make([]TunnelAccountInfo, 0, len(accounts))}
 	for _, account := range accounts {
-		snapshot.Accounts = append(snapshot.Accounts, TunnelAccountInfo{Username: account.Username, Disabled: account.Disabled})
+		snapshot.Accounts = append(snapshot.Accounts, TunnelAccountInfo{Username: account.Username, Disabled: account.Disabled, ReverseMappings: slices.Clone(account.ReverseMappings)})
 	}
 	return snapshot
 }
@@ -89,7 +96,7 @@ func (h *Handler) tunnelAccounts(w http.ResponseWriter, r *http.Request) {
 	var change *TunnelAccountChange
 	if r.Method == http.MethodPut {
 		change = &TunnelAccountChange{}
-		if !decode(w, r, change, 16384) {
+		if !decode(w, r, change, 131072) {
 			return
 		}
 	}
@@ -131,6 +138,23 @@ func (h *Handler) tunnelAccounts(w http.ResponseWriter, r *http.Request) {
 		problem(w, 400, "请先配置 accounts-file 并应用服务端代理")
 		return
 	}
+	if snapshot.ListenersChanged {
+		if !snapshot.ServiceRestartRequired && len(h.startupContent) > 0 {
+			if updated, err := updateConfigFields(h.startupContent, snapshot.SyncedFields); err == nil {
+				h.startupContent = []byte(updated)
+				h.startupRevision = h.restartDigest(h.startupContent)
+			}
+		}
+		if current, err := regularRead(h.view.AppConfigPath, 1<<20); err == nil {
+			snapshot.ConfigRevision = h.configRevision(current)
+		}
+	}
+	if snapshot.ServiceRestartRequired {
+		snapshot.RequiresRestart = true
+	}
+	if h.view.Runtime != nil {
+		snapshot.Runtime = h.view.Runtime()
+	}
 	reply(w, 200, snapshot)
 }
 
@@ -145,10 +169,16 @@ func editTunnelAccounts(accounts []tunnel.Account, change *TunnelAccountChange) 
 		if change.Disabled != nil {
 			account.Disabled = *change.Disabled
 		}
+		if change.ReverseMappings != nil {
+			account.ReverseMappings = slices.Clone(*change.ReverseMappings)
+		}
 		accounts = append(accounts, account)
 	case "update":
 		if index < 0 {
 			return nil, errors.New("客户端账号不存在")
+		}
+		if change.ReverseMappings != nil {
+			accounts[index].ReverseMappings = slices.Clone(*change.ReverseMappings)
 		}
 		if change.Password != "" {
 			accounts[index].Password = change.Password
@@ -187,7 +217,7 @@ func persistTunnelAccounts(path string, original, next []byte, apply func() erro
 		if restore := atomicFile(path, original); restore != nil {
 			return errors.New("账号更新失败，且无法恢复账号文件")
 		}
-		return errors.New("账号未生效，已恢复原账号文件")
+		return fmt.Errorf("账号未生效，已恢复原账号文件：%w", err)
 	}
 	return nil
 }

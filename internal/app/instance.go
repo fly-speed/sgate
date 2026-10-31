@@ -16,6 +16,7 @@ import (
 type definition struct {
 	accountsFile                   string
 	commonUsername, commonPassword string
+	commonAllowReverse             bool
 	listen                         string
 	client                         *tunnel.ClientConfig
 	proxies                        []clientProxy
@@ -95,7 +96,7 @@ func (d definition) start(ctx context.Context, stats *tunnel.Stats) (*instance, 
 			close(i.done)
 		}()
 	} else {
-		s, e := tunnel.NewServer(*d.server)
+		s, e := startTunnelServer(*d.server)
 		if e != nil {
 			l.Close()
 			cancel()
@@ -151,7 +152,19 @@ func (i *instance) stop() error {
 
 // startService 把 HTTP/TLS 和监听的生命周期交给 gin-service。
 func (d definition) startService(stats *tunnel.Stats) (*instance, error) {
-	s, e := tunnel.NewServer(*d.server)
+	cfg := *d.server
+	if d.service.Managed() {
+		provider, ok := d.service.(interface {
+			ReverseListener(string, string) (net.Listener, error)
+		})
+		if !ok && len(reverseAddresses(cfg.Accounts)) > 0 {
+			return nil, errors.New("HTTP framework cannot lease reverse listeners")
+		}
+		if ok {
+			cfg.ReverseListen = provider.ReverseListener
+		}
+	}
+	s, e := startTunnelServer(cfg)
 	if e != nil {
 		return nil, e
 	}
@@ -178,4 +191,16 @@ func (d definition) startService(stats *tunnel.Stats) (*instance, error) {
 		close(i.done)
 	}()
 	return i, nil
+}
+
+func startTunnelServer(cfg tunnel.ServerConfig) (*tunnel.Server, error) {
+	s, err := tunnel.NewServer(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if err = s.StartReverse(); err != nil {
+		s.Close()
+		return nil, err
+	}
+	return s, nil
 }

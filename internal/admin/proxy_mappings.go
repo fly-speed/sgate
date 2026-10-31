@@ -14,11 +14,12 @@ import (
 
 // ProxyMapping 是表单中的一个映射对；JSON 配置的编码只在服务端进行。
 type ProxyMapping struct {
-	Listen   string  `json:"listen"`
-	Server   string  `json:"server"`
-	Addr     string  `json:"addr,omitempty"`
-	Username *string `json:"username,omitempty"`
-	Password *string `json:"password,omitempty"`
+	AllowReverse bool    `json:"allow_reverse,omitempty"`
+	Listen       string  `json:"listen"`
+	Server       string  `json:"server"`
+	Addr         string  `json:"addr,omitempty"`
+	Username     *string `json:"username,omitempty"`
+	Password     *string `json:"password,omitempty"`
 }
 
 // Keep internal configuration helpers using the same mapping representation.
@@ -32,7 +33,7 @@ func proxyMappings(raw string) ([]proxyMapping, error) {
 			return nil, errors.New("代理映射格式错误，请检查 JSON、用户名和密码")
 		}
 		for _, m := range parsed {
-			mappings = append(mappings, proxyMapping{Listen: m.Listen, Server: m.Server, Addr: m.Addr, Username: m.Username, Password: m.Password})
+			mappings = append(mappings, proxyMapping{Listen: m.Listen, Server: m.Server, Addr: m.Addr, Username: m.Username, Password: m.Password, AllowReverse: m.AllowReverse})
 		}
 	}
 	for i := range mappings {

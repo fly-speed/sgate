@@ -22,13 +22,15 @@ const maxAccountCredentialBytes = 8192
 // Account is a tunnel identity, independent of Web management login users.
 // Protect the local JSON file as a secret, just like the legacy password .cf.
 type Account struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Disabled bool   `json:"disabled,omitempty"`
+	Username        string           `json:"username"`
+	Password        string           `json:"password"`
+	Disabled        bool             `json:"disabled,omitempty"`
+	ReverseMappings []ReverseMapping `json:"reverse_mappings,omitempty"`
 }
 type accountVerifier struct {
 	digest   [sha256.Size]byte
 	disabled bool
+	reverse  []ReverseMapping
 }
 
 func validateUsername(username string) error {
@@ -97,6 +99,9 @@ func accountVerifiers(accounts []Account) (map[string]accountVerifier, error) {
 	if accounts == nil || len(accounts) > maxAccounts {
 		return nil, errors.New("tunnel accounts requires an array of up to 4096 entries")
 	}
+	if err := validateReverseMappings(accounts); err != nil {
+		return nil, err
+	}
 	verifiers := make(map[string]accountVerifier, len(accounts))
 	for _, account := range accounts {
 		if err := validateUsername(account.Username); err != nil {
@@ -108,7 +113,7 @@ func accountVerifiers(accounts []Account) (map[string]accountVerifier, error) {
 		if _, exists := verifiers[account.Username]; exists {
 			return nil, errors.New("duplicate tunnel account username")
 		}
-		verifiers[account.Username] = accountVerifier{digest: sha256.Sum256([]byte(account.Password)), disabled: account.Disabled}
+		verifiers[account.Username] = accountVerifier{digest: sha256.Sum256([]byte(account.Password)), disabled: account.Disabled, reverse: append([]ReverseMapping(nil), account.ReverseMappings...)}
 	}
 	return verifiers, nil
 }
@@ -187,7 +192,7 @@ func EncodeAccounts(accounts []Account) ([]byte, error) {
 }
 
 // UpdateAccounts atomically replaces authentication policy and revokes only
-// sessions whose account was removed, disabled, or had its password changed.
+// sessions whose account was removed, disabled, or had its password or mappings changed.
 func (s *Server) UpdateAccounts(accounts []Account) error {
 	next, err := accountVerifiers(accounts)
 	if err != nil {
@@ -198,13 +203,18 @@ func (s *Server) UpdateAccounts(accounts []Account) error {
 	if s.closed {
 		return errors.New("tunnel account authentication is not running")
 	}
+	if s.reverseStarted {
+		if err := s.reconcileReverseLocked(next, nil); err != nil {
+			return err
+		}
+	}
 	previous := s.accounts
 	s.accountMode = true
 	s.accounts = next
 	for id, entry := range s.sessions {
 		account, exists := next[entry.username]
 		old := previous[entry.username]
-		if !exists || account.disabled || account.digest != old.digest {
+		if !exists || account.disabled || account.digest != old.digest || !sameReverseMappings(account.reverse, old.reverse) {
 			entry.session.close()
 			delete(s.sessions, id)
 		}
@@ -226,6 +236,7 @@ func (s *Server) UseLegacyAuthentication() error {
 	if !s.accountMode {
 		return nil
 	}
+	s.closeReverseLocked()
 	s.accountMode = false
 	s.accounts = nil
 	for id, entry := range s.sessions {

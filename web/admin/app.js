@@ -10,8 +10,10 @@ let state = {},
   servicePID = 0,
   serviceRestarting = false;
 let servicePendingListeners = [];
+let serverTunnelListeners = [];
 let tunnelAccountsLoad = 0;
 let tunnelAccountsRevision = "", tunnelAccountRows = [], tunnelAccountsBusy = false, tunnelAccountsEnabled = false, tunnelAccountsCanCreate = false;
+let tunnelAccountCreateMappings = null;
 let configRole = "";
 // Keep each role's expanded sections across saves and language changes.
 const configGroupOpen = new Map();
@@ -42,7 +44,7 @@ function renderConfigFields(fields, runtime, role) {
       group = document.createElement("details");
       group.className = "config-group";
       const groupKey = configRole + ":" + field.group;
-      group.open = configGroupOpen.get(groupKey) ?? true;
+      group.open = configGroupOpen.get(groupKey) ?? false;
       group.addEventListener("toggle", () => configGroupOpen.set(groupKey, group.open));
       const summary = document.createElement("summary");
       localText(summary, () => t(field.group));
@@ -548,6 +550,7 @@ function renderProxyMappings(group, field, overridden) {
       listen: row.listen.value,
       server: row.server.value,
       ...(row.addr.value ? { addr: row.addr.value } : {}),
+      ...(row.allowReverse.checked ? {allow_reverse:true} : {}),
       ...(row.auth.checked ? {
         ...(row.inheritUsername && !row.username.value ? {} : {username:row.username.value}),
         ...(row.password.value || row.savedPassword ? {password:row.password.value || row.savedPassword} : {}),
@@ -646,6 +649,28 @@ function renderProxyMappings(group, field, overridden) {
         controls.result.hidden = true;
         changed();
       });
+      const reversePermission = document.createElement("div");
+      reversePermission.className = "proxy-reverse-permission";
+      const reverseLabel = document.createElement("label");
+      const allowReverse = document.createElement("input");
+      allowReverse.type = "checkbox";
+      allowReverse.checked = value.allow_reverse === true;
+      controls.allowReverse = allowReverse;
+      const reverseCaption = document.createElement("span");
+      localText(reverseCaption, () => t("允许服务器反向代理"));
+      localAttr(allowReverse, "aria-label", () => t("允许服务器反向代理"));
+      reverseLabel.append(allowReverse, reverseCaption);
+      const reverseHelp = document.createElement("small");
+      reverseHelp.className = "muted";
+      localText(reverseHelp, () => t("默认关闭。开启后，服务器可通过本映射的通道访问客户端可达的目标服务。更改此选项并保存会重建本映射通道，断开其现有连接。"));
+      allowReverse.addEventListener("change", () => {
+        controls.testVersion = (controls.testVersion || 0) + 1;
+        controls.result.hidden = true;
+        changed();
+      });
+      entry.controls.push(allowReverse);
+      reversePermission.append(reverseLabel, reverseHelp);
+      row.append(reversePermission);
       const remove = document.createElement("button");
       remove.type = "button";
       remove.className = "secondary proxy-remove";
@@ -743,6 +768,7 @@ async function testProxyMapping(row) {
     const result = await api("proxy-test", {
       method: "POST",
       body: JSON.stringify({ listen: row.listen.value, server: row.server.value, addr: row.addr.value,
+        ...(row.allowReverse?.checked ? {allow_reverse:true} : {}),
         ...(row.auth?.checked ? {
           ...(row.inheritUsername && !row.username.value ? {} : {username:row.username.value}),
           ...(row.password.value || row.savedPassword ? {password:row.password.value || row.savedPassword} : {}),
@@ -949,12 +975,15 @@ function renderSignedOut() {
   tunnelAccountsCanCreate = false;
   $("tunnel-accounts-nav").hidden = true;
   $("tunnel-account-list").replaceChildren();
+  $("tunnel-account-create-mappings").replaceChildren();
+  tunnelAccountCreateMappings = null;
   $("tunnel-account-name").value = $("tunnel-account-secret").value = "";
   localText($("tunnel-accounts-path"), () => "");
   // 退出后也清除隐藏页面中的配置草稿、密码和统计，避免共享浏览器继续显示。
   configInputs = [];
   revision = "";
   servicePID = 0;
+  serverTunnelListeners = [];
   previous = null;
   points = [];
   $("traffic-ip").value = "";
@@ -1032,6 +1061,10 @@ async function loadConfig() {
   renderRuntime(data.runtime || {});
 }
 function renderRuntime(rt) {
+  if (Array.isArray(rt.websocket_listeners)) {
+    serverTunnelListeners = rt.websocket_listeners;
+    validateAllReverseMappings(false);
+  }
   servicePendingListeners = rt.pending_listeners || [];
   servicePID = rt.pid || 0;
   $("restart-service").hidden = $("restart-service-help").hidden = !rt.service_restart_available;
@@ -1564,10 +1597,12 @@ $("restart-service").addEventListener("click", restartService);
 // inherited sockets. Wait for a new running PID; do not discard other drafts.
 async function restartSavedMappings(result) {
   const oldPID = result.runtime?.pid || servicePID;
-  if (!oldPID) throw new Error(t("无法确定客户端进程，配置已保存，请刷新后重试重启"));
+  if (!oldPID) throw new Error(t("无法确定服务进程，配置已保存，请刷新后重试重启"));
   serviceRestarting = true;
   setConfigBusy(true);
-  notice(() => t("映射已保存，正在调用客户端停止和启动脚本，等待监听端口恢复…"));
+  notice(() => state.role === "server"
+    ? t("反向映射已保存，正在调用服务端停止和启动脚本，等待监听端口恢复…")
+    : t("映射已保存，正在调用客户端停止和启动脚本，等待监听端口恢复…"));
   try {
     try {
       await api("restart-service", {method: "POST", body: JSON.stringify({expected_pid: oldPID})});
@@ -1576,7 +1611,9 @@ async function restartSavedMappings(result) {
     revision = config.revision || revision;
     if (config.runtime) renderRuntime(config.runtime);
     localText($("pending-label"), () => (Object.keys(configEdits()).length ? t("有未保存修改 · ") : "") + t("已保存项已生效"));
-    notice(() => t("映射已生效，客户端已通过停止和启动脚本重启，监听端口已核对，登录会话继续有效。其他未保存修改已保留。"));
+    notice(() => state.role === "server"
+      ? t("反向映射已生效，服务端已通过停止和启动脚本重启，监听端口已核对。其他未保存修改已保留。")
+      : t("映射已生效，客户端已通过停止和启动脚本重启，监听端口已核对，登录会话继续有效。其他未保存修改已保留。"));
   } finally {
     serviceRestarting = false;
     setConfigBusy(configSaving);
@@ -1641,7 +1678,7 @@ async function waitForServiceRestart(oldPID, expectedListeners = []) {
     }
     if (runtime.pid && runtime.pid !== oldPID && runtime.running) {
       if (expectedListeners.length && !restartListenersReady(expectedListeners, runtime.listeners))
-        throw new Error(t("客户端已重启，但监听端口与已保存映射不一致，请检查启动脚本和 master_service。"));
+        throw new Error(t("服务已重启，但监听端口与已保存映射不一致，请检查启动脚本和 master_service。"));
       return config;
     }
     if (!runtime.service_restart_pending && runtime.last_error) {
@@ -1682,6 +1719,7 @@ window.addEventListener("resize", () => {
   drawChart();
 });
 sgateI18n.init(() => {
+  validateAllReverseMappings(false);
   validateConfigForm(null, false);
   drawChart();
 });
@@ -1691,16 +1729,169 @@ refreshAuth().catch((e) => {
 });
 
 
+// Each account owns its mapping draft; unrelated saves must not discard it.
+function reverseMappingsDirty(row) {
+  return JSON.stringify(row.reverse.read()) !== JSON.stringify(row.originalMappings);
+}
+function reverseMappingAddressError(value, listen) {
+  if (!value) return t("请填写地址和端口");
+  if (/\s/.test(value)) return t("地址不能包含空白字符");
+  try { configAddress(value); } catch (error) { return error.message; }
+  if (listen) {
+    const match = /^(?:\[([^\]]+)\]|(\d+\.\d+\.\d+\.\d+)):(\d+)$/.exec(value);
+    if (!match || String(Number(match[3])) !== match[3]) return t("监听地址须为明确的 IP 和 1～65535 的端口");
+    if (match[2] && match[2].split(".").some((part) => String(Number(part)) !== part)) return t("监听地址须为明确的 IP 和 1～65535 的端口");
+    if (match[1] && new URL("http://[" + match[1] + "]").hostname !== "[" + match[1] + "]") return t("请使用规范的 IPv6 监听地址，例如 [::1]:10022");
+  }
+  return "";
+}
+function reverseTunnelPortConflict(value) {
+  const port = value.slice(value.lastIndexOf(":") + 1);
+  const configured = configInputs.find(item => item.key === "listen");
+  const listeners = [...serverTunnelListeners, configured?.original || ""];
+  return listeners.flatMap(raw => raw.split(/[,;\s]+/)).some(address => {
+    const normalized = address.replaceAll("|", ":");
+    return Number(normalized.slice(normalized.lastIndexOf(":") + 1)) === Number(port);
+  });
+}
+function validateReverseMappings(editor, username, show) {
+  if (!editor) return true;
+  const seen = new Set(tunnelAccountRows.filter((row) => row.username !== username)
+    .flatMap((row) => row.originalMappings.map((mapping) => mapping.listen)));
+  let valid = true;
+  for (const row of editor.rows) {
+    for (const key of ["listen", "target"]) {
+      let error = reverseMappingAddressError(row[key].value, key === "listen");
+      if (key === "listen" && !error) {
+        if (reverseTunnelPortConflict(row.listen.value)) error = t("反向代理监听端口不能与 WebSocket 隧道服务端口相同");
+        else if (seen.has(row.listen.value)) error = t("监听地址已被其他映射使用");
+        seen.add(row.listen.value);
+      }
+      row[key].setCustomValidity(error);
+      row.errors[key].hidden = !error || (!show && !row[key].value);
+      localText(row.errors[key], () => reverseMappingAddressError(row[key].value, key === "listen") || (error ? (reverseTunnelPortConflict(row.listen.value) ? t("反向代理监听端口不能与 WebSocket 隧道服务端口相同") : t("监听地址已被其他映射使用")) : ""));
+      if (error) {
+        valid = false;
+        if (show && !editor.firstInvalid) editor.firstInvalid = row[key];
+      }
+    }
+  }
+  return valid;
+}
+function validateAllReverseMappings(show) {
+  validateReverseMappings(tunnelAccountCreateMappings, "", show);
+  for (const row of tunnelAccountRows) validateReverseMappings(row.reverse, row.username, show);
+}
+function createReverseMappingsEditor(values, changed) {
+  const element = document.createElement("div");
+  element.className = "reverse-editor";
+  const header = document.createElement("div");
+  header.className = "reverse-editor-heading";
+  const title = document.createElement("strong");
+  localText(title, () => t("反向代理端口映射"));
+  const count = document.createElement("span");
+  count.className = "muted";
+  const addButton = document.createElement("button");
+  addButton.type = "button";
+  addButton.className = "secondary";
+  localText(addButton, () => t("＋ 添加反向映射"));
+  header.append(title, count, addButton);
+  const help = document.createElement("p");
+  help.className = "muted reverse-help";
+  localText(help, () => t("服务端监听接入端口，通过该账号的客户端访问目标地址。目标可为客户端回环、局域网 IP 或主机名。"));
+  const list = document.createElement("div");
+  const empty = document.createElement("p");
+  empty.className = "muted reverse-empty";
+  localText(empty, () => t("尚未配置反向映射。保存时同步框架监听；托管模式端口变化会自动停止并启动服务端，中断当前业务连接。"));
+  element.append(header, help, list, empty);
+  const editor = {element, rows:[], addButton, busy:false};
+  editor.read = () => editor.rows.map((row) => ({listen:row.listen.value, target:row.target.value}));
+  editor.setBusy = (busy) => {
+    editor.busy = busy;
+    addButton.disabled = busy || editor.rows.length >= 256;
+    for (const row of editor.rows) row.listen.disabled = row.target.disabled = row.removeButton.disabled = busy;
+  };
+  const refresh = () => {
+    list.replaceChildren();
+    list.append(...editor.rows.map((row) => row.element));
+    empty.hidden = editor.rows.length !== 0;
+    localText(count, () => t("映射数量：") + editor.rows.length + " / 256");
+    editor.setBusy(editor.busy);
+  };
+  editor.add = (value = {listen:"", target:""}) => {
+    if (editor.busy) return;
+    if (editor.rows.length >= 256) { notice(() => t("每个账号最多配置 256 个反向映射"), true); return; }
+    const item = document.createElement("div");
+    item.className = "reverse-mapping";
+    const row = {element:item, errors:{}};
+    for (const [key, text, placeholder] of [["listen", "服务端监听地址", "127.0.0.1:10022"], ["target", "客户端目标地址", "127.0.0.1:22"]]) {
+      const label = document.createElement("label");
+      const caption = document.createElement("span");
+      localText(caption, () => t(text));
+      const input = document.createElement("input");
+      input.type = "text";
+      input.autocomplete = "off";
+      input.spellcheck = false;
+      input.maxLength = key === "listen" ? 64 : 260;
+      input.value = value[key] || "";
+      input.placeholder = placeholder;
+      localAttr(input, "aria-label", () => t(text));
+      input.addEventListener("input", () => changed());
+      const error = document.createElement("small");
+      error.className = "config-error";
+      error.hidden = true;
+      row[key] = input;
+      row.errors[key] = error;
+      label.append(caption, input, error);
+      item.append(label);
+    }
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "secondary";
+    localText(removeButton, () => t("移除此映射"));
+    removeButton.addEventListener("click", () => {
+      if (editor.busy) return;
+      editor.rows.splice(editor.rows.indexOf(row), 1);
+      refresh();
+      changed();
+    });
+    row.removeButton = removeButton;
+    item.append(removeButton);
+    editor.rows.push(row);
+    refresh();
+    return row;
+  };
+  for (const value of values) editor.add(value);
+  refresh();
+  addButton.addEventListener("click", () => {
+    const row = editor.add();
+    if (row) { row.listen.focus(); changed(); }
+  });
+  return editor;
+}
+function saveTunnelAccountRow(row) {
+  row.reverse.firstInvalid = null;
+  if (!validateReverseMappings(row.reverse, row.username, true)) {
+    row.reverse.firstInvalid.focus();
+    notice(() => t("请检查反向映射的监听地址和目标地址"), true);
+    return;
+  }
+  return saveTunnelAccount({action:"update",username:row.username,password:row.password.value,disabled:!row.enabled.checked,
+    ...(reverseMappingsDirty(row) ? {reverse_mappings:row.reverse.read()} : {})});
+}
+
 // Account JSON stays on the server. List responses contain no password values.
 function tunnelAccountDirty(row) {
-  return row.password.value !== "" || row.enabled.checked !== !row.originalDisabled;
+  return row.password.value !== "" || row.enabled.checked !== !row.originalDisabled || reverseMappingsDirty(row);
 }
 function setTunnelAccountsBusy(busy) {
   tunnelAccountsBusy = busy;
   for (const row of tunnelAccountRows) {
     row.password.disabled = row.enabled.disabled = row.deleteButton.disabled = busy;
     row.saveButton.disabled = busy || !tunnelAccountDirty(row);
+    row.reverse.setBusy(busy);
   }
+  if (tunnelAccountCreateMappings) tunnelAccountCreateMappings.setBusy(busy);
   for (const id of ["tunnel-account-name", "tunnel-account-secret"]) $(id).disabled = busy;
   $("tunnel-account-add").disabled = busy || !tunnelAccountsCanCreate;
   $("tunnel-accounts-reload").disabled = busy || !tunnelAccountsEnabled;
@@ -1708,7 +1899,13 @@ function setTunnelAccountsBusy(busy) {
 }
 function renderTunnelAccounts(data, savedName) {
   const drafts = new Map(tunnelAccountRows.filter((row) => row.username !== savedName && tunnelAccountDirty(row))
-    .map((row) => [row.username, {password:row.password.value, enabled:row.enabled.checked}]));
+    .map((row) => [row.username, {password:row.password.value,
+      enabled:row.enabled.checked !== !row.originalDisabled ? row.enabled.checked : undefined,
+      mappings:reverseMappingsDirty(row) ? row.reverse.read() : undefined}]));
+  if (!tunnelAccountCreateMappings) {
+    tunnelAccountCreateMappings = createReverseMappingsEditor([], () => validateReverseMappings(tunnelAccountCreateMappings, "", false));
+    $("tunnel-account-create-mappings").append(tunnelAccountCreateMappings.element);
+  }
   tunnelAccountsRevision = data.revision || "";
   tunnelAccountsEnabled = !!data.enabled;
   tunnelAccountsCanCreate = !!data.enabled || !!data.can_create;
@@ -1747,24 +1944,30 @@ function renderTunnelAccounts(data, savedName) {
     deleteButton.type = "button";
     deleteButton.className = "secondary";
     localText(deleteButton, () => t("删除"));
-    const row = {username:account.username, password, enabled, originalDisabled:account.disabled, saveButton, deleteButton};
+    const row = {username:account.username, password, enabled, originalDisabled:account.disabled, saveButton, deleteButton,
+      originalMappings:(account.reverse_mappings || []).map((mapping) => ({...mapping}))};
     const draft = drafts.get(account.username);
-    if (draft) { password.value = draft.password; enabled.checked = draft.enabled; }
-    const changed = () => { saveButton.disabled = tunnelAccountsBusy || !tunnelAccountDirty(row); };
+    if (draft) { password.value = draft.password; if (draft.enabled !== undefined) enabled.checked = draft.enabled; }
+    const changed = () => {
+      saveButton.disabled = tunnelAccountsBusy || !tunnelAccountDirty(row);
+      validateReverseMappings(row.reverse, row.username, false);
+    };
+    row.reverse = createReverseMappingsEditor(draft?.mappings || row.originalMappings, changed);
     password.addEventListener("input", changed);
     enabled.addEventListener("change", changed);
-    saveButton.addEventListener("click", () => saveTunnelAccount({action:"update",username:row.username,password:password.value,disabled:!enabled.checked}));
+    saveButton.addEventListener("click", () => saveTunnelAccountRow(row));
     deleteButton.addEventListener("click", () => {
       if (!row.confirmDelete) {
         row.confirmDelete = true;
         localText(deleteButton, () => t("再次点击确认删除"));
       } else saveTunnelAccount({action:"delete",username:row.username});
     });
-    element.append(name, password, label, saveButton, deleteButton);
+    element.append(name, password, label, saveButton, deleteButton, row.reverse.element);
     $("tunnel-account-list").append(element);
     tunnelAccountRows.push(row);
   }
   setTunnelAccountsBusy(tunnelAccountsBusy);
+  validateAllReverseMappings(false);
 }
 async function loadTunnelAccounts() {
   if (tunnelAccountsBusy || state.role !== "server") return;
@@ -1774,7 +1977,7 @@ async function loadTunnelAccounts() {
   if (load === tunnelAccountsLoad && run === epoch && state.authenticated) renderTunnelAccounts(data);
 }
 async function saveTunnelAccount(change) {
-  if (tunnelAccountsBusy || state.role !== "server" || !state.authenticated) return;
+  if (tunnelAccountsBusy || serviceRestarting || configSaving || state.role !== "server" || !state.authenticated) return;
   if (change.password && configByteLength(change.password) > 1024) {
     notice(() => t("密码不能超过 1024 个 UTF-8 字节"), true); return;
   }
@@ -1785,10 +1988,10 @@ async function saveTunnelAccount(change) {
     const data = await api("tunnel-accounts", {method:"PUT",body:JSON.stringify({...change,revision:tunnelAccountsRevision})});
     if (run !== epoch || !state.authenticated) return;
     renderTunnelAccounts(data, change.username);
-    if (data.config_changed) {
+    if (data.config_changed || data.listeners_changed) {
       revision = data.config_revision || revision;
       const entry = configInputs.find((item) => item.key === "accounts-file");
-      if (entry) {
+      if (entry && data.config_changed) {
         if (!entry.dirty) entry.input.value = data.path;
         entry.original = data.path;
         entry.dirty = entry.input.value !== entry.original;
@@ -1797,8 +2000,24 @@ async function saveTunnelAccount(change) {
       localText($("pending-label"), () => Object.keys(configEdits()).length ? t("有未保存修改")
         : data.requires_restart ? t("已保存 · 待应用") : t("配置文件已同步"));
     }
-    if (change.action === "create") $("tunnel-account-name").value = $("tunnel-account-secret").value = "";
-    notice(() => t("客户端账号已保存并立即生效"));
+    for (const [key, saved] of Object.entries(data.synced_fields || {})) {
+      const linked = configInputs.find(item => item.key === key);
+      if (!linked || linked.secret || linked.kind === "proxies") continue;
+      if (!linked.dirty) linked.input.value = saved;
+      linked.original = saved;
+      linked.dirty = linked.input.value !== saved;
+      updateConfigSaveButton(linked);
+    }
+    if (data.runtime) renderRuntime(data.runtime);
+    if (change.action === "create") {
+      $("tunnel-account-name").value = $("tunnel-account-secret").value = "";
+      tunnelAccountCreateMappings = null;
+      $("tunnel-account-create-mappings").replaceChildren();
+      tunnelAccountCreateMappings = createReverseMappingsEditor([], () => validateReverseMappings(tunnelAccountCreateMappings, "", false));
+      $("tunnel-account-create-mappings").append(tunnelAccountCreateMappings.element);
+    }
+    if (data.service_restart_required) await restartSavedMappings(data);
+    else notice(() => t("客户端账号已保存并立即生效"));
   } catch (error) {
     if (run === epoch && state.authenticated) notice(() => errorText(error), true);
   } finally {
@@ -1813,5 +2032,13 @@ $("tunnel-account-create").addEventListener("submit", (event) => {
   const password = $("tunnel-account-secret").value;
   const error = configValueError("username",username,{type:"username",required:true},{});
   if (error || !password) { notice(() => error || t("不能为空"), true); return; }
-  saveTunnelAccount({action:"create",username,password});
+  if (tunnelAccountCreateMappings) {
+    tunnelAccountCreateMappings.firstInvalid = null;
+    if (!validateReverseMappings(tunnelAccountCreateMappings, "", true)) {
+      tunnelAccountCreateMappings.firstInvalid.focus();
+      notice(() => t("请检查反向映射的监听地址和目标地址"), true);
+      return;
+    }
+  }
+  saveTunnelAccount({action:"create",username,password,reverse_mappings:tunnelAccountCreateMappings?.read() || []});
 });

@@ -18,11 +18,12 @@ import (
 )
 
 type ClientConfig struct {
-	Key      []byte
-	Password string
-	Username string
-	URL      string
-	Addr     string
+	AllowReverse bool // Explicit opt-in; zero value denies reverse OPEN commands.
+	Key          []byte
+	Password     string
+	Username     string
+	URL          string
+	Addr         string
 	// OmitAddr 强制使用服务端默认后端，但不修改保存的地址配置。
 	OmitAddr       bool
 	ReconnectMin   time.Duration
@@ -50,6 +51,8 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		return nil, err
 	}
 	cfg.URL = endpoint
+	cfg.Options.receiveReverse = cfg.AllowReverse && cfg.Username != ""
+	cfg.Options.closeSessionOnStop = cfg.Username != ""
 	if cfg.ReconnectMin == 0 {
 		cfg.ReconnectMin = 250 * time.Millisecond
 	}
@@ -84,6 +87,10 @@ func (c *Client) dial(ctx context.Context, id string, resume bool) (*websocket.C
 	}
 	u, _ := url.Parse(c.cfg.URL)
 	query := u.Query()
+	query.Del(reverseQuery) // A server URL must not override local consent.
+	if c.cfg.AllowReverse && c.cfg.Username != "" {
+		query.Set(reverseQuery, "1")
+	}
 	query.Set(streamErrorsQuery, "1")
 	query.Set(receiveWindowQuery, strconv.Itoa(c.cfg.Options.BufferBytes))
 	u.RawQuery = query.Encode()
@@ -177,14 +184,34 @@ func (c *Client) run(ctx context.Context, listener net.Listener, state *clientSe
 	running := *c
 	running.cfg.Options.Logf = mappingLogger(c.cfg.Options.Logf, listener.Addr().String(), c.cfg.URL)
 	c = &running
-	ctx, cancel := context.WithCancel(ctx)
+	parent := ctx
+	// Own cancellation so a deliberate stop can send the authenticated close
+	// proof before the transport writer exits. The notification is bounded by
+	// 100 ms; transient transport failure never takes this shutdown path.
+	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
 	defer cancel()
+	if parent.Err() != nil {
+		cancel()
+	}
 	mu := &state.mu
 	mu.Lock()
 	state.current = newSession(ctx, "", c.cfg.Options)
 	mu.Unlock()
 	acceptErr, stopLocal := c.startLocalListener(ctx, cancel, listener, state)
 	defer stopLocal()
+	parentStopped := make(chan struct{})
+	go func() {
+		defer close(parentStopped)
+		select {
+		case <-parent.Done():
+			mu.Lock()
+			state.current.close()
+			cancel()
+			mu.Unlock()
+		case <-ctx.Done():
+		}
+	}()
+	defer func() { cancel(); <-parentStopped }()
 	c.reconnect(ctx, state)
 	select {
 	case err := <-acceptErr:

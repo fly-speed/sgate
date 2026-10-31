@@ -113,18 +113,21 @@ test("form groups rows, masks secrets and submits only explicitly changed values
 
 test("configuration sections retain independent collapse state for each role", async () => {
   const { context, elements } = await page();
+  vm.runInContext('renderConfigFields(fields, {}, "client")', context);
   let groups = elements.get("config-fields").children;
   assert.equal(groups[0].className, "config-group");
   assert.equal(groups[0].children[0].textContent, "代理与通道");
-  assert.equal(groups[0].open, true);
-  groups[0].open = false;
+  assert.ok(groups.every(group => group.open === false));
+  groups[0].open = true;
   groups[0].listeners.toggle();
-  assert.equal(groups[1].open, true);
-  vm.runInContext('renderConfigFields(fields, {})', context);
+  assert.equal(groups[1].open, false);
+  vm.runInContext('renderConfigFields(fields, {}, "client")', context);
   groups = elements.get("config-fields").children;
-  assert.equal(groups[0].open, false);
-  assert.equal(groups[1].open, true);
+  assert.equal(groups[0].open, true);
+  assert.equal(groups[1].open, false);
   vm.runInContext('renderConfigFields(fields, {}, "server")', context);
+  assert.ok(elements.get("config-fields").children.every(group => group.open === false));
+  vm.runInContext('renderConfigFields(fields, {}, "client")', context);
   assert.equal(elements.get("config-fields").children[0].open, true);
 });
 
@@ -1457,4 +1460,248 @@ test("server accounts-file shows live status and single-row save preserves unrel
   assert.equal(vm.runInContext('configInputs[1].dirty',context),true);
   assert.match(elements.get("notice").textContent,/无需重启代理/);
   assert.match(elements.get("notice").textContent,/命令行覆盖项仍使用启动值/);
+});
+
+test("account reverse mappings render, edit and save through the row button", async () => {
+  const {context}=await page();
+  context.view={enabled:true,revision:"v1",accounts:[{username:"alice",disabled:false,reverse_mappings:[{listen:"127.0.0.1:10022",target:"127.0.0.1:22"},{listen:"[::1]:18080",target:"intranet.example:8080"}]}]};
+  vm.runInContext('state={authenticated:true,role:"server"};renderTunnelAccounts(view)',context);
+  let row=vm.runInContext('tunnelAccountRows[0]',context);
+  assert.equal(row.reverse.rows.length,2);
+  assert.equal(row.reverse.rows[1].target.value,"intranet.example:8080");
+  assert.equal(row.saveButton.disabled,true);
+  row.reverse.rows[0].target.value="192.168.1.20:22";
+  row.reverse.rows[0].target.listeners.input();
+  assert.equal(row.saveButton.disabled,false);
+  let payload;
+  context.api=async(_,options)=>{payload=JSON.parse(options.body);return {...context.view,revision:"v2",accounts:[{username:"alice",disabled:false,reverse_mappings:payload.reverse_mappings}]}};
+  await row.saveButton.listeners.click();
+  assert.deepEqual(payload,{action:"update",username:"alice",password:"",disabled:false,revision:"v1",reverse_mappings:[{listen:"127.0.0.1:10022",target:"192.168.1.20:22"},{listen:"[::1]:18080",target:"intranet.example:8080"}]});
+  row=vm.runInContext('tunnelAccountRows[0]',context);
+  assert.equal(row.saveButton.disabled,true);
+  assert.equal(row.password.value,"");
+});
+
+test("removing all reverse mappings sends an explicit empty array and locks controls during save", async () => {
+  const {context}=await page();
+  context.view={enabled:true,revision:"v1",accounts:[{username:"alice",disabled:false,reverse_mappings:[{listen:"127.0.0.1:10022",target:"localhost:22"}]}]};
+  vm.runInContext('state={authenticated:true,role:"server"};renderTunnelAccounts(view)',context);
+  const row=vm.runInContext('tunnelAccountRows[0]',context);
+  row.reverse.rows[0].removeButton.listeners.click();
+  assert.equal(row.reverse.rows.length,0);
+  assert.equal(row.saveButton.disabled,false);
+  let payload,finish;
+  context.api=(_,options)=>{payload=JSON.parse(options.body);return new Promise(resolve=>{finish=resolve})};
+  const pending=row.saveButton.listeners.click();
+  assert.deepEqual(payload.reverse_mappings,[]);
+  assert.equal(row.reverse.addButton.disabled,true);
+  assert.equal(vm.runInContext('tunnelAccountCreateMappings.addButton.disabled',context),true);
+  row.reverse.addButton.listeners.click();
+  assert.equal(row.reverse.rows.length,0);
+  finish({enabled:true,revision:"v2",accounts:[{username:"alice",disabled:false}]});
+  await pending;
+  assert.equal(vm.runInContext('tunnelAccountRows[0].reverse.rows.length',context),0);
+  assert.equal(vm.runInContext('tunnelAccountRows[0].saveButton.disabled',context),true);
+});
+
+test("reverse mapping validation blocks incomplete, duplicate and invalid addresses in both languages", async () => {
+  const {context,elements}=await page();
+  elements.get("traffic-chart").clientWidth=0;
+  context.view={enabled:true,revision:"v1",accounts:[{username:"alice",disabled:false},{username:"bob",disabled:false,reverse_mappings:[{listen:"127.0.0.1:10022",target:"localhost:22"}]}]};
+  vm.runInContext('state={authenticated:true,role:"server"};renderTunnelAccounts(view)',context);
+  const account=vm.runInContext('tunnelAccountRows[0]',context);
+  account.reverse.addButton.listeners.click();
+  const row=account.reverse.rows[0];
+  let calls=0;context.api=async()=>{calls++;throw new Error("must not submit")};
+  for(const language of ["zh-CN","en"]){
+    vm.runInContext(`sgateI18n.setLanguage(${JSON.stringify(language)})`,context);
+    for(const [listen,target] of [["",""],["localhost:10023","localhost:22"],["127.0.0.1:0","localhost:22"],["127.0.0.1:65536","localhost:22"],["127.0.0.1:010023","localhost:22"],["127.0.0.1:10023",""],["127.0.0.1:10023","http://localhost:80"],["127.0.0.1:10023","localhost:80\n"],["127.0.0.1:10022","localhost:22"]]){
+      row.listen.value=listen;row.target.value=target;
+      await account.saveButton.listeners.click();
+      assert.ok(row.listen.validationMessage||row.target.validationMessage,`${listen} / ${target}`);
+      if(language==="en")assert.doesNotMatch(row.listen.validationMessage+row.target.validationMessage,/[\p{Script=Han}]/u);
+    }
+  }
+  assert.equal(calls,0);
+  row.listen.value="127.0.0.1:10023";row.target.value="localhost:22";
+  account.reverse.addButton.listeners.click();
+  const duplicate=account.reverse.rows[1];duplicate.listen.value=row.listen.value;duplicate.target.value="localhost:80";
+  await account.saveButton.listeners.click();
+  assert.match(duplicate.listen.validationMessage,/already used/);
+  assert.equal(calls,0);
+  for(const listen of ["127.0.0.1:1","0.0.0.0:65535","[::1]:10023","[::]:10023"]){
+    context.address=listen;
+    assert.equal(vm.runInContext('reverseMappingAddressError(address,true)',context),"");
+  }
+});
+
+test("mapping drafts survive other account saves, errors and language switches", async () => {
+  const {context,elements}=await page();elements.get("traffic-chart").clientWidth=0;
+  context.view={enabled:true,revision:"v1",accounts:[{username:"alice",disabled:false},{username:"bob",disabled:false,reverse_mappings:[{listen:"127.0.0.1:10022",target:"localhost:22"}]}]};
+  vm.runInContext('state={authenticated:true,role:"server"};renderTunnelAccounts(view)',context);
+  let bob=vm.runInContext('tunnelAccountRows[1]',context);
+  bob.reverse.rows[0].target.value="192.168.1.20:22";bob.reverse.rows[0].target.listeners.input();
+  vm.runInContext('tunnelAccountCreateMappings.addButton.listeners.click();tunnelAccountCreateMappings.rows[0].listen.value="127.0.0.1:10080"',context);
+  context.api=async()=>({...context.view,revision:"v2"});
+  await vm.runInContext('saveTunnelAccount({action:"update",username:"alice",password:"new-secret"})',context);
+  bob=vm.runInContext('tunnelAccountRows[1]',context);
+  assert.equal(bob.reverse.rows[0].target.value,"192.168.1.20:22");
+  assert.equal(bob.saveButton.disabled,false);
+  assert.equal(vm.runInContext('tunnelAccountCreateMappings.rows[0].listen.value',context),"127.0.0.1:10080");
+  vm.runInContext('sgateI18n.setLanguage("en")',context);
+  assert.equal(bob.reverse.rows[0].target.value,"192.168.1.20:22");
+  context.api=async()=>{throw new Error("账号未生效，已恢复原账号文件")};
+  await bob.saveButton.listeners.click();
+  assert.equal(bob.reverse.rows[0].target.value,"192.168.1.20:22");
+  assert.equal(bob.reverse.rows[0].target.disabled,false);
+  assert.equal(bob.saveButton.disabled,false);
+  assert.equal(vm.runInContext('tunnelAccountsRevision',context),"v2");
+  assert.match(elements.get("notice").textContent,/failed/);
+});
+
+test("new accounts can configure reverse mappings atomically and logout clears the editor", async () => {
+  const {context,elements}=await page();
+  context.view={enabled:false,can_create:true,revision:"setup-v1",accounts:[]};
+  vm.runInContext('state={authenticated:true,role:"server"};renderTunnelAccounts(view);tunnelAccountCreateMappings.addButton.listeners.click()',context);
+  elements.get("tunnel-account-name").value="alice";elements.get("tunnel-account-secret").value="new-secret";
+  const editor=vm.runInContext('tunnelAccountCreateMappings',context);
+  editor.rows[0].listen.value="127.0.0.1:10022";editor.rows[0].target.value="localhost:22";
+  let payload;
+  context.api=async(_,options)=>{payload=JSON.parse(options.body);return{enabled:true,revision:"v1",accounts:[{username:"alice",disabled:false,reverse_mappings:payload.reverse_mappings}]}};
+  elements.get("tunnel-account-create").listeners.submit({preventDefault(){}});
+  await new Promise(setImmediate);
+  assert.deepEqual(payload.reverse_mappings,[{listen:"127.0.0.1:10022",target:"localhost:22"}]);
+  assert.equal(payload.action,"create");assert.equal(payload.revision,"setup-v1");
+  assert.equal(vm.runInContext('tunnelAccountCreateMappings.rows.length',context),0);
+  assert.equal(vm.runInContext('tunnelAccountRows[0].reverse.rows.length',context),1);
+  vm.runInContext('epoch++;state={authenticated:false};renderSignedOut()',context);
+  assert.equal(vm.runInContext('tunnelAccountCreateMappings',context),null);
+  assert.equal(elements.get("tunnel-account-create-mappings").children.length,0);
+});
+
+test("reverse mapping editors cap additions at 256 and retain saved mappings on password-only edits", async () => {
+  const {context}=await page();
+  context.view={enabled:true,revision:"v1",accounts:[{username:"alice",disabled:false,reverse_mappings:[{listen:"127.0.0.1:10022",target:"localhost:22"}]}]};
+  vm.runInContext('state={authenticated:true,role:"server"};renderTunnelAccounts(view)',context);
+  const row=vm.runInContext('tunnelAccountRows[0]',context);
+  row.password.value="password-draft";
+  context.view.accounts[0].reverse_mappings[0].target="192.168.1.20:22";
+  vm.runInContext('renderTunnelAccounts(view)',context);
+  assert.equal(vm.runInContext('tunnelAccountRows[0].reverse.rows[0].target.value',context),"192.168.1.20:22");
+  const editor=vm.runInContext('tunnelAccountCreateMappings',context);
+  for(let i=0;i<256;i++)editor.add({listen:`127.0.0.1:${10000+i}`,target:"localhost:22"});
+  assert.equal(editor.rows.length,256);assert.equal(editor.addButton.disabled,true);
+  editor.addButton.listeners.click();assert.equal(editor.rows.length,256);
+});
+
+test("client mappings deny reverse proxy by default and require independent opt-in", async () => {
+  const {context,elements}=await page();elements.get("traffic-chart").clientWidth=0;
+  context.mappingFields=[{key:"proxies",kind:"proxies",group:"代理与通道",mappings:[
+    {listen:"127.0.0.1:9001",server:"ws://localhost:8081/tunnel"},
+    {listen:"127.0.0.1:9002",server:"ws://localhost:8081/tunnel",allow_reverse:true}
+  ]}];
+  vm.runInContext('state={authenticated:true,role:"client"};renderConfigFields(mappingFields,{},"client");revision="v1"',context);
+  const entry=vm.runInContext('configInputs[0]',context);
+  assert.equal(entry.rows[0].allowReverse.checked,false);
+  assert.equal(entry.rows[1].allowReverse.checked,true);
+  assert.equal(entry.saveButton.disabled,true);
+  entry.rows[0].allowReverse.checked=true;entry.rows[0].allowReverse.listeners.change();
+  assert.equal(entry.saveButton.disabled,false);
+  let payload,finish;
+  context.api=(_,options)=>{payload=JSON.parse(options.body);return new Promise(resolve=>{finish=resolve})};
+  const pending=vm.runInContext('saveConfigField(configInputs[0])',context);
+  assert.equal(payload.proxies[0].allow_reverse,true);
+  assert.equal(payload.proxies[1].allow_reverse,true);
+  assert.equal(entry.rows[0].allowReverse.disabled,true);
+  finish({revision:"v2"});await pending;
+  vm.runInContext('sgateI18n.setLanguage("en")',context);
+  assert.equal(entry.rows[0].allowReverse.checked,true);
+  // Adding a mapping must not inherit the preceding mapping's consent.
+  entry.controls[0].listeners.click();
+  assert.equal(entry.rows[2].allowReverse.checked,false);
+  assert.equal(entry.rows[0].allowReverse.checked,true);
+});
+
+test("client mapping reverse permission can be revoked and failed saves preserve consent drafts", async () => {
+  const {context}=await page();
+  context.mappingFields=[{key:"proxies",kind:"proxies",group:"代理与通道",mappings:[{listen:"127.0.0.1:9001",server:"ws://localhost:8081/tunnel",allow_reverse:true}]}];
+  vm.runInContext('state={authenticated:true,role:"client"};renderConfigFields(mappingFields,{},"client");revision="v1"',context);
+  const entry=vm.runInContext('configInputs[0]',context);
+  entry.rows[0].allowReverse.checked=false;entry.rows[0].allowReverse.listeners.change();
+  let payload;
+  context.api=async(_,options)=>{payload=JSON.parse(options.body);throw new Error("save failed")};
+  await vm.runInContext('saveConfigField(configInputs[0])',context);
+  assert.notEqual(payload.proxies[0].allow_reverse,true);
+  assert.equal(entry.rows[0].allowReverse.checked,false);
+  assert.equal(entry.rows[0].allowReverse.disabled,false);
+  assert.equal(entry.dirty,true);
+  context.api=async(_,options)=>{payload=JSON.parse(options.body);return {revision:"v2"}};
+  await vm.runInContext('saveConfigField(configInputs[0])',context);
+  assert.equal(entry.dirty,false);
+  assert.equal(entry.rows[0].allowReverse.checked,false);
+});
+
+test("managed reverse account save synchronizes listeners and restarts the server while preserving drafts", async () => {
+  const {context,elements}=await page();
+  context.view={enabled:true,revision:"v1",accounts:[{username:"alice",disabled:false,reverse_mappings:[]}]};
+  vm.runInContext('state={authenticated:true,role:"server"};renderConfigFields([{key:"master_service",value:"|1080",group:"监听"},{key:"target",value:"localhost:80",group:"代理与通道"}],{},"server");revision="old";configInputs[1].input.value="keep-draft";configInputs[1].input.listeners.input();renderTunnelAccounts(view)',context);
+  const calls=[];
+  context.renderRuntime=()=>{};
+  context.waitForServiceRestart=async(pid,listeners)=>{
+    assert.equal(pid,101);assert.deepEqual(listeners,[":1080","127.0.0.1:10022"]);
+    return {revision:"new",runtime:{pid:102,running:true}};
+  };
+  context.api=async(route,options)=>{
+    calls.push(route);
+    if(route==="tunnel-accounts") return {...context.view,revision:"v2",listeners_changed:true,config_revision:"saved",synced_fields:{master_service:"|1080, 127.0.0.1|10022"},service_restart_required:true,runtime:{pid:101,pending_listeners:[":1080","127.0.0.1:10022"]}};
+    assert.equal(route,"restart-service");assert.equal(JSON.parse(options.body).expected_pid,101);
+    // The old process may exit before returning the restart response.
+    throw new Error("connection reset");
+  };
+  await vm.runInContext('saveTunnelAccount({action:"update",username:"alice",reverse_mappings:[{listen:"127.0.0.1:10022",target:"localhost:22"}]})',context);
+  assert.deepEqual(calls,["tunnel-accounts","restart-service"]);
+  assert.equal(vm.runInContext('configInputs[0].input.value',context),"|1080, 127.0.0.1|10022");
+  assert.equal(vm.runInContext('configInputs[1].input.value',context),"keep-draft");
+  assert.equal(vm.runInContext('configInputs[1].dirty',context),true);
+  assert.equal(vm.runInContext('revision',context),"new");
+  assert.match(elements.get("notice").textContent,/反向映射已生效，服务端.*监听端口已核对/);
+  assert.equal(vm.runInContext('serviceRestarting || tunnelAccountsBusy',context),false);
+});
+
+test("failed server restart preserves saved reverse mappings and never reports them active",async()=>{
+ const {context,elements}=await page();
+ context.view={enabled:true,revision:"v1",accounts:[{username:"alice",disabled:false,reverse_mappings:[]}]};
+ vm.runInContext('state={authenticated:true,role:"server"};renderTunnelAccounts(view)',context);
+ context.renderRuntime=()=>{};
+ context.api=async(route)=>{
+  if(route==="tunnel-accounts")return {...context.view,revision:"v2",service_restart_required:true,runtime:{pid:101}};
+  throw Object.assign(new Error("stop script failed"),{status:409});
+ };
+ await vm.runInContext('saveTunnelAccount({action:"update",username:"alice"})',context);
+ assert.equal(vm.runInContext('tunnelAccountsRevision',context),"v2");
+ assert.match(elements.get("notice").textContent,/stop script failed/);
+ assert.doesNotMatch(elements.get("notice").textContent,/已生效/);
+ assert.equal(vm.runInContext('serviceRestarting || tunnelAccountsBusy',context),false);
+});
+
+test("reverse listeners reject WebSocket service ports across bind IPs in both languages",async()=>{
+ const {context}=await page();
+ context.drawChart=()=>{};
+ context.view={enabled:true,revision:"v1",accounts:[{username:"alice",disabled:true,reverse_mappings:[{listen:"127.0.0.1:10022",target:"localhost:22"}]}]};
+ vm.runInContext('state={authenticated:true,role:"server"};renderRuntime({websocket_listeners:["127.0.0.1:1080","[::1]:8081"]});renderTunnelAccounts(view)',context);
+ let calls=0;context.api=async()=>{calls++;throw new Error("must not save invalid mapping")};
+ for(const language of ["zh","en"]){
+  vm.runInContext(`sgateI18n.setLanguage("${language}")`,context);
+  const account=vm.runInContext('tunnelAccountRows[0]',context),row=account.reverse.rows[0];
+  for(const listen of ["127.0.0.1:1080","127.0.0.2:1080","0.0.0.0:1080","[::]:1080","[::1]:8081"]){
+   row.listen.value=listen;row.listen.listeners.input();
+   await account.saveButton.listeners.click();
+   assert.match(row.listen.validationMessage,/WebSocket/);
+   assert.match(row.errors.listen.textContent,/WebSocket/);
+   if(language==="en")assert.doesNotMatch(row.listen.validationMessage,/[\p{Script=Han}]/u);
+  }
+  row.listen.value="127.0.0.1:10022";row.listen.listeners.input();
+  assert.equal(row.listen.validationMessage,"");
+ }
+ assert.equal(calls,0);
 });

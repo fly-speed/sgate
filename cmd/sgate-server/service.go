@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"time"
 
 	mastergin "github.com/acl-dev/gin-service"
@@ -23,4 +24,8 @@ func (s frameworkService) Configure(c app.HTTPConfig) (app.HTTPWorker, error) {
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    16 * 1024,
 	})
+}
+
+func (s frameworkService) ReverseListener(network, address string) (net.Listener, error) {
+	return s.GinService.LeaseTCP(address)
 }

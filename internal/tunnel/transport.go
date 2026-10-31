@@ -1,6 +1,7 @@
 package tunnel
 
 import (
+	"crypto/hmac"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +10,10 @@ import (
 
 	"github.com/gorilla/websocket"
 )
+
+const sessionClosePrefix = "sgate-end:"
+
+var errPeerSessionClosed = errors.New("peer ended session")
 
 // 传输层只管理当前 WebSocket；可靠序列、业务连接和重放缓存由 session 持有。
 // transport serializes replacement connections so only one reader applies frames.
@@ -28,6 +33,10 @@ func (s *session) transportConfirmed(ws *websocket.Conn, crypt *codec, resumeDea
 		return errSessionClosed
 	}
 	s.active = ws
+	s.activeCloseProof = ""
+	if crypt.client && s.opts.closeSessionOnStop {
+		s.activeCloseProof = crypt.closeProof
+	}
 	s.peerWindow = crypt.peerWindow
 	s.signalLocked()
 	s.mu.Unlock()
@@ -38,9 +47,19 @@ func (s *session) transportConfirmed(ws *websocket.Conn, crypt *codec, resumeDea
 		ws.Close()
 		s.mu.Lock()
 		s.active = nil
+		s.activeCloseProof = ""
 		s.signalLocked()
 		s.mu.Unlock()
 	}()
+	defaultClose := ws.CloseHandler()
+	ws.SetCloseHandler(func(code int, text string) error {
+		// Unauthenticated Close frames must not destroy resumable TCP state.
+		if !crypt.client && code == websocket.CloseNormalClosure && hmac.Equal([]byte(text), []byte(sessionClosePrefix+crypt.closeProof)) {
+			s.close()
+			return errPeerSessionClosed
+		}
+		return defaultClose(code, text)
+	})
 	ws.SetReadLimit(frameHeader + chunkSize + 24)
 	confirm, touch, stopConfirmation := transportConfirmation(ws, resumeDeadline, s.opts.HeartbeatTimeout, onConfirmed)
 	defer stopConfirmation()

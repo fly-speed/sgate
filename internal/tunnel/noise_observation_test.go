@@ -12,14 +12,19 @@ func TestNoiseObservationTrickleAndRealIdle(t *testing.T) {
 			noiseRecoveryResourceCheck(t)
 			serverStats, clientStats := NewStats(), NewStats()
 			t.Cleanup(func() {
-				for _, stats := range []*Stats{serverStats, clientStats} {
-					stats.mu.Lock()
-					remaining := len(stats.noiseSessions)
-					stats.mu.Unlock()
-					if remaining != 0 || stats.Snapshot().NoiseActivity.Tunnels != 0 {
-						t.Error("observation retained old transports")
+				// Server.Close cancels hijacked WebSocket handlers; the writer
+				// unregisters asynchronously when transport unwinding finishes.
+				waitFor(t, "observation transport cleanup", func() bool {
+					for _, stats := range []*Stats{serverStats, clientStats} {
+						stats.mu.Lock()
+						remaining := len(stats.noiseSessions)
+						stats.mu.Unlock()
+						if remaining != 0 || stats.Snapshot().NoiseActivity.Tunnels != 0 {
+							return false
+						}
 					}
-				}
+					return true
+				})
 			})
 			live, err := NewLiveSettings(LiveConfig{NoiseIntervalMin: 10 * time.Millisecond, NoiseIntervalMax: 100 * time.Millisecond,
 				NoiseMinBytes: 10 * 1024, NoiseMaxBytes: 100 * 1024, NoiseSuppressTraffic: true, NoiseIdleAfter: time.Second})

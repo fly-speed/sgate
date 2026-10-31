@@ -24,7 +24,7 @@ func (d definition) clientRoutes(singleAddress string) []clientProxy {
 		return nil
 	}
 	_, port, _ := net.SplitHostPort(address.String())
-	return []clientProxy{{Listen: address.String(), Server: d.client.URL, Addr: d.client.Addr, port: port, config: *d.client}}
+	return []clientProxy{{Listen: address.String(), Server: d.client.URL, Addr: d.client.Addr, AllowReverse: d.client.AllowReverse, port: port, config: *d.client}}
 }
 
 func sameClientAddresses(a, b string) bool {
@@ -83,6 +83,7 @@ func (c *controller) replaceClientMappings(next definition) error {
 		for n := range current.proxies {
 			cfg := *base
 			cfg.URL, cfg.Addr = next.proxies[n].config.URL, next.proxies[n].config.Addr
+			cfg.AllowReverse = next.proxies[n].AllowReverse
 			// Mapping credentials are live; unrelated common credential edits stay pending.
 			cfg.Username, cfg.Password = c.current.commonUsername, c.current.commonPassword
 			if current.proxies[n].Username != nil {
@@ -96,6 +97,7 @@ func (c *controller) replaceClientMappings(next definition) error {
 	} else {
 		cfg := *base
 		cfg.URL, cfg.Addr = next.client.URL, next.client.Addr
+		cfg.AllowReverse = c.current.commonAllowReverse // Do not apply pending single-proxy security edits.
 		cfg.Username, cfg.Password = c.current.commonUsername, c.current.commonPassword
 		current.client = &cfg
 	}

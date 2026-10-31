@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"sgate/internal/admin"
 	"sgate/internal/cli"
 	"sgate/internal/tunnel"
 )
@@ -46,6 +47,7 @@ func build(role string, fs *flag.FlagSet, stats *tunnel.Stats) (definition, erro
 	if role == "client" {
 		d.commonUsername = values.optionalText("username")
 		d.commonPassword = values.text("password")
+		d.commonAllowReverse = values.optionalText("allow-reverse") == "true"
 	}
 	if role == "client" && (strings.TrimSpace(values.optionalText("proxies")) != "" || values.optionalText("proxies-file") != "") {
 		secret, err := cli.LoadKey(values.text("key-file"))
@@ -82,6 +84,9 @@ func build(role string, fs *flag.FlagSet, stats *tunnel.Stats) (definition, erro
 	} else {
 		d.server, d.tls, err = values.serverConfig(secret, options)
 		d.accountsFile = values.accountPath()
+		if err == nil {
+			err = admin.ValidateReverseTunnelPorts(d.server.Accounts, d.listen)
+		}
 	}
 	return d, err
 }
@@ -121,6 +126,7 @@ func (v configValues) clientConfig(secret []byte, options tunnel.Options) (*tunn
 func (v configValues) clientSettings(secret []byte, options tunnel.Options) tunnel.ClientConfig {
 	return tunnel.ClientConfig{
 		Key:            secret,
+		AllowReverse:   v.optionalText("allow-reverse") == "true",
 		Password:       v.text("password"),
 		Username:       v.optionalText("username"),
 		URL:            v.text("server"),

@@ -15,9 +15,10 @@ import (
 const MaxBytes = 1 << 20
 
 type Mapping struct {
-	Listen string `json:"listen"`
-	Server string `json:"server"`
-	Addr   string `json:"addr,omitempty"`
+	AllowReverse bool   `json:"allow_reverse,omitempty"`
+	Listen       string `json:"listen"`
+	Server       string `json:"server"`
+	Addr         string `json:"addr,omitempty"`
 	// Nil inherits the common credential; an explicit empty username selects legacy auth.
 	Username *string `json:"username,omitempty"`
 	Password *string `json:"password,omitempty"`

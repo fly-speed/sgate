@@ -42,6 +42,9 @@ func SetupTunnelAccounts(configPath, accountsPath, blocked string, change *Tunne
 	if change.Disabled != nil {
 		account.Disabled = *change.Disabled
 	}
+	if change.ReverseMappings != nil {
+		account.ReverseMappings = append([]tunnel.ReverseMapping(nil), (*change.ReverseMappings)...)
+	}
 	accounts := []tunnel.Account{account}
 	data, err := tunnel.EncodeAccounts(accounts)
 	if err != nil {

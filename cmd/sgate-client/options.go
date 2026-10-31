@@ -19,6 +19,7 @@ type clientOptions struct {
 	proxiesFile      string
 	addr             string
 	sendAddr         bool
+	allowReverse     bool
 	keyFile          string
 	password         string
 	username         string
@@ -61,6 +62,7 @@ func parseClientOptions() (clientOptions, error) {
 		true,
 		"include backend addr in the request URL; false uses the server default",
 	)
+	flag.BoolVar(&options.allowReverse, "allow-reverse", false, "allow server reverse TCP connections in single-proxy mode (default denies; multi-proxy entries require their own allow_reverse)")
 	flag.StringVar(&options.addr, "addr", "", "optional server-side backend host:port; overrides server URL addr when nonempty")
 	flag.StringVar(&options.keyFile, "key-file", "", "shared key file (defaults to SGATE_KEY environment variable)")
 	flag.StringVar(&options.username, "username", "", "tunnel account username; empty uses legacy single-password authentication")
