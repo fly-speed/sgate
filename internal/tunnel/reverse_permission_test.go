@@ -28,7 +28,7 @@ func TestReversePermissionDefaultAndURLCannotBypass(t *testing.T) {
 				return s.sessions[allowed.id] == nil || !s.sessions[allowed.id].inUse
 			})
 			cfg.AllowReverse = false
-			cfg.URL += "?" + reverseQuery + "=1&" + reverseQuery + "=1"
+			cfg.URL += "?" + reverseQuery + "=1&" + reverseQuery + "=1&" + reverseTLSQuery + "=1"
 			client, err := NewClient(cfg)
 			if err != nil {
 				t.Fatal(err)

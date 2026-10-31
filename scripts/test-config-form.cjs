@@ -1705,3 +1705,33 @@ test("reverse listeners reject WebSocket service ports across bind IPs in both l
  }
  assert.equal(calls,0);
 });
+
+test("reverse TLS defaults off, supports tunnel or independent certificates, and preserves failed drafts",async()=>{
+ const {context}=await page();context.drawChart=()=>{};
+ context.view={enabled:true,revision:"v1",accounts:[{username:"alice",disabled:false,reverse_mappings:[{listen:"127.0.0.1:10022",target:"localhost:443"}]}]};
+ vm.runInContext('state={authenticated:true,role:"server"};renderTunnelAccounts(view)',context);
+ let account=vm.runInContext('tunnelAccountRows[0]',context),row=account.reverse.rows[0];
+ assert.equal(row.listenTLS.checked,false);assert.equal(row.targetTLS.checked,false);assert.equal(row.reuseCert.checked,true);
+ row.listenTLS.checked=true;row.listenTLS.listeners.change();row.targetTLS.checked=true;row.targetTLS.listeners.change();
+ let payload;context.api=async(_,options)=>{payload=JSON.parse(options.body);return {...context.view,revision:"v2",accounts:[{username:"alice",disabled:false,reverse_mappings:payload.reverse_mappings}]}};
+ await account.saveButton.listeners.click();
+ assert.deepEqual(payload.reverse_mappings,[{listen:"127.0.0.1:10022",target:"localhost:443",listen_tls:true,target_tls:true}]);
+ account=vm.runInContext('tunnelAccountRows[0]',context);row=account.reverse.rows[0];
+ row.reuseCert.checked=false;row.reuseCert.listeners.change();
+ let calls=0;context.api=async()=>{calls++;throw new Error("must not save incomplete certificates")};
+ await account.saveButton.listeners.click();assert.equal(calls,0);assert.ok(row.tlsCert.validationMessage);assert.ok(row.tlsKey.validationMessage);
+ row.tlsCert.value="/srv/cert.pem";row.tlsKey.value="/srv/key.pem";row.tlsCert.listeners.input();row.tlsKey.listeners.input();
+ let finish;context.api=(_,options)=>{payload=JSON.parse(options.body);return new Promise((resolve,reject)=>{finish=reject})};
+ const pending=account.saveButton.listeners.click();
+ assert.equal(row.listenTLS.disabled,true);assert.equal(row.targetTLS.disabled,true);assert.equal(row.tlsKey.disabled,true);
+ assert.deepEqual(payload.reverse_mappings,[{listen:"127.0.0.1:10022",target:"localhost:443",listen_tls:true,listen_tls_cert:"/srv/cert.pem",listen_tls_key:"/srv/key.pem",target_tls:true}]);
+ finish(new Error("bad certificate"));await pending;
+ assert.equal(row.tlsCert.value,"/srv/cert.pem");assert.equal(row.tlsKey.disabled,false);
+ vm.runInContext('sgateI18n.setLanguage("en")',context);
+ assert.equal(row.targetTLS.checked,true);
+ row.reuseCert.checked=true;row.reuseCert.listeners.change();
+ assert.equal(row.tlsKey.disabled,true);
+ assert.equal(account.reverse.read()[0].listen_tls_cert,undefined);
+ row.listenTLS.checked=false;row.listenTLS.listeners.change();row.targetTLS.checked=false;row.targetTLS.listeners.change();
+ assert.deepEqual(JSON.parse(JSON.stringify(account.reverse.read())),[{listen:"127.0.0.1:10022",target:"localhost:443"}]);
+});

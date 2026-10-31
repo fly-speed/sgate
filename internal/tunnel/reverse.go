@@ -1,16 +1,19 @@
 package tunnel
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
 	"slices"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 )
 
 const reverseQuery = "sgate-reverse"
+const reverseTLSQuery = "sgate-reverse-tls"
 const reverseStreamBase uint64 = 1 << 63
 const maxReverseMappings = 256
 const maxReverseListeners = 4096
@@ -18,8 +21,12 @@ const maxReverseListeners = 4096
 // ReverseMapping exposes Listen on the server and dials Target from the client.
 // Listen requires a literal IP to make interface exposure explicit.
 type ReverseMapping struct {
-	Listen string `json:"listen"`
-	Target string `json:"target"`
+	Listen        string `json:"listen"`
+	Target        string `json:"target"`
+	ListenTLS     bool   `json:"listen_tls,omitempty"`
+	ListenTLSCert string `json:"listen_tls_cert,omitempty"`
+	ListenTLSKey  string `json:"listen_tls_key,omitempty"`
+	TargetTLS     bool   `json:"target_tls,omitempty"`
 }
 
 type reverseListener struct {
@@ -39,6 +46,17 @@ func validateReverseMappings(accounts []Account) error {
 			host, port, err := net.SplitHostPort(mapping.Listen)
 			if err != nil || net.ParseIP(host) == nil || validateSelectableTarget(mapping.Listen) != nil {
 				return errors.New("reverse listen must be a literal IP:port with port 1 to 65535")
+			}
+			for _, path := range []string{mapping.ListenTLSCert, mapping.ListenTLSKey} {
+				if len(path) > 4096 || strings.TrimSpace(path) != path || strings.ContainsAny(path, "\r\n\x00") {
+					return errors.New("reverse TLS certificate paths must be valid paths of at most 4096 bytes")
+				}
+			}
+			if (mapping.ListenTLSCert == "") != (mapping.ListenTLSKey == "") {
+				return errors.New("reverse TLS requires both certificate and key")
+			}
+			if !mapping.ListenTLS && (mapping.ListenTLSCert != "" || mapping.ListenTLSKey != "") {
+				return errors.New("reverse TLS certificate requires listen_tls")
 			}
 			if validateSelectableTarget(mapping.Target) != nil {
 				return errors.New("reverse target must be a valid host:port with port 1 to 65535")
@@ -176,13 +194,14 @@ func (s *Server) acceptReverse(listener *reverseListener, conn net.Conn) {
 		return
 	}
 	var username, target string
+	var targetTLS bool
 	for name, account := range s.accounts {
 		if account.disabled {
 			continue
 		}
 		for _, mapping := range account.reverse {
 			if mapping.Listen == address {
-				username, target = name, mapping.Target
+				username, target, targetTLS = name, mapping.Target, mapping.TargetTLS
 				break
 			}
 		}
@@ -193,7 +212,7 @@ func (s *Server) acceptReverse(listener *reverseListener, conn net.Conn) {
 	var chosen *session
 	var chosenID string
 	for id, entry := range s.sessions {
-		if username != "" && entry.username == username && entry.reverse && entry.ready && entry.inUse && (chosen == nil || id < chosenID) {
+		if username != "" && entry.username == username && entry.reverse && (!targetTLS || entry.reverseTLS) && entry.ready && entry.inUse && (chosen == nil || id < chosenID) {
 			chosen, chosenID = entry.session, id
 		}
 	}
@@ -204,7 +223,11 @@ func (s *Server) acceptReverse(listener *reverseListener, conn net.Conn) {
 	}
 	// Admission is bounded and atomic with revocation; a full queue rejects
 	// the new connection without blocking the listener or account updates.
-	err := chosen.reserveReverse(conn, target)
+	if config := s.reverseTLS[address]; config != nil {
+		_ = conn.SetDeadline(time.Now().Add(s.cfg.Options.DialTimeout))
+		conn = &reverseTLSConn{Conn: tls.Server(conn, config)}
+	}
+	err := chosen.reserveReverseMode(conn, target, targetTLS)
 	s.mu.Unlock()
 	if err != nil {
 		conn.Close()
@@ -212,6 +235,10 @@ func (s *Server) acceptReverse(listener *reverseListener, conn net.Conn) {
 }
 
 func (s *session) reserveReverse(conn net.Conn, target string) error {
+	return s.reserveReverseMode(conn, target, false)
+}
+
+func (s *session) reserveReverseMode(conn net.Conn, target string, secure bool) error {
 	s.mu.Lock()
 	if s.closed || s.active == nil || len(s.streams) >= s.opts.MaxStreams || s.nextStream >= reverseStreamBase-1 || s.pendingBytes+frameHeader+len(target) > s.opts.BufferBytes {
 		s.mu.Unlock()
@@ -225,10 +252,50 @@ func (s *session) reserveReverse(conn net.Conn, target string) error {
 	}
 	s.streams[id] = st
 	s.next++
-	s.pending = append(s.pending, frame{op: opReverseOpen, seq: s.next, stream: id, data: []byte(target)})
+	op := opReverseOpen
+	if secure {
+		op = opReverseOpenTLS
+	}
+	s.pending = append(s.pending, frame{op: op, seq: s.next, stream: id, data: []byte(target)})
 	s.pendingBytes += frameHeader + len(target)
 	s.signalLocked()
 	s.mu.Unlock()
 	go s.readStream(id, st)
 	return nil
 }
+
+// Prepare TLS before changing listeners or policy. Failed certificate loading
+// must never downgrade an existing TLS endpoint or partially commit an update.
+func prepareReverseTLS(accounts []Account, fallback *tls.Config) (map[string]*tls.Config, error) {
+	configs := map[string]*tls.Config{}
+	for _, account := range accounts {
+		for _, mapping := range account.ReverseMappings {
+			if !mapping.ListenTLS {
+				continue
+			}
+			config := fallback
+			if mapping.ListenTLSCert != "" {
+				pair, err := tls.LoadX509KeyPair(mapping.ListenTLSCert, mapping.ListenTLSKey)
+				if err != nil {
+					return nil, fmt.Errorf("cannot load reverse TLS certificate for %s: %w", mapping.Listen, err)
+				}
+				config = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{pair}}
+			}
+			if config == nil || (len(config.Certificates) == 0 && config.GetCertificate == nil && config.GetConfigForClient == nil) {
+				return nil, errors.New("reverse listen TLS requires tunnel certificate or a separate certificate/key")
+			}
+			config = config.Clone()
+			if config.MinVersion < tls.VersionTLS12 {
+				config.MinVersion = tls.VersionTLS12
+			}
+			configs[mapping.Listen] = config
+		}
+	}
+	return configs, nil
+}
+
+// Closing a session must interrupt a blocked TLS Write immediately rather than
+// waiting for close_notify under the TLS write lock. FIN still uses CloseWrite.
+type reverseTLSConn struct{ *tls.Conn }
+
+func (c *reverseTLSConn) Close() error { return c.Conn.NetConn().Close() }

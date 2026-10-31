@@ -1004,3 +1004,9 @@ html[lang="en"] nav button span {
 .proxy-mapping .proxy-reverse-permission label { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .proxy-mapping .proxy-reverse-permission input[type="checkbox"] { width: auto; margin: 0; flex-shrink: 0; }
 .proxy-reverse-permission small { display: block; margin-top: 6px; line-height: 1.6; }
+
+.reverse-address-group, .reverse-tls-certificates { display:flex; flex-direction:column; gap:10px; min-width:0; }
+.reverse-mapping label.reverse-tls-checkbox { flex-direction:row; align-items:center; gap:8px; }
+.reverse-mapping .reverse-tls-checkbox input { width:auto; margin:0; flex:none; }
+.reverse-tls-certificates > div { display:flex; flex-direction:column; gap:10px; }
+.reverse-tls-certificates[hidden], .reverse-tls-certificates > div[hidden] { display:none; }

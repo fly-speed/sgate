@@ -3,6 +3,14 @@
 // UI translations only: editable values and protocol/configuration keys are never translated.
 const sgateI18n = (() => {
   const messages = {
+  "服务端监听启用 SSL/TLS": "Enable SSL/TLS on the server listener",
+  "客户端目标启用 SSL/TLS": "Use SSL/TLS for the client target",
+  "复用隧道监听证书": "Reuse the tunnel listener certificate",
+  "独立证书路径": "Separate certificate path",
+  "独立私钥路径": "Separate private key path",
+  "目标 TLS 校验证书链和地址主机名；自签名服务须由客户端 tls-ca 信任。": "Target TLS verifies the certificate chain and target hostname. Trust private certificates with the client's tls-ca setting.",
+  "开启独立 SSL/TLS 证书时，必须填写证书和私钥路径": "A separate SSL/TLS certificate requires both certificate and private key paths",
+  "证书路径不能包含首尾空白、换行或空字符": "Certificate paths cannot contain leading/trailing whitespace, newlines or null characters",
   "反向代理监听端口不能与 WebSocket 隧道服务端口相同": "The reverse listener port must differ from the WebSocket tunnel service port",
   "停止/启动脚本重启未完成，请检查脚本、服务日志和管理套接字权限": "Stop/start restart did not complete. Check scripts, service logs and management socket permissions.",
   "无法读取服务端监听配置": "Cannot read server listener configuration",

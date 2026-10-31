@@ -198,6 +198,10 @@ func (s *Server) UpdateAccounts(accounts []Account) error {
 	if err != nil {
 		return err
 	}
+	configs, err := prepareReverseTLS(accounts, s.cfg.ReverseTLSConfig)
+	if err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -208,6 +212,7 @@ func (s *Server) UpdateAccounts(accounts []Account) error {
 			return err
 		}
 	}
+	s.reverseTLS = configs
 	previous := s.accounts
 	s.accountMode = true
 	s.accounts = next
@@ -254,4 +259,14 @@ func (s *Server) authorizedLocked(request tunnelRequest) bool {
 	}
 	account, exists := s.accounts[request.username]
 	return exists && !account.disabled && account.digest == request.accountDigest
+}
+
+// ValidateAccounts preflights credentials and reverse TLS files without changing
+// listeners or policy, including when managed port changes are staged for restart.
+func (s *Server) ValidateAccounts(accounts []Account) error {
+	if _, err := accountVerifiers(accounts); err != nil {
+		return err
+	}
+	_, err := prepareReverseTLS(accounts, s.cfg.ReverseTLSConfig)
+	return err
 }

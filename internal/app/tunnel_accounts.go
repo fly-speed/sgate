@@ -45,6 +45,9 @@ func (c *controller) manageTunnelAccounts(change *admin.TunnelAccountChange) (ad
 			previous = append(previous, admin.TunnelAccountInfo{Disabled: account.Disabled, ReverseMappings: account.ReverseMappings})
 		}
 		apply = func(accounts []tunnel.Account) error {
+			if err := c.worker.server.ValidateAccounts(accounts); err != nil {
+				return err
+			}
 			if err := admin.ValidateReverseTunnelPorts(accounts, c.current.listen, c.worker.listener.Addr().String()); err != nil {
 				return err
 			}
@@ -56,6 +59,11 @@ func (c *controller) manageTunnelAccounts(change *admin.TunnelAccountChange) (ad
 			syncedListeners, listenersChanged, err = admin.SyncReverseListeners(path, previous, accounts, func(addresses string, changed bool) error {
 				serviceRestart = c.isManaged() && addresses != "" && !sameClientAddresses(addresses, c.serviceListen)
 				if serviceRestart {
+					// The restart loads the saved configuration, whose tunnel
+					// certificate may differ from the currently active one.
+					if _, err := c.load(""); err != nil {
+						return err
+					}
 					if c.servicePath == "" || c.service == nil {
 						return errors.New("缺少 acl_master 服务文件，无法自动重启")
 					}

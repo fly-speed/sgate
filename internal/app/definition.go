@@ -165,13 +165,14 @@ func (v configValues) serverConfig(secret []byte, options tunnel.Options) (*tunn
 		return nil, nil, err
 	}
 	config := tunnel.ServerConfig{
-		Key:         secret,
-		Password:    v.text("password"),
-		Target:      v.text("target"),
-		Path:        v.text("path"),
-		SessionTTL:  v.duration("session-ttl"),
-		MaxSessions: v.integer("max-sessions"),
-		Options:     options,
+		ReverseTLSConfig: tlsConfig,
+		Key:              secret,
+		Password:         v.text("password"),
+		Target:           v.text("target"),
+		Path:             v.text("path"),
+		SessionTTL:       v.duration("session-ttl"),
+		MaxSessions:      v.integer("max-sessions"),
+		Options:          options,
 	}
 	if path := v.accountPath(); path != "" {
 		config.Accounts, err = tunnel.LoadAccounts(path)

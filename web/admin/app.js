@@ -1775,6 +1775,17 @@ function validateReverseMappings(editor, username, show) {
         if (show && !editor.firstInvalid) editor.firstInvalid = row[key];
       }
     }
+    for (const key of ["tlsCert","tlsKey"]) {
+      if (!row[key]) continue;
+      let error="";
+      if (row.listenTLS.checked && !row.reuseCert.checked) {
+        if (!row[key].value) error=t("开启独立 SSL/TLS 证书时，必须填写证书和私钥路径");
+        else if (row[key].value.trim() !== row[key].value || /[\r\n\x00]/.test(row[key].value)) error=t("证书路径不能包含首尾空白、换行或空字符");
+      }
+      row[key].setCustomValidity(error);row.errors[key].hidden=!error;
+      localText(row.errors[key],()=>error);
+      if (error) {valid=false;if(show && !editor.firstInvalid)editor.firstInvalid=row[key]}
+    }
   }
   return valid;
 }
@@ -1805,11 +1816,18 @@ function createReverseMappingsEditor(values, changed) {
   localText(empty, () => t("尚未配置反向映射。保存时同步框架监听；托管模式端口变化会自动停止并启动服务端，中断当前业务连接。"));
   element.append(header, help, list, empty);
   const editor = {element, rows:[], addButton, busy:false};
-  editor.read = () => editor.rows.map((row) => ({listen:row.listen.value, target:row.target.value}));
+  editor.read = () => editor.rows.map((row) => ({
+    listen:row.listen.value, target:row.target.value,
+    ...(row.listenTLS.checked ? {listen_tls:true, ...(!row.reuseCert.checked ? {listen_tls_cert:row.tlsCert.value,listen_tls_key:row.tlsKey.value} : {})} : {}),
+    ...(row.targetTLS.checked ? {target_tls:true} : {})
+  }));
   editor.setBusy = (busy) => {
     editor.busy = busy;
     addButton.disabled = busy || editor.rows.length >= 256;
-    for (const row of editor.rows) row.listen.disabled = row.target.disabled = row.removeButton.disabled = busy;
+    for (const row of editor.rows) {
+      row.listen.disabled = row.target.disabled = row.removeButton.disabled = busy;
+      row.updateTLS();
+    }
   };
   const refresh = () => {
     list.replaceChildren();
@@ -1843,8 +1861,46 @@ function createReverseMappingsEditor(values, changed) {
       row[key] = input;
       row.errors[key] = error;
       label.append(caption, input, error);
-      item.append(label);
+      const group = document.createElement("div");
+      group.className = "reverse-address-group";
+      group.append(label);
+      row[key + "Group"] = group;
+      item.append(group);
     }
+    const checkbox = (parent, key, text, checked) => {
+      const label = document.createElement("label");
+      label.className = "reverse-tls-checkbox";
+      const input = document.createElement("input"); input.type = "checkbox"; input.checked = checked;
+      const caption = document.createElement("span"); localText(caption, () => t(text));
+      localAttr(input, "aria-label", () => t(text));
+      input.addEventListener("change", () => {row.updateTLS();changed()});
+      label.append(input,caption); parent.append(label); row[key]=input;
+      return label;
+    };
+    checkbox(row.listenGroup,"listenTLS","服务端监听启用 SSL/TLS",value.listen_tls === true);
+    const certOptions = document.createElement("div"); certOptions.className="reverse-tls-certificates";
+    row.listenGroup.append(certOptions);
+    checkbox(certOptions,"reuseCert","复用隧道监听证书",!value.listen_tls_cert && !value.listen_tls_key);
+    const customCertificates = document.createElement("div"); certOptions.append(customCertificates);
+    for (const [key, field, text] of [["tlsCert","listen_tls_cert","独立证书路径"],["tlsKey","listen_tls_key","独立私钥路径"]]) {
+      const label=document.createElement("label"), caption=document.createElement("span"), input=document.createElement("input"), error=document.createElement("small");
+      localText(caption,()=>t(text)); input.type="text"; input.autocomplete="off"; input.spellcheck=false; input.maxLength=4096;
+      input.value=value[field] || ""; input.placeholder=key === "tlsCert" ? "/path/server-cert.pem" : "/path/server-key.pem";
+      localAttr(input,"aria-label",()=>t(text)); input.addEventListener("input",()=>changed());
+      error.className="config-error"; error.hidden=true;
+      row[key]=input;row.errors[key]=error;label.append(caption,input,error);customCertificates.append(label);
+    }
+    checkbox(row.targetGroup,"targetTLS","客户端目标启用 SSL/TLS",value.target_tls === true);
+    const tlsHelp=document.createElement("small");tlsHelp.className="muted";
+    localText(tlsHelp,()=>t("目标 TLS 校验证书链和地址主机名；自签名服务须由客户端 tls-ca 信任。"));row.targetGroup.append(tlsHelp);
+    row.updateTLS=()=>{
+      row.listenTLS.disabled=row.targetTLS.disabled=editor.busy;
+      certOptions.hidden=!row.listenTLS.checked;
+      row.reuseCert.disabled=editor.busy || !row.listenTLS.checked;
+      customCertificates.hidden=row.reuseCert.checked;
+      row.tlsCert.disabled=row.tlsKey.disabled=editor.busy || !row.listenTLS.checked || row.reuseCert.checked;
+    };
+    row.updateTLS();
     const removeButton = document.createElement("button");
     removeButton.type = "button";
     removeButton.className = "secondary";

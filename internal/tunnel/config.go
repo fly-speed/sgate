@@ -2,6 +2,7 @@
 package tunnel
 
 import (
+	"crypto/tls"
 	"errors"
 	"log"
 	"time"
@@ -31,9 +32,10 @@ type Options struct {
 	NoiseMaxBytes        int
 	Logf                 func(string, ...any)
 
-	closeSessionOnStop bool // Named clients end their own server session on intentional shutdown.
-	receiveReverse     bool // Only clients may accept authenticated reverse OPEN commands.
-	reportStreamErrors bool // Negotiated per session; never enabled for legacy peers.
+	reverseTLSConfig   *tls.Config // Client-side trust for TLS targets; never carries tunnel ServerName.
+	closeSessionOnStop bool        // Named clients end their own server session on intentional shutdown.
+	receiveReverse     bool        // Only clients may accept authenticated reverse OPEN commands.
+	reportStreamErrors bool        // Negotiated per session; never enabled for legacy peers.
 }
 
 func (o Options) defaults() (Options, error) {

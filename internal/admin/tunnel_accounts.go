@@ -96,7 +96,7 @@ func (h *Handler) tunnelAccounts(w http.ResponseWriter, r *http.Request) {
 	var change *TunnelAccountChange
 	if r.Method == http.MethodPut {
 		change = &TunnelAccountChange{}
-		if !decode(w, r, change, 131072) {
+		if !decode(w, r, change, 1<<20) {
 			return
 		}
 	}

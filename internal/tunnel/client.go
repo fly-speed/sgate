@@ -51,6 +51,11 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		return nil, err
 	}
 	cfg.URL = endpoint
+	cfg.Options.reverseTLSConfig = nil
+	if cfg.TLSConfig != nil {
+		cfg.Options.reverseTLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: cfg.TLSConfig.RootCAs}
+	}
+
 	cfg.Options.receiveReverse = cfg.AllowReverse && cfg.Username != ""
 	cfg.Options.closeSessionOnStop = cfg.Username != ""
 	if cfg.ReconnectMin == 0 {
@@ -87,9 +92,11 @@ func (c *Client) dial(ctx context.Context, id string, resume bool) (*websocket.C
 	}
 	u, _ := url.Parse(c.cfg.URL)
 	query := u.Query()
+	query.Del(reverseTLSQuery)
 	query.Del(reverseQuery) // A server URL must not override local consent.
 	if c.cfg.AllowReverse && c.cfg.Username != "" {
 		query.Set(reverseQuery, "1")
+		query.Set(reverseTLSQuery, "1")
 	}
 	query.Set(streamErrorsQuery, "1")
 	query.Set(receiveWindowQuery, strconv.Itoa(c.cfg.Options.BufferBytes))

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/tls"
 	"errors"
 	"net"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 )
 
 type ServerConfig struct {
+	ReverseTLSConfig *tls.Config // Default certificate for reverse TLS listeners.
 	// ReverseListen optionally leases listeners owned by the service framework.
 	ReverseListen  func(network, address string) (net.Listener, error)
 	Key            []byte
@@ -27,12 +29,13 @@ type ServerConfig struct {
 	Options        Options
 }
 type serverEntry struct {
-	username string
-	session  *session
-	inUse    bool
-	reverse  bool
-	ready    bool
-	idle     time.Time
+	username   string
+	session    *session
+	inUse      bool
+	reverse    bool
+	reverseTLS bool
+	ready      bool
+	idle       time.Time
 }
 
 // Server.mu 保护会话索引、nonce 防重放表和占用标志。
@@ -40,6 +43,7 @@ type serverEntry struct {
 type Server struct {
 	reverseStarted   bool
 	reverseListeners map[string]*reverseListener
+	reverseTLS       map[string]*tls.Config
 	accountMode      bool
 	accounts         map[string]accountVerifier
 	cfg              ServerConfig
@@ -56,6 +60,10 @@ type Server struct {
 func NewServer(cfg ServerConfig) (*Server, error) {
 	if len(cfg.Key) != 32 {
 		return nil, errors.New("server key must contain 32 bytes")
+	}
+	reverseTLS, err := prepareReverseTLS(cfg.Accounts, cfg.ReverseTLSConfig)
+	if err != nil {
+		return nil, err
 	}
 	var accounts map[string]accountVerifier
 	if cfg.Accounts != nil {
@@ -94,7 +102,6 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	if cfg.SessionTTL <= 0 || cfg.MaxSessions < 1 {
 		return nil, errors.New("invalid session TTL or limit")
 	}
-	var err error
 	cfg.Options, err = cfg.Options.defaults()
 	if err != nil {
 		return nil, err
@@ -103,6 +110,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
 		cfg:            cfg,
+		reverseTLS:     reverseTLS,
 		accounts:       accounts,
 		accountMode:    accounts != nil,
 		ctx:            ctx,
@@ -257,6 +265,7 @@ type tunnelRequest struct {
 	accountDigest                            [sha256.Size]byte
 	peerWindow                               int
 	reverse                                  bool
+	reverseTLS                               bool
 	reportStreamErrors                       bool
 }
 
@@ -312,6 +321,12 @@ func (s *Server) authenticateRequest(r *http.Request) (tunnelRequest, bool) {
 			return tunnelRequest{}, false
 		}
 		request.reverse = true
+	}
+	if values, ok := r.URL.Query()[reverseTLSQuery]; ok {
+		if len(values) != 1 || values[0] != "1" || !request.reverse {
+			return tunnelRequest{}, false
+		}
+		request.reverseTLS = true
 	}
 	return request, true
 }
@@ -378,7 +393,7 @@ func (s *Server) acquireSession(w http.ResponseWriter, r *http.Request, request 
 		opts.Logf = func(format string, args ...any) {
 			logf("session=%s account=%q target=%q "+format, append([]any{id, username, target}, args...)...)
 		}
-		e = &serverEntry{username: request.username, reverse: request.reverse, session: newSession(s.ctx, request.target, opts), idle: time.Now()}
+		e = &serverEntry{username: request.username, reverse: request.reverse, reverseTLS: request.reverseTLS, session: newSession(s.ctx, request.target, opts), idle: time.Now()}
 		s.sessions[id] = e
 	}
 	if e.username != request.username {
@@ -392,7 +407,7 @@ func (s *Server) acquireSession(w http.ResponseWriter, r *http.Request, request 
 		s.rejectHandshake(w, r, request, "session target mismatch", http.StatusConflict)
 		return nil, time.Time{}, false
 	}
-	if e.reverse != request.reverse || e.session.opts.reportStreamErrors != request.reportStreamErrors {
+	if e.reverse != request.reverse || e.reverseTLS != request.reverseTLS || e.session.opts.reportStreamErrors != request.reportStreamErrors {
 		s.mu.Unlock()
 		s.rejectHandshake(w, r, request, "session diagnostic capability mismatch", http.StatusConflict)
 		return nil, time.Time{}, false

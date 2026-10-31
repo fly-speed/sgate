@@ -2,7 +2,7 @@
 
 A Go TCP tunnel with two executables. `sgate-client` accepts local TCP connections and multiplexes them over one persistent, authenticated, AES-256-GCM encrypted WebSocket connection. `sgate-server` opens one TCP connection per stream to a fixed backend. Traffic flows in both directions.
 
-See [the Chinese documentation](README.md) for all options, protocol details, and reverse proxy configuration.
+See [the Chinese documentation](README.md) for all options, protocol details, and reverse proxy configuration. The [architecture and tunnel protocol document (Chinese)](docs/architecture.md) covers frame classes, command IDs, forward/reverse flows, encrypted JSON probes, ACKs, flow control, and replay.
 
 ## acl_master integration
 
@@ -588,3 +588,6 @@ Managed client listener changes use the deployed `bin/sgate-client-stop.sh`, wai
 acl_master identifies services by the literal `-f` path. Web restarts retain path spelling, including `bin/../conf`, `./` and symlinks. The client submits asynchronously; a detached controller waits for the stop script, old-process exit and start script in order. The browser waits for the replacement PID and listeners.
 
 Managed client/server services send START_OK over FD 5 when Run begins after successful initialization. This is separate from busy/idle status notifications. master_ctl -t uses milliseconds; client scripts and Web restarts use 30000 (30 seconds). Failed initialization never acknowledges readiness. scripts/test-start-ready.py validates real framework startup replies, repeated WS/WSS launches, 128 streams and port cleanup.
+
+
+Each reverse mapping now supports independent `listen_tls` and `target_tls` booleans, both false by default. The server UI offers SSL/TLS toggles next to both addresses. An SSL listener reuses the loaded tunnel certificate unless both `listen_tls_cert` and `listen_tls_key` specify separate server-side PEM files. Relative paths use the server working directory; absolute paths are recommended. Missing or invalid certificates reject the save, including managed restart staging. Target TLS uses the authenticated `REVERSE_OPEN_TLS` opcode (7), only for clients advertising `sgate-reverse-tls=1`; unsupported peers are never downgraded to plaintext. Clients verify the target hostname/IP and certificate chain, using system roots plus their `tls-ca` when configured. TLS requires 1.2 or later. Upgrade both programs. Entry TLS and target TLS terminate separately, while the existing AEAD WebSocket tunnel continues carrying application bytes. See the [architecture document](docs/architecture.md#81-反向映射两端的-ssltls).

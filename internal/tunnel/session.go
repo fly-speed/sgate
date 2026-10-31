@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -20,6 +21,7 @@ const (
 	opReset
 	opNoise
 	opReverseOpen
+	opReverseOpenTLS
 	chunkSize   = 16 * 1024
 	frameHeader = 25
 )
@@ -59,11 +61,11 @@ func decodeFrame(p []byte) (frame, error) {
 		}
 		return f, nil
 	}
-	if (f.op > opReset && f.op != opReverseOpen) || (f.op == opAck && (f.seq != 0 || f.stream != 0 || len(f.data) != 0)) ||
+	if (f.op > opReset && f.op != opReverseOpen && f.op != opReverseOpenTLS) || (f.op == opAck && (f.seq != 0 || f.stream != 0 || len(f.data) != 0)) ||
 		(f.op != opAck && (f.seq == 0 || f.stream == 0)) ||
-		(f.op != opData && f.op != opReset && f.op != opReverseOpen && len(f.data) != 0) ||
+		(f.op != opData && f.op != opReset && f.op != opReverseOpen && f.op != opReverseOpenTLS && len(f.data) != 0) ||
 		(f.op == opReset && !validResetReason(f.data)) ||
-		(f.op == opReverseOpen && (f.stream <= reverseStreamBase || validateSelectableTarget(string(f.data)) != nil)) ||
+		((f.op == opReverseOpen || f.op == opReverseOpenTLS) && (f.stream <= reverseStreamBase || validateSelectableTarget(string(f.data)) != nil)) ||
 		(f.op == opData && len(f.data) == 0) {
 		return frame{}, errors.New("invalid frame fields")
 	}
@@ -266,6 +268,16 @@ func (s *session) halfDone(id uint64, read bool) {
 }
 func (s *session) readStream(id uint64, st *stream) {
 	c := st.conn
+	if secure, ok := c.(interface{ HandshakeContext(context.Context) error }); ok {
+		ctx, cancel := context.WithTimeout(s.ctx, s.opts.DialTimeout)
+		err := secure.HandshakeContext(ctx)
+		cancel()
+		if err != nil {
+			s.failStream(id, "TLS handshake", err, resetDialFailed)
+			return
+		}
+		_ = c.SetDeadline(time.Time{})
+	}
 	buf := make([]byte, chunkSize)
 	for {
 		n, err := c.Read(buf)
@@ -325,9 +337,9 @@ func (s *session) addLocal(c net.Conn) error {
 	return nil
 }
 func (s *session) apply(f frame) error {
-	if f.op == opOpen || f.op == opReverseOpen {
+	if f.op == opOpen || f.op == opReverseOpen || f.op == opReverseOpenTLS {
 		target := s.target
-		if f.op == opReverseOpen {
+		if f.op == opReverseOpen || f.op == opReverseOpenTLS {
 			if !s.opts.receiveReverse || s.target != "" || f.stream <= reverseStreamBase || validateSelectableTarget(string(f.data)) != nil {
 				return errors.New("reverse OPEN not permitted")
 			}
@@ -351,7 +363,26 @@ func (s *session) apply(f frame) error {
 			s.enqueueResetReason(f.stream, resetStreamLimit)
 			return nil
 		}
-		c, err := (&net.Dialer{Timeout: s.opts.DialTimeout, KeepAlive: 30 * time.Second}).DialContext(s.ctx, "tcp", target)
+		dialer := &net.Dialer{Timeout: s.opts.DialTimeout, KeepAlive: 30 * time.Second}
+		var c net.Conn
+		var err error
+		if f.op == opReverseOpenTLS {
+			config := &tls.Config{MinVersion: tls.VersionTLS12}
+			if s.opts.reverseTLSConfig != nil {
+				config = s.opts.reverseTLSConfig.Clone()
+			}
+			host, _, _ := net.SplitHostPort(target)
+			config.ServerName = host
+			config.InsecureSkipVerify = false
+			ctx, cancel := context.WithTimeout(s.ctx, s.opts.DialTimeout)
+			c, err = (&tls.Dialer{NetDialer: dialer, Config: config}).DialContext(ctx, "tcp", target)
+			cancel()
+			if err == nil {
+				c = &reverseTLSConn{Conn: c.(*tls.Conn)}
+			}
+		} else {
+			c, err = dialer.DialContext(s.ctx, "tcp", target)
+		}
 		if err != nil {
 			if s.ctx.Err() == nil {
 				s.opts.Logf("stream=%d target=%q backend connection failed: %v", f.stream, target, err)
