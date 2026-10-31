@@ -115,3 +115,25 @@ for (const runtime of [
     assert.equal(elements.get("restart-service").disabled, false);
   });
 }
+
+for (const actual of [
+  ["127.0.0.1:9001"],
+  ["127.0.0.1:9001", "127.0.0.1:9002", "127.0.0.1:9003"],
+]) {
+  test(`replacement PID cannot hide incorrect listeners: ${actual}`, async () => {
+    const { context } = await page();
+    context.api = async () => ({ runtime: { pid: 102, running: true, listeners: actual } });
+    await assert.rejects(vm.runInContext(
+      'waitForServiceRestart(101, ["127.0.0.1:9001", "127.0.0.1:9002"])', context,
+    ), /监听端口与已保存映射不一致/);
+  });
+}
+
+test("replacement verifies all expected ports, wildcard expansion and IPv6", async () => {
+  const { context } = await page();
+  context.api = async () => ({ runtime: { pid: 102, running: true,
+    listeners: ["127.0.0.1:9001", "192.168.1.2:9001", "[::1]:9002"] } });
+  const result = await vm.runInContext('waitForServiceRestart(101, ["0.0.0.0:9001", "localhost:9002"])', context);
+  assert.equal(result.runtime.pid, 102);
+  assert.equal(vm.runInContext('restartListenersReady(["[::1]:9002"], ["[::1]:9002"])', context), true);
+});

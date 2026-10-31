@@ -8,8 +8,16 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
-    path.chmod(0o600)
+    # The diagnostic process consumes/removes .collect immediately. Set mode
+    # and finish writing before publishing, so chmod cannot race its consumer.
+    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as file:
+        pending = pathlib.Path(file.name)
+        try:
+            file.write(text)
+            file.close()
+            os.replace(pending, path)
+        finally:
+            pending.unlink(missing_ok=True)
 
 
 def port():

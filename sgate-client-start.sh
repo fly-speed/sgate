@@ -2,7 +2,15 @@
 
 set -eu
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-# 安装后读取相邻 conf/；源码目录直接运行时读取当前目录的配置。
-config="$script_dir/../conf/sgate-client.cf"
-[ -f "$config" ] || config="$script_dir/sgate-client.cf"
-exec "${MASTER_CTL:-/opt/soft/acl-master/bin/master_ctl}" -f "$config" -a start
+# Preserve the captured service configuration during a Web-triggered restart.
+config=${SGATE_CONFIG:-}
+if [ -z "$config" ]; then
+    config="$script_dir/../conf/sgate-client.cf"
+    [ -f "$config" ] || config="$script_dir/sgate-client.cf"
+fi
+# master_ctl -t is in milliseconds; 30000 gives startup 30 seconds.
+set -- -f "$config" -a start -t "${MASTER_CTL_TIMEOUT:-30000}"
+if [ -n "${MASTER_SOCKET:-}" ]; then
+    set -- "$@" -s "$MASTER_SOCKET"
+fi
+exec "${MASTER_CTL:-/opt/soft/acl-master/bin/master_ctl}" "$@"

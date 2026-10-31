@@ -20,3 +20,5 @@ listener set, retaining the current worker, unchanged accept loops and accepted
 connections. Removed accept loops are joined individually; wildcard and port-zero
 identities are retained. Managed listener updates still require acl_master to
 replace its sockets; the application exposes that as an automatic service restart.
+
+Managed contextual services acknowledge ACL_MASTER_STAT_START_OK on the owned status channel when Run starts, after application initialization. The native 12-byte message carries PID, the octal GENERATION environment value and status 4. This startup acknowledgement is independent of busy/idle notifications.

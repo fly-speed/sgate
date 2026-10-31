@@ -1206,10 +1206,10 @@ test("managed mapping save automatically restarts and waits for the replacement 
   vm.runInContext('renderConfigFields(fields,{}); revision="old"; configInputs[1].input.value="keep-draft";configInputs[1].input.listeners.input();configInputs[3].rows[0].listen.value="127.0.0.1:9002";configInputs[3].rows[0].listen.listeners.input()', context);
   const calls=[];
   context.renderRuntime=()=>{};
-  context.waitForServiceRestart=async (pid)=>{assert.equal(pid,101);return {revision:"new",runtime:{pid:102,running:true}}};
+  context.waitForServiceRestart=async (pid,listeners)=>{assert.equal(pid,101);assert.deepEqual(listeners,["127.0.0.1:9002"]);return {revision:"new",runtime:{pid:102,running:true}}};
   context.api=async(route,options)=>{
     calls.push(route);
-    if(route==="config")return {revision:"saved",requires_restart:true,service_restart_required:true,runtime:{pid:101}};
+    if(route==="config")return {revision:"saved",requires_restart:true,service_restart_required:true,runtime:{pid:101,pending_listeners:["127.0.0.1:9002"]}};
     assert.equal(route,"restart-service");assert.equal(JSON.parse(options.body).expected_pid,101);return {restart_requested:true};
   };
   await vm.runInContext("saveConfigField(configInputs[3])",context);

@@ -219,4 +219,15 @@ func TestManagedOnlineMappingPortChangeRequestsRestart(t *testing.T) {
 	if c.worker != old || len(c.current.proxies) != 1 {
 		t.Fatal("managed change touched current listeners")
 	}
+	want := first + "," + second
+	if got := strings.Join(c.status().(map[string]any)["pending_listeners"].([]string), ","); got != want {
+		t.Fatalf("pending listeners = %q, want %q", got, want)
+	}
+	setOnlineMappings(t, c, []clientProxy{{Listen: first, Server: "ws://127.0.0.1:1/tunnel"}})
+	if err := c.applyLive([]string{"proxies"}); err != nil {
+		t.Fatal(err)
+	}
+	if c.pendingListeners != "" {
+		t.Fatal("restoring current ports retained stale pending listeners")
+	}
 }

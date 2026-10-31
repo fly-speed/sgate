@@ -151,6 +151,15 @@ func (s *TcpService) runLifecycle() {
 	}
 	life.mu.Unlock()
 	life.op.Unlock()
+	// Run is entered only after application configuration and management startup.
+	if life.state != nil && life.ctx.Err() == nil {
+		if err := NotifyStarted(life.state); err != nil {
+			life.mu.Lock()
+			life.err = err
+			life.mu.Unlock()
+			life.cancel()
+		}
+	}
 	log.Printf("go-service Run: managed=%t", life.managed)
 	<-life.ctx.Done()
 	s.Close()

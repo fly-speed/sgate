@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"time"
 )
@@ -28,22 +29,25 @@ func (c *controller) restartService(control, socket string, expectedPID int) err
 	if control == "" {
 		return errors.New("未配置 master_ctl 路径")
 	}
-	args := []string{"-f", c.servicePath, "-a", "restart", "-t", "30"}
+	args := []string{"-f", c.servicePath, "-a", "restart", "-t", "30000"}
 	if socket != "" {
 		args = append(args, "-s", socket)
 	}
 	program := control
+	rebind := false
 	if c.tcp != nil {
 		settings, err := processSettings(c.servicePath)
 		if err != nil {
 			return err
 		}
-		if settings["master_service"] != c.serviceListen {
-			// acl_master restart 保留原监听描述符。端口集合改变时必须先
-			// stop 再 start，让框架重新打开端口；子进程独立存活至操作结束。
-			// 所有路径通过位置参数传入，不能拼入 shell 程序文本。
+		if !sameClientAddresses(settings["master_service"], c.serviceListen) {
+			stop, start, err := clientRestartScripts(c.servicePath)
+			if err != nil {
+				return err
+			}
+			rebind = true
 			program = "/bin/sh"
-			args = rebindArguments(control, socket, c.servicePath, os.Getpid())
+			args = clientRebindArguments(stop, start, control, socket, c.servicePath, os.Getpid())
 		}
 	}
 	// 独立于代理上下文，允许 master_ctl 在旧代理退出后完成管理请求。
@@ -61,33 +65,73 @@ func (c *controller) restartService(control, socket string, expectedPID int) err
 		return fmt.Errorf("无法启动 master_ctl: %w", err)
 	}
 	c.restartPending = true
+	failure := "master_ctl 重启未完成，请检查服务日志和管理套接字权限"
+	if rebind {
+		failure = "客户端停止/启动脚本重启未完成，请检查脚本、服务日志和管理套接字权限"
+	}
 	go func() {
 		defer cancel()
-		c.waitRestart(cmd, 30*time.Second)
+		c.waitRestart(cmd, 30*time.Second, failure)
 	}()
 	return nil
 }
 
-func rebindArguments(control, socket, path string, oldPID int) []string {
-	// stop 只确认请求已受理；旧进程退出前仍持有监听 socket。
-	// 等待其被框架回收后才能 start，否则会出现部分端口绑定失败。
-	args := []string{"-c", `control=$1; old=$2; shift 2
-"$control" "$@" -a stop || exit $?
+// Installed services keep their scripts beside conf/ in bin/. Source-tree
+// services use scripts beside the .cf. Always pass the captured service path.
+func clientRestartScripts(servicePath string) (string, string, error) {
+	dir := filepath.Dir(servicePath)
+	// acl_master may scan conf/service/ instead of conf/ directly.
+	if filepath.Base(dir) == "service" && filepath.Base(filepath.Dir(dir)) == "conf" {
+		dir = filepath.Dir(dir)
+	}
+	if filepath.Base(dir) == "conf" {
+		dir = filepath.Join(filepath.Dir(dir), "bin")
+	}
+	stop, start := filepath.Join(dir, "sgate-client-stop.sh"), filepath.Join(dir, "sgate-client-start.sh")
+	for _, path := range []string{stop, start} {
+		info, err := os.Stat(path)
+		if err != nil {
+			return "", "", fmt.Errorf("客户端重启脚本不存在或不可访问：%s", path)
+		}
+		if !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
+			return "", "", fmt.Errorf("客户端重启脚本不可执行：%s", path)
+		}
+	}
+	return stop, start, nil
+}
+
+func clientRebindArguments(stop, start, control, socket, path string, oldPID int) []string {
+	// All values are positional parameters; none is interpolated as shell code.
+	return []string{"-c", `stop=$1; start=$2; old=$3
+MASTER_CTL=$4; MASTER_SOCKET=$5; SGATE_CONFIG=$6; MASTER_CTL_TIMEOUT=30000
+export MASTER_CTL MASTER_SOCKET SGATE_CONFIG MASTER_CTL_TIMEOUT
+printf 'client listener restart: running stop script; old_pid=%s service=%s\n' "$old" "$SGATE_CONFIG" >&2
+"$stop"
+status=$?
+if [ "$status" -ne 0 ]; then
+  printf '%s\n' 'client listener restart: stop script failed; start skipped' >&2
+  exit "$status"
+fi
+printf '%s\n' 'client listener restart: stop script completed; waiting for old process exit' >&2
 attempt=0
 while kill -0 "$old" 2>/dev/null; do
   attempt=$((attempt+1))
-  [ "$attempt" -le 300 ] || exit 1
+  if [ "$attempt" -gt 300 ]; then
+    printf '%s\n' 'client listener restart: old process did not exit; start skipped' >&2
+    exit 1
+  fi
   sleep 0.1
 done
-exec "$control" "$@" -a start`,
-		"sgate-rebind", control, strconv.Itoa(oldPID), "-f", path, "-t", "30"}
-	if socket != "" {
-		args = append(args, "-s", socket)
-	}
-	return args
+printf '%s\n' 'client listener restart: running start script' >&2
+"$start"
+status=$?
+if [ "$status" -ne 0 ]; then
+  printf '%s\n' 'client listener restart: start script failed' >&2
+fi
+exit "$status"`, "sgate-client-rebind", stop, start, strconv.Itoa(oldPID), control, socket, path}
 }
 
-func (c *controller) waitRestart(cmd *exec.Cmd, timeout time.Duration) {
+func (c *controller) waitRestart(cmd *exec.Cmd, timeout time.Duration, failure ...string) {
 	err := cmd.Wait()
 	if err == nil {
 		// 某些 master_ctl 在管理请求失败时仍返回 0；旧进程未退出不能视为成功。
@@ -103,6 +147,9 @@ func (c *controller) waitRestart(cmd *exec.Cmd, timeout time.Duration) {
 	c.mu.Lock()
 	c.restartPending = false
 	c.lastError = "master_ctl 重启未完成，请检查服务日志和管理套接字权限"
+	if len(failure) > 0 {
+		c.lastError = failure[0]
+	}
 	c.mu.Unlock()
 	log.Printf("master_ctl restart: %v", err)
 }

@@ -67,6 +67,7 @@ func (c *controller) replaceClientMappings(next definition) error {
 		if err := checkManagedMappingPorts(next.listen, c.tcp.Addresses()); err != nil {
 			return err
 		}
+		c.pendingListeners = next.listen
 		return admin.ErrMappingServiceRestart
 	}
 	base := c.current.client
@@ -116,6 +117,7 @@ func (c *controller) replaceClientMappings(next definition) error {
 		return err
 	}
 	c.current = current
+	c.pendingListeners = ""
 	if value, ok := settings["master_service"]; ok {
 		if c.controls == nil {
 			c.controls = map[string]string{}

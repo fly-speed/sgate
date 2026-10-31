@@ -24,28 +24,29 @@ import (
 var errStopTimeout = errors.New("proxy shutdown timed out")
 
 type controller struct {
-	mu             sync.Mutex
-	ctx            context.Context
-	original       *flag.FlagSet
-	args           []string
-	role, path     string
-	stats          *tunnel.Stats
-	current        definition
-	worker         *instance
-	generation     int
-	lastError      string
-	overrides      []string
-	managed        *aclservice.Pool
-	wrapHTTP       func(net.Listener, http.Handler) http.Handler
-	controls       map[string]string
-	service        HTTPService
-	tcp            TCPService
-	tcpClosed      atomic.Uint64
-	shared         *sharedServer
-	sharedMode     bool
-	servicePath    string
-	serviceListen  string // 启动时框架持有的 master_service，不能随在线保存改变。
-	restartPending bool
+	mu               sync.Mutex
+	ctx              context.Context
+	original         *flag.FlagSet
+	args             []string
+	role, path       string
+	stats            *tunnel.Stats
+	current          definition
+	worker           *instance
+	generation       int
+	lastError        string
+	overrides        []string
+	managed          *aclservice.Pool
+	wrapHTTP         func(net.Listener, http.Handler) http.Handler
+	controls         map[string]string
+	service          HTTPService
+	tcp              TCPService
+	tcpClosed        atomic.Uint64
+	shared           *sharedServer
+	sharedMode       bool
+	servicePath      string
+	serviceListen    string // 启动时框架持有的 master_service，不能随在线保存改变。
+	pendingListeners string
+	restartPending   bool
 }
 
 func Run(ctx context.Context, role string, fs *flag.FlagSet, args []string, adminPath string) error {
@@ -120,7 +121,12 @@ func (c *controller) status() any {
 	if c.sharedMode {
 		adminRoute = managementPath
 	}
+	var pending []string
+	if c.pendingListeners != "" {
+		pending = strings.Split(c.pendingListeners, ",")
+	}
 	return map[string]any{
+		"pending_listeners":         pending,
 		"noise":                     c.current.noiseStatus(),
 		"generation":                c.generation,
 		"running":                   running,

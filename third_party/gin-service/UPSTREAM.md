@@ -199,3 +199,5 @@ status  service                                         type    proc    owner   
 ```
 
 - `ownedConn.NetConn` exposes the underlying connection for transport counter attribution, including under TLS, without transferring lifecycle ownership.
+
+Run acknowledges startup through go-service.NotifyStarted after the HTTP/TLS worker is configured. Startup failure does not acknowledge readiness; busy/idle status notifications remain disabled.

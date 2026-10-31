@@ -206,6 +206,15 @@ func (s *GinService) Run() {
 		s.worker = w
 	}
 	s.worker.start()
+	if s.state != nil {
+		if e := master.NotifyStarted(s.state); e != nil {
+			s.err = e
+			s.mu.Unlock()
+			s.Close()
+			close(s.runDone)
+			return
+		}
+	}
 	s.mu.Unlock()
 	log.Printf("gin-service Run: standalone=%t", s.Alone)
 	<-s.ctx.Done()

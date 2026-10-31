@@ -9,6 +9,7 @@ let state = {},
   chartPointer = null,
   servicePID = 0,
   serviceRestarting = false;
+let servicePendingListeners = [];
 let tunnelAccountsLoad = 0;
 let tunnelAccountsRevision = "", tunnelAccountRows = [], tunnelAccountsBusy = false, tunnelAccountsEnabled = false, tunnelAccountsCanCreate = false;
 let configRole = "";
@@ -1031,6 +1032,7 @@ async function loadConfig() {
   renderRuntime(data.runtime || {});
 }
 function renderRuntime(rt) {
+  servicePendingListeners = rt.pending_listeners || [];
   servicePID = rt.pid || 0;
   $("restart-service").hidden = $("restart-service-help").hidden = !rt.service_restart_available;
   $("restart-service").disabled = serviceRestarting || !!rt.service_restart_pending;
@@ -1565,16 +1567,16 @@ async function restartSavedMappings(result) {
   if (!oldPID) throw new Error(t("无法确定客户端进程，配置已保存，请刷新后重试重启"));
   serviceRestarting = true;
   setConfigBusy(true);
-  notice(() => t("映射已保存，正在通过 acl_master 重启客户端并等待恢复…"));
+  notice(() => t("映射已保存，正在调用客户端停止和启动脚本，等待监听端口恢复…"));
   try {
     try {
       await api("restart-service", {method: "POST", body: JSON.stringify({expected_pid: oldPID})});
     } catch (error) { if (error.status) throw error; }
-    const config = await waitForServiceRestart(oldPID);
+    const config = await waitForServiceRestart(oldPID, result.runtime?.pending_listeners || []);
     revision = config.revision || revision;
     if (config.runtime) renderRuntime(config.runtime);
     localText($("pending-label"), () => (Object.keys(configEdits()).length ? t("有未保存修改 · ") : "") + t("已保存项已生效"));
-    notice(() => t("映射已生效，客户端已由 acl_master 重启，登录会话继续有效。其他未保存修改已保留。"));
+    notice(() => t("映射已生效，客户端已通过停止和启动脚本重启，监听端口已核对，登录会话继续有效。其他未保存修改已保留。"));
   } finally {
     serviceRestarting = false;
     setConfigBusy(configSaving);
@@ -1584,6 +1586,7 @@ async function restartSavedMappings(result) {
 async function restartService() {
   if (serviceRestarting || configSaving || !servicePID) return;
   const oldPID = servicePID;
+  const expectedListeners = servicePendingListeners;
   const buttons = [$("restart-service"), $("save-config"), $("apply-config")];
   serviceRestarting = true;
   buttons.forEach((button) => (button.disabled = true));
@@ -1598,7 +1601,7 @@ async function restartService() {
       // 整进程替换可能早于 HTTP 响应；明确的 HTTP 拒绝则直接显示原因。
       if (error.status) throw error;
     }
-    await waitForServiceRestart(oldPID);
+    await waitForServiceRestart(oldPID, expectedListeners);
     await refreshAuth();
     if (state.authenticated) notice(() => t("服务已由 acl_master 重启，登录会话继续有效。"));
   } catch (error) {
@@ -1609,7 +1612,21 @@ async function restartService() {
   }
 }
 
-async function waitForServiceRestart(oldPID) {
+// Wildcard framework listeners may expand to multiple interface addresses.
+function restartListenersReady(expected, actual) {
+  const endpoint = (value) => {
+    const at = value.lastIndexOf(":");
+    return { host: value.slice(0, at).replace(/^\[|\]$/g, ""), port: value.slice(at + 1) };
+  };
+  const wanted = expected.map(endpoint), bound = (actual || []).map(endpoint);
+  const matches = (w, b) => w.port === b.port && (
+    w.host === b.host || ["", "0.0.0.0", "::"].includes(w.host) ||
+    (w.host === "localhost" && (b.host === "::1" || b.host.startsWith("127.")))
+  );
+  return wanted.every(w => bound.some(b => matches(w, b))) &&
+    bound.every(b => wanted.some(w => w.port === b.port));
+}
+async function waitForServiceRestart(oldPID, expectedListeners = []) {
   const deadline = Date.now() + 90000;
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -1622,7 +1639,11 @@ async function waitForServiceRestart(oldPID) {
       // HTTP 监听重建期间继续轮询；只有新 PID 就绪才报告完成。
       continue;
     }
-    if (runtime.pid && runtime.pid !== oldPID && runtime.running) return config;
+    if (runtime.pid && runtime.pid !== oldPID && runtime.running) {
+      if (expectedListeners.length && !restartListenersReady(expectedListeners, runtime.listeners))
+        throw new Error(t("客户端已重启，但监听端口与已保存映射不一致，请检查启动脚本和 master_service。"));
+      return config;
+    }
     if (!runtime.service_restart_pending && runtime.last_error) {
       throw new Error(runtime.last_error);
     }

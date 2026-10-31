@@ -6,7 +6,6 @@ import (
 	"flag"
 	"net"
 	"net/http"
-	"path/filepath"
 
 	"sgate/internal/aclservice"
 	"sgate/internal/admin"
@@ -83,11 +82,9 @@ func newRunController(
 	}
 	c.sharedMode = role == "server" && hooks.httpServer && adminPath != ""
 	if f := fs.Lookup("f"); f != nil && f.Value.String() != "" {
-		var err error
-		c.servicePath, err = filepath.Abs(f.Value.String())
-		if err != nil {
-			return nil, err
-		}
+		// acl_master keys services by the literal -f string. filepath.Abs/Clean
+		// would change bin/../conf into conf and stop/restart a different key.
+		c.servicePath = f.Value.String()
 	}
 	var controlErr error
 	c.controls, controlErr = processSettings(c.path)

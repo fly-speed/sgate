@@ -205,6 +205,24 @@ class Case(combined.Case):
         self.targets = {key: b.address for key, b in self.backends.items()}
         self.targets["C"] = "localhost:" + self.targets["C"].split(":")[1]
         super().setup()
+        # Exercise the installed stop/start scripts with the isolated framework,
+        # never the production service configuration or management socket.
+        bindir = self.root / "bin"
+        bindir.mkdir(exist_ok=True)
+        for name in ["sgate-client-stop.sh", "sgate-client-start.sh"]:
+            script = bindir / name
+            script.write_bytes((ROOT / name).read_bytes())
+            script.chmod(0o700)
+        if self.args.service_path_alias:
+            # Match deployment scripts: acl_master identifies the service by
+            # this literal path, even though conf/ is the same filesystem entry.
+            directory = str(self.root) + "/bin/../conf/service"
+            main = self.root / "conf/main.cf"
+            main.write_text(main.read_text().replace(
+                f"service_directory = {self.root}/conf/service",
+                f"service_directory = {directory}"))
+            self.configs = {role: pathlib.Path(directory + "/" + p.name)
+                            for role, p in self.configs.items()}
         self.ports["client3"] = multi.port()
         self.active = [dict(r) for r in self.routes]
         self.labels = ["A", "B", "C"]
@@ -536,6 +554,8 @@ def main():
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--mode", choices=["standalone", "managed"], required=True)
     parser.add_argument("--tls", choices=["ws", "wss"], required=True)
+    parser.add_argument("--service-path-alias", action="store_true",
+                        help="retain bin/../conf in the framework service identity")
     parser.add_argument("--master", default="/opt/soft/acl-master/libexec/acl_master")
     parser.add_argument("--ctl", default="/opt/soft/acl-master/bin/master_ctl")
     args = parser.parse_args()

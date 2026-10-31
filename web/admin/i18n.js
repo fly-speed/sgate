@@ -3,6 +3,11 @@
 // UI translations only: editable values and protocol/configuration keys are never translated.
 const sgateI18n = (() => {
   const messages = {
+  "映射已保存，正在调用客户端停止和启动脚本，等待监听端口恢复…": "Mappings saved. Running the client stop/start scripts and waiting for listeners…",
+  "映射已生效，客户端已通过停止和启动脚本重启，监听端口已核对，登录会话继续有效。其他未保存修改已保留。": "Mappings are active. The client was restarted through stop/start scripts and its listeners were verified. Login and other unsaved drafts are retained.",
+  "客户端已重启，但监听端口与已保存映射不一致，请检查启动脚本和 master_service。": "The client restarted, but its listeners do not match the saved mappings. Check the startup script and master_service.",
+  "客户端停止/启动脚本重启未完成，请检查脚本、服务日志和管理套接字权限": "Client stop/start restart did not complete. Check scripts, service logs and management socket permissions.",
+
   "账号 JSON 路径，相对本 .cf 目录解析；保存后在线加载，无需重启。清空恢复已生效的公共密码认证；命令行参数优先。": "Account JSON path, relative to this .cf directory. Saving loads it online without restarting. Clearing restores the active common-password authentication. CLI options take priority.",
   "清空账号文件前需先配置并应用有效的公共隧道密码": "Configure and apply a valid common tunnel password before clearing the account file",
 

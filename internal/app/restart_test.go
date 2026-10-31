@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -48,7 +49,7 @@ func TestServiceRestartUsesCapturedPathAndRejectsDuplicates(t *testing.T) {
 	if accepted.Load() != 1 {
 		t.Fatalf("accepted %d concurrent restarts", accepted.Load())
 	}
-	want := "-f\n" + c.servicePath + "\n-a\nrestart\n-t\n30\n-s\n/test/control socket\n"
+	want := "-f\n" + c.servicePath + "\n-a\nrestart\n-t\n30000\n-s\n/test/control socket\n"
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		if b, _ := os.ReadFile(argsPath); string(b) == want {
@@ -150,7 +151,22 @@ func TestTCPPortChangeRecreatesFrameworkListeners(t *testing.T) {
 	for _, failStop := range []bool{false, true} {
 		t.Run(fmt.Sprint("fail-stop-", failStop), func(t *testing.T) {
 			dir := t.TempDir()
-			service := filepath.Join(dir, "client ; ' literal.cf")
+			if err := os.MkdirAll(filepath.Join(dir, "conf"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(dir, "bin"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"sgate-client-stop.sh", "sgate-client-start.sh"} {
+				data, err := os.ReadFile(filepath.Join("../..", name))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, "bin", name), data, 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			service := dir + "/bin/../conf/client ; ' literal.cf"
 			if err := os.WriteFile(service, []byte("service client {\nmaster_service = 127.0.0.1|9002\n}\n"), 0600); err != nil {
 				t.Fatal(err)
 			}
@@ -169,7 +185,11 @@ func TestTCPPortChangeRecreatesFrameworkListeners(t *testing.T) {
 			}
 			reaped := make(chan struct{})
 			go func() { _ = old.Wait(); close(reaped) }()
-			command := exec.Command("/bin/sh", rebindArguments(control, "/test/socket ' ; literal", service, old.Process.Pid)...)
+			stop, start, err := clientRestartScripts(service)
+			if err != nil {
+				t.Fatal(err)
+			}
+			command := exec.Command("/bin/sh", clientRebindArguments(stop, start, control, "/test/socket ' ; literal", service, old.Process.Pid)...)
 			if err := command.Run(); (err != nil) != failStop {
 				t.Fatalf("stop result: %v", err)
 			}
@@ -181,10 +201,10 @@ func TestTCPPortChangeRecreatesFrameworkListeners(t *testing.T) {
 				}
 			}
 			<-reaped
-			base := "-f\n" + service + "\n-t\n30\n-s\n/test/socket ' ; literal\n-a\n"
-			want := base + "stop\n"
+			suffix := "\n-t\n30000\n-s\n/test/socket ' ; literal\n"
+			want := "-f\n" + service + "\n-a\nstop" + suffix
 			if !failStop {
-				want += base + "start\n"
+				want += "-f\n" + service + "\n-a\nstart" + suffix
 			}
 			deadline := time.Now().Add(3 * time.Second)
 			for time.Now().Before(deadline) {
@@ -196,5 +216,114 @@ func TestTCPPortChangeRecreatesFrameworkListeners(t *testing.T) {
 			}
 			t.Fatal("listener replacement did not preserve arguments or stop/start ordering")
 		})
+	}
+}
+
+func TestClientRestartScriptsPreflight(t *testing.T) {
+	for _, layout := range []string{"source", "conf", "conf/service"} {
+		t.Run(layout, func(t *testing.T) {
+			root := t.TempDir()
+			dir, bin := root, root
+			if layout != "source" {
+				dir = filepath.Join(root, layout)
+				bin = filepath.Join(root, "bin")
+			}
+			for _, path := range []string{dir, bin} {
+				if err := os.MkdirAll(path, 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			service := filepath.Join(dir, "sgate-client.cf")
+			if _, _, err := clientRestartScripts(service); err == nil {
+				t.Fatal("missing scripts accepted")
+			}
+			stop, start := filepath.Join(bin, "sgate-client-stop.sh"), filepath.Join(bin, "sgate-client-start.sh")
+			if err := os.WriteFile(stop, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := clientRestartScripts(service); err == nil {
+				t.Fatal("missing start accepted")
+			}
+			if err := os.WriteFile(start, []byte("#!/bin/sh\nexit 0\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := clientRestartScripts(service); err == nil {
+				t.Fatal("nonexecutable start accepted")
+			}
+			if err := os.Chmod(start, 0700); err != nil {
+				t.Fatal(err)
+			}
+			a, b, err := clientRestartScripts(service)
+			if err != nil || a != stop || b != start {
+				t.Fatalf("wrong scripts %q %q %v", a, b, err)
+			}
+		})
+	}
+}
+
+func TestClientPortRestartRejectsMissingScriptsBeforeStop(t *testing.T) {
+	dir := t.TempDir()
+	service := filepath.Join(dir, "client.cf")
+	if err := os.WriteFile(service, []byte("service client {\nmaster_service = 127.0.0.1|9002\n}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	control := filepath.Join(dir, "control")
+	if err := os.WriteFile(control, []byte("#!/bin/sh\ntouch \"$0.called\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	c := &controller{ctx: context.Background(), servicePath: service,
+		serviceListen: "127.0.0.1|9001", tcp: restartTCPService{managed: true}}
+	if err := c.restartService(control, "", os.Getpid()); err == nil || !strings.Contains(err.Error(), "脚本") {
+		t.Fatalf("missing scripts did not reject restart: %v", err)
+	}
+	if c.restartPending {
+		t.Fatal("failed preflight left restart pending")
+	}
+	if _, err := os.Stat(control + ".called"); !os.IsNotExist(err) {
+		t.Fatal("preflight ran control before both scripts were checked")
+	}
+}
+
+func TestClientStartScriptFailureIsReported(t *testing.T) {
+	dir := t.TempDir()
+	stop, start := filepath.Join(dir, "stop"), filepath.Join(dir, "start")
+	for path, content := range map[string]string{stop: "#!/bin/sh\nexit 0\n", start: "#!/bin/sh\nexit 9\n"} {
+		if err := os.WriteFile(path, []byte(content), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := exec.Command("/bin/sleep", "0.01")
+	if err := old.Run(); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command("/bin/sh", clientRebindArguments(stop, start, "unused", "", "unused", old.Process.Pid)...)
+	output, err := command.CombinedOutput()
+	var status *exec.ExitError
+	if !errors.As(err, &status) || status.ExitCode() != 9 || !strings.Contains(string(output), "start script failed") {
+		t.Fatalf("start failure hidden: %v, %s", err, output)
+	}
+}
+
+func TestServiceRestartPreservesLiteralFrameworkIdentity(t *testing.T) {
+	dir := t.TempDir()
+	appPath := filepath.Join(dir, "proxy.conf")
+	if err := os.WriteFile(appPath, []byte("target = 127.0.0.1:9\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, service := range []string{dir + "/bin/../conf/client.cf", "./bin/../conf/client.cf"} {
+		fs := appFlags("server")
+		fs.String("f", "", "framework service file")
+		args := []string{"-f", service, "-config", appPath}
+		if err := cli.Parse(fs, args); err != nil {
+			t.Fatal(err)
+		}
+		c, err := newRunController(context.Background(), "server", fs, args, "", runtimeHooks{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := service
+		if c.servicePath != want {
+			t.Fatalf("framework identity normalized: %q != %q", c.servicePath, want)
+		}
 	}
 }

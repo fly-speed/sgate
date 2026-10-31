@@ -67,7 +67,7 @@ service sgate-client {
     # A nonempty array replaces top-level listen/server/addr; key, TLS, reconnect, heartbeat and padding settings are shared; each mapping can override username/password.
     # Local ports must differ between mappings; send-addr=false removes addr from every mapping URL.
     # Example: proxies = '[{"listen":"127.0.0.1:9001","server":"ws://127.0.0.1:8081/tunnel?addr=127.0.0.1:22"},{"listen":"127.0.0.1:9002","server":"ws://127.0.0.1:8081/tunnel?addr=127.0.0.1:8088"}]'
-    # UI saves update mappings online and synchronize master_service; managed port changes automatically restart the client via master_ctl.
+    # UI saves update mappings online and synchronize master_service; managed port changes restart via bin/sgate-client-stop.sh then bin/sgate-client-start.sh.
     # Manual file edits must keep master_service and mapping ports consistent; standalone updates preserve unchanged mappings.
     proxies = ''
     # Optional JSON array file; relative paths resolve from this .cf directory. Nonempty overrides inline proxies.
