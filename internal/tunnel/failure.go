@@ -77,12 +77,26 @@ func dialResetReason(err error) byte {
 }
 
 func (s *session) failStream(id uint64, operation string, err error, reason byte) {
-	// The reader and writer can fail together. Log and reset only once, and do
-	// not report normal session shutdown as a new application failure.
+	// Capture the immutable stream identity before releasing the socket. Forward
+	// session.target alone is misleading for server-initiated reverse streams.
+	s.mu.Lock()
+	st := s.streams[id]
+	target := s.target
+	var local, peer net.Addr
+	if st != nil {
+		target = st.target
+		local, peer = st.conn.LocalAddr(), st.conn.RemoteAddr()
+	}
+	s.mu.Unlock()
+	// Concurrent read/write failures still log and enqueue RESET only once.
 	if s.ctx.Err() != nil || !s.drop(id) {
 		return
 	}
-	s.opts.Logf("stream=%d target=%q %s failed: %v", id, s.target, operation, err)
+	flow := "forward"
+	if id > reverseStreamBase {
+		flow = "reverse"
+	}
+	s.opts.Logf("stream=%d flow=%s stream_target=%q local=%q peer=%q %s failed: %v", id, flow, target, local, peer, operation, err)
 	s.enqueueResetReason(id, reason)
 }
 

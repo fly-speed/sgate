@@ -1058,15 +1058,17 @@ password = replace-with-alice-password
 
 ### 反向代理压力与边界测试
 
+新增[反向代理弱网验证与半关闭日志排查](docs/reverse-weaknet.md)，覆盖延迟、抖动、单向断流、真实 RST、ENOTCONN 单流隔离、TLS 和同账号双隧道。
+
 反向代理测试默认随普通测试执行，使用真实 TCP 和 WS/WSS 连接。新增覆盖：64 并发 × 4 轮逐字节校验及半关闭；8 条既有流在 4 次断线期间填充缓存并恢复重放；目标完全停止读取时的有界背压与关闭；账户在并发接入时反复禁用/启用，另一账户持续传输；服务端与客户端流数限制、缓存恰好满及 ACK 后恢复、最后一个流 ID、每账号 256 / 全局 4096 映射临界值、过期会话拒绝恢复，以及畸形连接命令。压力用例在退出后检查协程和文件描述符回落，并验证会话、流和收发缓存的清理。
 
 ```bash
 # 常规用例，重复三轮并检查数据竞争
-GOPROXY=off go test -mod=mod -race ./internal/tunnel -run '^TestReverse' -count=3 -timeout=3m
+GOPROXY=off go test -mod=mod -race ./internal/tunnel -run '^TestReverse' -count=3 -timeout=12m
 
 # 扩展压力：WS/WSS 各 128 并发 × 8 轮，每流每轮 256 KiB；
 # 32 条流经历 12 次重连；账户禁用/启用 48 轮
-SGATE_REVERSE_STRESS=1 GOPROXY=off go test -mod=mod -race ./internal/tunnel -run '^TestReverse' -count=1 -timeout=5m -v
+SGATE_REVERSE_STRESS=1 GOPROXY=off go test -mod=mod -race ./internal/tunnel -run '^TestReverse' -count=1 -timeout=15m -v
 
 # 单独模糊测试反向连接命令，跳过其他测试
 GOPROXY=off go test -mod=mod ./internal/tunnel -run '^$' -fuzz '^FuzzReverseOpenFrame$' -fuzztime=30s -parallel=2

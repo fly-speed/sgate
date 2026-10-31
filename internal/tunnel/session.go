@@ -73,6 +73,7 @@ func decodeFrame(p []byte) (frame, error) {
 }
 
 type stream struct {
+	target                string // Actual per-stream destination, including reverse targets.
 	conn                  net.Conn
 	readEnded, writeEnded bool
 }
@@ -323,7 +324,7 @@ func (s *session) addLocal(c net.Conn) error {
 	}
 	s.nextStream++
 	id := s.nextStream
-	st := &stream{conn: c}
+	st := &stream{conn: c, target: s.target}
 	if len(s.streams) == 0 {
 		s.lastBusiness = time.Time{}
 	}
@@ -403,7 +404,7 @@ func (s *session) apply(f frame) error {
 			s.enqueueResetReason(f.stream, resetStreamLimit)
 			return nil
 		}
-		st := &stream{conn: c}
+		st := &stream{conn: c, target: target}
 		if len(s.streams) == 0 {
 			s.lastBusiness = time.Time{}
 		}

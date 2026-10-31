@@ -401,3 +401,6 @@ sequenceDiagram
 对应回归覆盖包括 [crypto_test.go](../internal/tunnel/crypto_test.go)、[session_test.go](../internal/tunnel/session_test.go)、[window_test.go](../internal/tunnel/window_test.go)、[resume_confirmation_test.go](../internal/tunnel/resume_confirmation_test.go)、[probe_command_test.go](../internal/tunnel/probe_command_test.go)、[reverse_test.go](../internal/tunnel/reverse_test.go) 及 [reverse_permission_test.go](../internal/tunnel/reverse_permission_test.go)。
 
 维护协议时应同步更新枚举表、方向及权限、字段合法性、可靠性与窗口行为、兼容策略和测试。当前 `sgate-v1` 标识未因每次能力扩展而更换；已知能力通过认证握手参数协商，不能假定任意旧版本都认识新增 `op` 或字段。
+
+
+反向代理的弱网验证与半关闭日志说明见 [反向代理弱网验证](reverse-weaknet.md)。错误日志使用 `flow`、`stream_target`、`local`、`peer` 标识具体业务流；会话级正向目标与反向目标可能不同。单流半关闭失败保留 RESET 隔离行为，不因这一条错误主动关闭整个隧道。

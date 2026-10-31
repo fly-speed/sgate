@@ -246,7 +246,7 @@ func (s *session) reserveReverseMode(conn net.Conn, target string, secure bool) 
 	}
 	s.nextStream++
 	id := reverseStreamBase + s.nextStream
-	st := &stream{conn: conn}
+	st := &stream{conn: conn, target: target}
 	if len(s.streams) == 0 {
 		s.lastBusiness = time.Time{}
 	}
