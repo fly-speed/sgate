@@ -91,7 +91,8 @@ type session struct {
 	incoming                               []frame
 	incomingBytes                          int
 	accepted                               uint64
-	peerWindow                             int // 0 表示旧版未协商；非零时限制未确认的线帧总量。
+	peerWindow                             int  // 0 表示旧版未协商；非零时限制未确认的线帧总量。
+	reportStreamErrors                     bool // Protected by mu; confirmed on client transports.
 	resets                                 chan streamReset
 	pending                                []frame
 	pendingBytes                           int
@@ -107,13 +108,14 @@ type session struct {
 func newSession(parent context.Context, target string, opts Options) *session {
 	ctx, cancel := context.WithCancel(parent)
 	s := &session{
-		ctx:     ctx,
-		cancel:  cancel,
-		target:  target,
-		opts:    opts,
-		changed: make(chan struct{}),
-		resets:  make(chan streamReset, opts.MaxStreams),
-		streams: make(map[uint64]*stream),
+		ctx:                ctx,
+		cancel:             cancel,
+		target:             target,
+		opts:               opts,
+		changed:            make(chan struct{}),
+		resets:             make(chan streamReset, opts.MaxStreams),
+		streams:            make(map[uint64]*stream),
+		reportStreamErrors: opts.reportStreamErrors,
 	}
 	if opts.Stats != nil {
 		opts.Stats.registerSession(s)
@@ -127,7 +129,10 @@ func newSession(parent context.Context, target string, opts Options) *session {
 				return
 			case reset := <-s.resets:
 				var reason []byte
-				if s.opts.reportStreamErrors && reset.reason != 0 {
+				s.mu.Lock()
+				report := s.reportStreamErrors
+				s.mu.Unlock()
+				if report && reset.reason != 0 {
 					reason = []byte{reset.reason}
 				}
 				if s.enqueue(opReset, reset.id, reason) != nil {
@@ -454,8 +459,12 @@ func (s *session) apply(f frame) error {
 		s.halfDone(f.stream, false)
 	case opReset:
 		if s.drop(f.stream) {
-			s.opts.Logf("stream=%d local=%q peer=%q connection rejected/reset by remote: %s",
-				f.stream, st.conn.LocalAddr(), st.conn.RemoteAddr(), resetReasonText(f.data))
+			reason := 0
+			if len(f.data) == 1 {
+				reason = int(f.data[0])
+			}
+			s.opts.Logf("stream=%d flow=%s stream_target=%q local=%q peer=%q event=stream_remote_reset reason_code=%d connection rejected/reset by remote: %s",
+				f.stream, streamFlow(f.stream), st.target, st.conn.LocalAddr(), st.conn.RemoteAddr(), reason, resetReasonText(f.data))
 		}
 	}
 	return nil

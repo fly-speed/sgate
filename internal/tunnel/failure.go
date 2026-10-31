@@ -9,6 +9,12 @@ import (
 )
 
 const streamErrorsQuery = "sgate-stream-errors"
+const streamErrorsHeader = "X-Sgate-Stream-Errors"
+const streamErrorsAuthHeader = "X-Sgate-Stream-Errors-Auth"
+
+func streamErrorsMAC(key []byte, id, clientNonce, serverNonce string) string {
+	return mac(key, protocol, "stream-errors", id, clientNonce, serverNonce, "1")
+}
 
 // Only negotiated peers receive a one-byte reason in reliable RESET frames.
 // Keep raw dial errors local: they may contain infrastructure details, and must
@@ -39,7 +45,7 @@ func resetReasonText(data []byte) string {
 	}
 	switch data[0] {
 	case resetDialFailed:
-		return "backend TCP connection failed (see server log)"
+		return "backend TCP connection failed (see remote log)"
 	case resetDialTimeout:
 		return "backend TCP connection timed out"
 	case resetDNSFailed:
@@ -49,7 +55,7 @@ func resetReasonText(data []byte) string {
 	case resetUnreachable:
 		return "backend network/host unreachable"
 	case resetStreamLimit:
-		return "server stream limit reached"
+		return "remote stream limit reached"
 	case resetReadFailed:
 		return "remote TCP read failed (see remote log)"
 	case resetWriteFailed:
@@ -92,12 +98,27 @@ func (s *session) failStream(id uint64, operation string, err error, reason byte
 	if s.ctx.Err() != nil || !s.drop(id) {
 		return
 	}
-	flow := "forward"
-	if id > reverseStreamBase {
-		flow = "reverse"
-	}
-	s.opts.Logf("stream=%d flow=%s stream_target=%q local=%q peer=%q %s failed: %v", id, flow, target, local, peer, operation, err)
+	s.opts.Logf("stream=%d flow=%s stream_target=%q local=%q peer=%q event=%s %s failed: %v", id, streamFlow(id), target, local, peer, streamFailureEvent(operation, err), operation, err)
 	s.enqueueResetReason(id, reason)
+}
+
+func streamFlow(id uint64) string {
+	if id > reverseStreamBase {
+		return "reverse"
+	}
+	return "forward"
+}
+
+// Classify without suppressing errors: a peer closing a socket can still mean
+// an incomplete response. Keep the original error and per-stream RESET behavior.
+func streamFailureEvent(operation string, err error) string {
+	if operation == "TLS handshake" {
+		return "ingress_tls_rejected"
+	}
+	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ENOTCONN) {
+		return "stream_peer_closed"
+	}
+	return "stream_error"
 }
 
 func (s *Server) rejectHandshake(w http.ResponseWriter, r *http.Request, request tunnelRequest, reason string, status int) {

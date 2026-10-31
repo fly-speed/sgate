@@ -152,7 +152,9 @@ WebSocket Binary Message
 | `7` | 本地 TCP 读取失败 |
 | `8` | 本地 TCP 写入或半关闭失败 |
 
-服务端根据握手中的 `sgate-stream-errors` 决定是否在 RESET 中携带详细原因。空内容 RESET 用于未提供详细原因的关闭，旧端兼容依赖此形式；接收端只接受空内容或上述一个字节，不接受任意错误文本。原始系统错误留在本端日志，避免混入业务字节流。客户端发送 RESET 是否附原因取决于该客户端会话的 `reportStreamErrors` 设置，不能把请求参数理解为额外的独立双向确认命令。
+服务端根据握手中的 `sgate-stream-errors=1` 决定是否在 RESET 中携带详细原因，并返回 `X-Sgate-Stream-Errors: 1` 及 `X-Sgate-Stream-Errors-Auth`。确认签名使用共享密钥，绑定协议、用途、会话 ID 和本次双方 nonce。客户端验证该确认后，也在发往服务端的 RESET 中携带原因，因此反向目标拒绝连接等错误可直接在服务端定位；每次重连重新确认。没有确认头的旧服务端仍接收空 RESET，确认存在但无效时拒绝连接。
+
+空内容 RESET 用于未提供详细原因的关闭，旧端兼容依赖此形式；接收端只接受空内容或上述一个字节，不接受任意错误文本。原始系统错误留在本端日志，避免混入业务字节流。原因码没有新增，旧客户端仍可连接新服务端；要获得客户端发回的详细原因，需要更新两端并重新建立传输。
 
 ## 6. 命令包与业务负载的共同收发管线
 
@@ -404,3 +406,12 @@ sequenceDiagram
 
 
 反向代理的弱网验证与半关闭日志说明见 [反向代理弱网验证](reverse-weaknet.md)。错误日志使用 `flow`、`stream_target`、`local`、`peer` 标识具体业务流；会话级正向目标与反向目标可能不同。单流半关闭失败保留 RESET 隔离行为，不因这一条错误主动关闭整个隧道。
+
+日志的 `event` 区分以下情况，原始错误仍保留：
+
+| event | 含义 |
+| --- | --- |
+| `stream_peer_closed` | TCP 读写或半关闭遇到 EPIPE、ECONNRESET、ENOTCONN；可能是取消访问、超时或网络断开，不能据此保证当前响应完整 |
+| `stream_error` | 其他本地业务流错误 |
+| `ingress_tls_rejected` | 本地入口 TLS 握手失败，例如非 TLS 数据、超时；不等于隧道 TLS 握手失败 |
+| `stream_remote_reset` | 隧道另一端发回 RESET，`reason_code=1..8` 表示上述原因，`0` 表示未携带原因，应结合对端同一 stream 日志定位 |

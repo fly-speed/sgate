@@ -57,11 +57,12 @@ func freshTimestamp(value string) bool {
 }
 
 type codec struct {
-	client         bool
-	closeProof     string // Bound to this authenticated transport; independent of data counters.
-	peerWindow     int
-	tx, rx         cipher.AEAD
-	sent, received uint64
+	client             bool
+	closeProof         string // Bound to this authenticated transport; independent of data counters.
+	peerWindow         int
+	reportStreamErrors bool // Authenticated server confirmation; client-to-server RESET reasons.
+	tx, rx             cipher.AEAD
+	sent, received     uint64
 }
 
 func newCodec(key []byte, sessionID, clientNonce, serverNonce string, client bool) *codec {

@@ -165,6 +165,15 @@ func (c *Client) dial(ctx context.Context, id string, resume bool) (*websocket.C
 		}
 	}
 	crypt := newCodec(c.cfg.Key, id, nonce, serverNonce, true)
+	if response.Header.Get(streamErrorsHeader) != "" {
+		if response.Header.Get(streamErrorsHeader) != "1" || !hmac.Equal(
+			[]byte(response.Header.Get(streamErrorsAuthHeader)),
+			[]byte(streamErrorsMAC(c.cfg.Key, id, nonce, serverNonce))) {
+			ws.Close()
+			return nil, nil, 0, errors.New("server stream-error capability authentication failed")
+		}
+		crypt.reportStreamErrors = true
+	}
 	if window != "" {
 		crypt.peerWindow, err = parseReceiveWindow(window)
 		if err != nil {

@@ -207,6 +207,10 @@ func probeResponseError(key []byte, response *http.Response, request tunnelReque
 func (s *Server) handshakeHeaders(request tunnelRequest, serverNonce string) http.Header {
 	headers := http.Header{}
 	headers.Set("X-Sgate-Nonce", serverNonce)
+	if request.reportStreamErrors {
+		headers.Set(streamErrorsHeader, "1")
+		headers.Set(streamErrorsAuthHeader, streamErrorsMAC(s.cfg.Key, request.id, request.nonce, serverNonce))
+	}
 	window := ""
 	if request.peerWindow > 0 {
 		window = strconv.Itoa(s.cfg.Options.BufferBytes)

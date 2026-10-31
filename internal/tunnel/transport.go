@@ -33,6 +33,9 @@ func (s *session) transportConfirmed(ws *websocket.Conn, crypt *codec, resumeDea
 		return errSessionClosed
 	}
 	s.active = ws
+	if crypt.client {
+		s.reportStreamErrors = crypt.reportStreamErrors
+	}
 	s.activeCloseProof = ""
 	if crypt.client && s.opts.closeSessionOnStop {
 		s.activeCloseProof = crypt.closeProof
