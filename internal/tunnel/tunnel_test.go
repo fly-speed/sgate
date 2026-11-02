@@ -65,6 +65,10 @@ func newFixtureWithBackend(t *testing.T, ttl time.Duration, handle func(net.Conn
 }
 
 func newFixtureWithOptions(t *testing.T, ttl time.Duration, handle func(net.Conn), clientOpts, serverOpts Options) *fixture {
+	return newFixtureWithTransport(t, ttl, handle, clientOpts, serverOpts, false)
+}
+
+func newFixtureWithTransport(t *testing.T, ttl time.Duration, handle func(net.Conn), clientOpts, serverOpts Options, udp bool) *fixture {
 	t.Helper()
 	f := &fixture{}
 	var err error
@@ -126,6 +130,23 @@ func newFixtureWithOptions(t *testing.T, ttl time.Duration, handle func(net.Conn
 		}
 		f.server.ServeHTTP(w, r)
 	}))
+	endpoint := "ws" + strings.TrimPrefix(f.http.URL, "http") + "/tunnel"
+	var trust *tls.Config
+	if udp {
+		certificate := httptest.NewTLSServer(nil)
+		roots := x509.NewCertPool()
+		roots.AddCert(certificate.Certificate())
+		trust = &tls.Config{RootCAs: roots}
+		listener, e := ListenQUIC("127.0.0.1:0", certificate.TLS, serverOpts)
+		certificate.Close()
+		if e != nil {
+			t.Fatal(e)
+		}
+		server := &http.Server{Handler: f.http.Config.Handler}
+		go server.Serve(listener)
+		t.Cleanup(func() { server.Close() })
+		endpoint = "quic://" + listener.Addr().String() + "/tunnel"
+	}
 	f.local, err = net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -133,7 +154,8 @@ func newFixtureWithOptions(t *testing.T, ttl time.Duration, handle func(net.Conn
 	client, err := NewClient(ClientConfig{
 		Password:     testPassword,
 		Key:          key,
-		URL:          "ws" + strings.TrimPrefix(f.http.URL, "http") + "/tunnel",
+		URL:          endpoint,
+		TLSConfig:    trust,
 		ReconnectMin: 10 * time.Millisecond,
 		ReconnectMax: 30 * time.Millisecond,
 		Options:      clientOpts,

@@ -1,4 +1,4 @@
-// Package tunnel implements authenticated, encrypted, resumable TCP streams over WebSocket.
+// Package tunnel implements authenticated, encrypted, resumable TCP streams over WebSocket or UDP-based QUIC.
 package tunnel
 
 import (

@@ -1,8 +1,18 @@
 # sgate
 
-A Go TCP tunnel with two executables. `sgate-client` accepts local TCP connections and multiplexes them over one persistent, authenticated, AES-256-GCM encrypted WebSocket connection. `sgate-server` opens one TCP connection per stream to a fixed backend. Traffic flows in both directions.
+A Go TCP tunnel with two executables, supporting WS/WSS over TCP and QUIC over UDP. `sgate-client` accepts local TCP connections and multiplexes them over one persistent, authenticated, AES-256-GCM encrypted WebSocket connection. `sgate-server` opens one TCP connection per stream to a fixed backend. Traffic flows in both directions.
 
 See [the Chinese documentation](README.md) for all options, protocol details, and reverse proxy configuration. The [architecture and tunnel protocol document (Chinese)](docs/architecture.md) covers frame classes, command IDs, forward/reverse flows, encrypted JSON probes, ACKs, flow control, and replay.
+
+## UDP / QUIC tunnels
+
+Set `quic-listen = "0.0.0.0:8443"` on the server together with `tls-cert` and `tls-key`. Set `server = "quic://gateway.example.com:8443/tunnel"` on the client; use `tls-ca` for a private CA or self-signed certificate. Keep the existing key, password/account and backend configuration. Both peers must support QUIC. The TCP tunnel remains available, and TCP and UDP may use the same port number. Adding `tls-cert`/`tls-key` to a previously plaintext deployment also enables HTTPS/WSS on that TCP endpoint; update existing TCP clients to `wss://`.
+
+Open the UDP port in the firewall. QUIC requires TLS 1.3 and certificate verification against the URL hostname/IP. The URL requires an explicit port (1–65535). This is a private sgate QUIC protocol, not HTTP/3, and cannot pass through a regular TCP HTTP proxy or an HTTP/WebSocket-only reverse proxy. Management stays on the existing TCP HTTP/HTTPS endpoint. `quic-listen` defaults to empty (disabled); restart the entire process after changing it. In managed mode the single worker owns the UDP socket; do not list it as a TCP socket in acl_master.
+
+Multi-port mappings may mix `quic://`, `ws://` and `wss://` servers. Backend selection, authentication, reverse proxy consent, noise, heartbeat and session resumption retain their existing behavior. The application-facing listeners and targets remain TCP; this does not add UDP application forwarding or automatic TCP fallback.
+
+This implementation carries the existing HTTP Upgrade, WebSocket framing and session multiplexing over one reliable QUIC stream. QUIC provides UDP transport, retransmission and congestion control, but the single ordered stream still permits cross-stream waiting. Higher throughput is not guaranteed; compare throughput, latency and CPU on the deployment network. QUIC traffic totals count stream bytes, including HTTP/WS, application encryption and noise, but exclude QUIC/TLS, UDP/IP overhead and QUIC retransmissions. They are not directly comparable wire-bandwidth measurements.
 
 ## acl_master integration
 

@@ -83,6 +83,17 @@ func build(role string, fs *flag.FlagSet, stats *tunnel.Stats) (definition, erro
 		d.client, err = values.clientConfig(secret, options)
 	} else {
 		d.server, d.tls, err = values.serverConfig(secret, options)
+		d.quicListen = values.optionalText("quic-listen")
+		if err == nil && d.quicListen != "" {
+			if d.tls == nil {
+				return d, errors.New("quic-listen requires tls-cert and tls-key")
+			}
+			if _, port, e := net.SplitHostPort(d.quicListen); e != nil {
+				return d, errors.New("quic-listen must be host:port")
+			} else if p, e := strconv.Atoi(port); e != nil || p < 0 || p > 65535 {
+				return d, errors.New("quic-listen port must be in 0..65535")
+			}
+		}
 		d.accountsFile = values.accountPath()
 		if err == nil {
 			err = admin.ValidateReverseTunnelPorts(d.server.Accounts, d.listen)

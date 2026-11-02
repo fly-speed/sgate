@@ -243,18 +243,19 @@ function configURL(value, checkAddress = true) {
   try {
     url = new URL(value);
   } catch {
-    throw new Error(t("需要有效的 ws:// 或 wss:// URL"));
+    throw new Error(t("需要有效的 ws://、wss:// 或 quic:// URL"));
   }
   if (
-    !["ws:", "wss:"].includes(url.protocol) ||
+    !["ws:", "wss:", "quic:"].includes(url.protocol) ||
     !url.hostname ||
     url.username ||
     url.password ||
     url.hash
   )
-    throw new Error(t("需要不含账号或片段的 ws:// 或 wss:// URL"));
+    throw new Error(t("需要不含账号或片段的 ws://、wss:// 或 quic:// URL"));
+  if (url.protocol === "quic:" && !url.port) throw new Error(t("QUIC URL 必须指定 UDP 端口"));
   if (url.port === "0") throw new Error(t("URL 端口范围为 1～65535"));
-  if (!/^wss?:\/\//.test(value) || /\s/.test(value)) throw new Error(t("WebSocket URL 格式无效"));
+  if (!/^(wss?|quic):\/\//.test(value) || /\s/.test(value)) throw new Error(t("WebSocket URL 格式无效"));
   const addresses = checkAddress ? url.searchParams.getAll("addr") : [];
   if (addresses.length > 1) throw new Error(t("URL 不能重复指定 addr"));
   if (addresses.length) configAddress(addresses[0]);

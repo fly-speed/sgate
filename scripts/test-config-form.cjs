@@ -1735,3 +1735,15 @@ test("reverse TLS defaults off, supports tunnel or independent certificates, and
  row.listenTLS.checked=false;row.listenTLS.listeners.change();row.targetTLS.checked=false;row.targetTLS.listeners.change();
  assert.deepEqual(JSON.parse(JSON.stringify(account.reverse.read())),[{listen:"127.0.0.1:10022",target:"localhost:443"}]);
 });
+
+ test("QUIC endpoint validation requires an explicit UDP port", async () => {
+ const {context} = await page();
+ for (const value of ["quic://example.com:8443/tunnel", "quic://[::1]:443/tunnel?addr=localhost:80"]) {
+  context.quicTestURL = value;
+  assert.doesNotThrow(() => vm.runInContext("configURL(quicTestURL)", context));
+ }
+ for (const value of ["quic://example.com/tunnel", "quic://example.com:0/tunnel", "quic://user:pass@example.com:443/tunnel"]) {
+  context.quicTestURL = value;
+  assert.throws(() => vm.runInContext("configURL(quicTestURL)", context));
+ }
+ });

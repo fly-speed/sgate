@@ -18,6 +18,7 @@ type definition struct {
 	commonUsername, commonPassword string
 	commonAllowReverse             bool
 	listen                         string
+	quicListen                     string
 	client                         *tunnel.ClientConfig
 	proxies                        []clientProxy
 	server                         *tunnel.ServerConfig
@@ -29,15 +30,18 @@ type definition struct {
 	shared                         *sharedServer
 }
 type instance struct {
-	proxies  *clientProxyGroup
-	live     *tunnel.LiveSettings
-	cancel   context.CancelFunc
-	listener net.Listener
-	server   *tunnel.Server
-	http     *http.Server
-	done     chan struct{}
-	err      error
-	service  HTTPWorker
+	quicHTTP     *http.Server
+	quicListener net.Listener
+	quicDone     chan struct{}
+	proxies      *clientProxyGroup
+	live         *tunnel.LiveSettings
+	cancel       context.CancelFunc
+	listener     net.Listener
+	server       *tunnel.Server
+	http         *http.Server
+	done         chan struct{}
+	err          error
+	service      HTTPWorker
 }
 
 func (d definition) start(ctx context.Context, stats *tunnel.Stats) (*instance, error) {
@@ -111,6 +115,12 @@ func (d definition) start(ctx context.Context, stats *tunnel.Stats) (*instance, 
 		if d.wrapHTTP != nil {
 			handler = d.wrapHTTP(transport, s)
 		}
+		if e := i.startQUIC(d, s, d.tls, stats); e != nil {
+			s.Close()
+			l.Close()
+			cancel()
+			return nil, e
+		}
 		i.http = &http.Server{
 			Handler:           handler,
 			ReadHeaderTimeout: 10 * time.Second,
@@ -129,6 +139,7 @@ func (d definition) start(ctx context.Context, stats *tunnel.Stats) (*instance, 
 	return i, nil
 }
 func (i *instance) stop() error {
+	i.stopQUIC()
 	if i.service != nil {
 		e := i.service.Close()
 		<-i.done
@@ -174,6 +185,13 @@ func (d definition) startService(stats *tunnel.Stats) (*instance, error) {
 		d.shared.proxy.Store(s)
 		handler, tlsConfig, onStop = d.shared, d.shared.TLSConfig(d.tls), d.shared.Close
 	}
+	i := &instance{cancel: func() {}, server: s, done: make(chan struct{})}
+	if e := i.startQUIC(d, handler, tlsConfig, stats); e != nil {
+		s.Close()
+		return nil, e
+	}
+	stopHTTP := onStop
+	onStop = func() { i.stopQUIC(); stopHTTP() }
 	w, e := d.service.Configure(HTTPConfig{
 		Addresses:    d.listen,
 		TLS:          tlsConfig,
@@ -182,10 +200,11 @@ func (d definition) startService(stats *tunnel.Stats) (*instance, error) {
 		OnStop:       onStop,
 	})
 	if e != nil {
+		i.stopQUIC()
 		s.Close()
 		return nil, e
 	}
-	i := &instance{cancel: func() {}, listener: w.PrimaryListener(), server: s, service: w, done: make(chan struct{})}
+	i.listener, i.service = w.PrimaryListener(), w
 	go func() {
 		i.err = w.Wait()
 		close(i.done)
@@ -203,4 +222,34 @@ func startTunnelServer(cfg tunnel.ServerConfig) (*tunnel.Server, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// The UDP listener belongs to the worker, so shared-port proxy replacement can
+// retain it while routing new handshakes to the replacement tunnel server.
+func (i *instance) startQUIC(d definition, handler http.Handler, config *tls.Config, stats *tunnel.Stats) error {
+	if d.quicListen == "" {
+		return nil
+	}
+	listener, err := tunnel.ListenQUIC(d.quicListen, config, d.server.Options)
+	if err != nil {
+		return err
+	}
+	i.quicListener = listener
+	i.quicHTTP = &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: time.Minute, MaxHeaderBytes: 16 * 1024}
+	i.quicDone = make(chan struct{})
+	go func() {
+		defer close(i.quicDone)
+		if err := i.quicHTTP.Serve(stats.Listener(listener)); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
+			if logf := d.server.Options.Logf; logf != nil {
+				logf("QUIC listener stopped: %v", err)
+			}
+		}
+	}()
+	return nil
+}
+func (i *instance) stopQUIC() {
+	if i.quicHTTP != nil {
+		_ = i.quicHTTP.Close()
+		<-i.quicDone
+	}
 }

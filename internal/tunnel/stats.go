@@ -7,7 +7,9 @@ import (
 	"time"
 )
 
-// Stats counts actual tunnel TCP bytes, including HTTP, WS, TLS and padding.
+// Stats counts tunnel TCP bytes, including HTTP, WS, TLS and padding.
+// QUIC counts stream bytes instead: QUIC/TLS overhead and UDP retransmissions
+// are excluded. Business and noise counters retain their payload semantics.
 // Application sockets and a separate management listener are not counted.
 // With shared server management, bytes and connections on that HTTP/TLS
 // listener also include management traffic.

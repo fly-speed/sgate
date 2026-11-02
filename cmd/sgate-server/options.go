@@ -18,6 +18,7 @@ func parseOptions(args []string) (string, error) {
 	flag.String("key-file", "", "shared key file (defaults to SGATE_KEY environment variable)")
 	flag.String("password", "", "legacy authentication password (required unless accounts-file is set)")
 	flag.String("accounts-file", "", "tunnel accounts JSON file; relative to service configuration; created empty on startup if missing (disables legacy password authentication)")
+	flag.String("quic-listen", "", "optional QUIC UDP listen address; requires tls-cert and tls-key")
 	flag.String("tls-cert", "", "TLS certificate PEM file")
 	flag.String("tls-key", "", "TLS private key PEM file")
 	flag.Duration("session-ttl", 2*time.Minute, "retain disconnected sessions for this duration")

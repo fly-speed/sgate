@@ -81,8 +81,13 @@ func encodeProxyMappings(mappings []proxyMapping) (string, error) {
 		}
 		seen[number] = true
 		u, err := url.Parse(m.Server)
-		if err != nil || (u.Scheme != "ws" && u.Scheme != "wss") || u.Host == "" || u.User != nil || u.Fragment != "" {
-			return "", fmt.Errorf("第 %d 个映射的服务端地址必须为有效的 ws:// 或 wss:// URL", i+1)
+		if err != nil || (u.Scheme != "ws" && u.Scheme != "wss" && u.Scheme != "quic") || u.Host == "" || u.User != nil || u.Fragment != "" {
+			return "", fmt.Errorf("第 %d 个映射的服务端地址必须为有效的 ws://、wss:// 或 quic:// URL", i+1)
+		}
+		if u.Scheme == "quic" {
+			if err := validateConfigEdit("server", m.Server); err != nil {
+				return "", err
+			}
 		}
 		if m.Addr != "" {
 			host, port, err := net.SplitHostPort(m.Addr)

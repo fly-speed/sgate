@@ -53,9 +53,10 @@ func configurationRules() map[string]configRule {
 	}
 	add("master_type", configRule{Type: "enum", Choices: []string{"sock", "inet", "unix"}, Hint: "服务套接字类型：sock、inet 或 unix。"})
 	add("listen admin_listen", configRule{Type: "listen", Required: true, Hint: "格式为 主机:端口；IPv6 使用 [地址]:端口；端口为 0～65535，0 表示自动分配。"})
+	add("quic-listen", configRule{Type: "listen", Hint: "可选 UDP 监听地址，需配置 tls-cert/tls-key；更改后重启进程。"})
 	add("target", configRule{Type: "address", Required: true, Hint: "IP或域名:端口，端口范围 1～65535；IPv6 使用 [地址]:端口。"})
 	add("addr", configRule{Type: "address", Hint: "留空保留 URL 中的 addr；URL 也无 addr 时使用默认后端。填写 IP或域名:端口，端口范围 1～65535。"})
-	add("server", configRule{Type: "url", Hint: "ws:// 或 wss:// URL，例如 wss://example.com:443/tunnel；配置多端口映射时可留空。"})
+	add("server", configRule{Type: "url", Hint: "ws://、wss:// 或 quic:// URL，例如 wss://example.com:443/tunnel；配置多端口映射时可留空。"})
 	add("allowed-targets", configRule{Type: "addresses", Hint: "逗号分隔的 IP或域名:端口；端口范围 1～65535；留空禁止客户端选后端。"})
 	add("master_service", configRule{Type: "listeners", Required: true, Hint: "框架监听格式：IP|端口，多项用逗号分隔，IPv6 用 [地址]|端口；TCP 端口范围 1～65535。unix 类型使用绝对套接字路径。"})
 	add("path", configRule{Type: "route", Hint: "以 / 开头的 URL 路径，不含 ? 或 #；留空使用 /tunnel；不能占用 /admin 管理路径。"})
@@ -155,8 +156,11 @@ func validateConfigEdit(key, value string) error {
 		return nil
 	case "url":
 		u, e := url.Parse(value)
-		if e != nil || (u.Scheme != "ws" && u.Scheme != "wss") || u.Hostname() == "" || u.User != nil || u.Fragment != "" {
-			return errors.New("需要有效的 ws:// 或 wss:// URL")
+		if e != nil || (u.Scheme != "ws" && u.Scheme != "wss" && u.Scheme != "quic") || u.Hostname() == "" || u.User != nil || u.Fragment != "" {
+			return errors.New("需要有效的 ws://、wss:// 或 quic:// URL")
+		}
+		if u.Scheme == "quic" && u.Port() == "" {
+			return errors.New("QUIC URL 必须指定 UDP 端口")
 		}
 		if u.Port() != "" {
 			if _, e := strconv.ParseUint(u.Port(), 10, 16); e != nil || u.Port() == "0" {
@@ -212,7 +216,7 @@ func validateFormAddress(value string, listen bool) error {
 func argumentOptions(role string) map[string]configRule {
 	options := map[string]configRule{}
 	clientOnly := " username proxies proxies-file server addr send-addr allow-reverse tls-ca reconnect-min reconnect-max offline-timeout "
-	serverOnly := " accounts-file target allowed-targets path tls-cert tls-key session-ttl max-sessions "
+	serverOnly := " quic-listen accounts-file target allowed-targets path tls-cert tls-key session-ttl max-sessions "
 	for key, rule := range configRules {
 		if strings.Contains(key, "_") || key == "master_args" || strings.HasPrefix(key, "app_") {
 			continue

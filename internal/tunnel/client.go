@@ -122,6 +122,14 @@ func (c *Client) dial(ctx context.Context, id string, resume bool) (*websocket.C
 			return stats.Conn(conn), nil
 		}
 	}
+	if u.Scheme == "quic" {
+		address, hostname := u.Host, u.Hostname()
+		d.Proxy = nil // A TCP HTTP proxy cannot carry this private UDP protocol.
+		d.NetDialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return c.dialQUIC(ctx, address, hostname)
+		}
+		u.Scheme = "ws" // Reuse framing and authentication over the QUIC stream.
+	}
 	ws, response, err := d.DialContext(ctx, u.String(), headers)
 	if err != nil {
 		err = safeDialError(err)

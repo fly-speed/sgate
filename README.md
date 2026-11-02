@@ -1,6 +1,6 @@
 # sgate
 
-Go 编写的通用 TCP 加密通道。客户端和服务端使用标准 HTTP Upgrade 建立一条持久 WebSocket 连接，在其中加密、复用多个双向 TCP 流。应用只需要连接本地 TCP 端口，无需修改协议。
+Go 编写的通用 TCP 加密通道，支持 TCP 上的 WS/WSS 和 UDP 上的 QUIC 传输。客户端和服务端使用标准 HTTP Upgrade 建立一条持久 WebSocket 连接，在其中加密、复用多个双向 TCP 流。应用只需要连接本地 TCP 端口，无需修改协议。
 
 ```text
 应用客户端 -- TCP --> sgate-client == 加密 WebSocket ==> sgate-server -- TCP --> 应用服务器
@@ -8,6 +8,34 @@ Go 编写的通用 TCP 加密通道。客户端和服务端使用标准 HTTP Upg
 ```
 
 实现说明：[整体架构与隧道协议](docs/architecture.md)。
+
+## UDP / QUIC 隧道
+
+客户端可使用 `quic://服务器:端口/tunnel`，服务端通过 `quic-listen` 增加 UDP 监听。既有 TCP 隧道入口保留；TCP 和 UDP 可以使用同一个端口号。两端必须升级到支持 QUIC 的版本。
+
+服务端配置（其余 key-file、password 或 accounts-file、target 等沿用原配置）：
+
+```ini
+quic-listen = "0.0.0.0:8443"
+tls-cert = "/path/to/server.crt"
+tls-key = "/path/to/server.key"
+```
+
+客户端配置：
+
+```ini
+server = "quic://gateway.example.com:8443/tunnel"
+# 私有 CA 或自签名证书时设置；公有 CA 证书可省略。
+tls-ca = "/path/to/ca.crt"
+```
+
+也可使用 `sgate-server -quic-listen :8443 -tls-cert ... -tls-key ...` 和 `sgate-client -server quic://gateway.example.com:8443/tunnel`；其他必需参数照常提供。多端口映射中的 `server` 同样支持 `quic://`，可与 WS/WSS 映射混用；反向代理仍需配置账号映射，并由客户端显式开启 `allow-reverse`。路径和 `addr` 选择规则、账号权限、加密、心跳、白噪音、离线缓存及会话恢复沿用原逻辑。
+
+这些 `tls-cert` / `tls-key` 同时用于既有 TCP 入口；从无证书的 WS 配置新增证书时，该入口会启用 HTTPS/WSS，原有 TCP 客户端应相应改用 `wss://`。
+
+部署时放行对应 **UDP** 端口。QUIC 强制 TLS 1.3 并验证证书，证书必须覆盖 URL 的主机名或 IP；没有跳过校验的开关。`quic://` 必须显式指定 1～65535 的端口，不能经过普通 TCP HTTP 代理或仅支持 HTTP/WebSocket 的反向代理。它是 sgate 私有 QUIC 协议，并非 HTTP/3；管理后台继续通过原 TCP HTTP/HTTPS 入口访问。`quic-listen` 默认为空，关闭 UDP；修改其监听地址时重启整个进程。托管模式由单个 sgate worker 绑定 UDP 套接字，不向 acl_master 声明为 TCP 监听项。
+
+当前实现把既有 HTTP Upgrade、WebSocket 帧和会话复用协议承载在一条 QUIC 双向流上，底层传输使用 UDP，由 QUIC 负责丢包重传、拥塞控制和有序交付；代理两端的业务接口仍为 TCP，不提供 UDP 业务端口转发，也不会自动降级为 TCP。单条有序流仍可能产生跨业务流等待，不能保证在所有网络上更快；需要按目标网络对吞吐、延迟及 CPU 使用量进行对照测试。统计中的 QUIC 总收发字节为流层计数，包含 HTTP/WS、应用加密和噪音，不包含 QUIC/TLS、UDP/IP 包头以及 QUIC 重传开销；不能据此直接比较两种传输的线上带宽。
 
 ## 功能
 

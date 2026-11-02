@@ -61,6 +61,7 @@ func appFlags(role string) *flag.FlagSet {
 		fs.String("accounts-file", "", "")
 		fs.String("allowed-targets", "", "")
 		fs.String("path", "/tunnel", "")
+		fs.String("quic-listen", "", "")
 		fs.String("tls-cert", "", "")
 		fs.String("tls-key", "", "")
 		fs.Duration("session-ttl", 2*time.Minute, "")

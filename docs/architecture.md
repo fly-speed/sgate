@@ -2,6 +2,8 @@
 
 本文依据当前仓库实现编写，协议标识为 `sgate-v1`。重点说明客户端与服务端之间的数据分类、命令、收发顺序、可靠性和生命周期；部署参数见 [README](../README.md)。文中的“包”是逻辑协议帧，不等同于 TCP/IP 网络包。
 
+UDP 传输入口为 `quic://`，服务端以 `quic-listen` 监听 UDP，ALPN 为 `sgate-quic-v1`，TLS 最低版本为 1.3。每条 QUIC 连接仅接收一条双向流，通过 `quicStreamConn` 适配 `net.Conn`，在该流上复用现有 HTTP Upgrade、WebSocket 消息、认证及会话恢复逻辑；下文的逻辑协议同样适用。它不是 HTTP/3，不提供原始 UDP 业务转发，且当前仍有单条有序流导致的跨业务流等待。UDP 监听属于应用 worker；共享入口更新仅替换其目标处理器，整进程关闭时释放 QUIC transport 和 UDP socket。关闭单条流时先发送 FIN，并在有界等待期间保留 QUIC 重传机会，避免立即关闭连接丢失最终探测响应。
+
 ## 1. 当前实现的结论
 
 长连接中的**业务负载和流控制命令已经区分**，但使用统一帧头中的 `op` 字段区分，共用同一条双向 WebSocket。没有为每个业务 TCP 流各建一条 WebSocket，也没有独立的长连接命令通道。
