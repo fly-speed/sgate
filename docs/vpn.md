@@ -1,6 +1,6 @@
 # 独立 IPv4 VPN：sgate-vpn
 
-`sgate-vpn` 是 sgate 新增的独立 VPN 入口，不依赖 OpenVPN。原有 `sgate-client` / `sgate-server` TCP 代理继续保留。VPN 使用独立 UDP 监听及 ALPN `sgate-vpn-v1`，IP 数据通过 QUIC DATAGRAM 发送，不复用有序业务流；认证控制流不承载 IP 数据。
+`sgate-vpn` 是 sgate 新增的独立 VPN 入口，不依赖 OpenVPN。原有 `sgate-client` / `sgate-server` TCP 代理继续保留。VPN 默认使用独立 QUIC UDP 监听及 ALPN `sgate-vpn-v1`，IP 数据通过 DATAGRAM 发送。另支持 TLS/TCP 和 WSS 可靠传输，可同时监听并由客户端手动选择，均使用相同的共享密钥、证书校验和虚拟网络配置。
 
 首版支持 macOS/Linux 服务端及客户端、IPv4、固定客户端虚拟地址、多客户端、自动 TUN/路由/DNS、Linux 转发/NAT、macOS PF NAT、退出清理和重连。除独立 CLI 外，现已集成至 `sgate-client` / `sgate-server`，可通过现有管理网页配置并随服务进程运行。Windows、IPv6 转发、按账号授权和在线配置不在此版本内。
 
@@ -18,17 +18,46 @@ VPN 参数统一以 `vpn-` 开头，不使用独立 CLI 示例中的 `role`、`s
 
 点击现有“保存并应用”按钮后生效；单独保存会保留待应用状态。客户端进程启动后不会自动启动 VPN；应用配置会断开原代理/VPN连接并恢复旧网络，随后需在实时概览点击“启动 VPN”。启动使用已应用的配置，未保存或未应用的修改不参与启动。“停止 VPN”会等待连接退出、路由及 DNS 清理和 TUN 关闭，再返回结果；不会停止原代理或管理界面。启停状态不写入配置，进程重启后仍需手动启动。普通连接故障在手动启动后仍会自动重连，点击停止才结束重连并清理网络。服务端共享管理入口保持在线，VPN 参数未改变时保留现有 VPN，改变时停止旧 VPN 并启动新 VPN。`disabled` 停用并恢复网络。CLI 对同名参数的覆盖仍优先，界面会标注。
 
-客户端“独立 VPN”分组在 `vpn-mode` 下提供“测试 VPN 连接”按钮；选择 `only` 或 `both` 后即可使用，不要求先保存或应用。测试使用当前表单中的 VPN 地址、证书/CA、密钥、子网、MTU 和虚拟 IP；命令行覆盖项仍优先。测试返回配置、DNS 解析、QUIC/TLS、认证或数据报回显阶段的结果、耗时和错误，修改参数后隐藏旧结果。
+客户端“独立 VPN”分组在 `vpn-mode` 下提供“测试 VPN 连接”按钮；选择 `only` 或 `both` 后即可使用，不要求先保存或应用。测试使用当前表单中的 VPN 地址、证书/CA、密钥、子网、MTU 和虚拟 IP；命令行覆盖项仍优先。测试返回配置、DNS 解析、QUIC/TLS 或 TCP/TLS、认证或数据帧回显阶段的结果、耗时和错误，修改参数后隐藏旧结果。
 
-测试只建立独立 QUIC 连接完成证书/共享密钥认证与小型 DATAGRAM 回显，不创建 TUN、不配置路由/DNS、不保存配置、不占用或替换虚拟 IP。已有在线连接不会中断；虚拟 IP 已占用或服务端达到客户端上限时会单独提示，但连通性测试仍可成功。测试成功不代表 TUN、NAT、DNS 接管或互联网转发已经正常，完整 VPN 仍需实际业务验证。
+测试按所选协议建立独立连接，完成证书/共享密钥认证与小型 VPN 数据帧回显，不创建 TUN、不配置路由/DNS、不保存配置、不占用或替换虚拟 IP。已有在线连接不会中断；虚拟 IP 已占用或服务端达到客户端上限时会单独提示，但连通性测试仍可成功。测试成功不代表 TUN、NAT、DNS 接管或互联网转发已经正常，完整 VPN 仍需实际业务验证。
 
 无会话测试需要服务端也更新至支持该功能的版本。正常 VPN 的原有认证与数据协议保持不变；服务端挑战包含测试能力标识；较旧服务端未声明此标识时，认证失败会提示核对实际监听端口的程序版本和密钥。新版服务端会明确反馈共享密钥不匹配，并记录拒绝日志；子网和 MTU 不一致会返回服务端期望值。旧服务端会拒绝测试认证，客户端会提示检查密钥或升级服务端，不会退回建立普通 VPN 会话来测试。
 
-实时概览显示 VPN 的启动/连接/重连/失败状态、TUN、监听或远端地址、虚拟地址、活跃连接、IP 收发字节及丢弃数。带宽图选择 `VPN IP` 查看全部客户端的 VPN IP 负载（不含 QUIC/UDP/IP 封装开销，不按原代理的 IP 筛选）；原 TCP/QUIC 代理曲线保持其原有统计口径。VPN 重建时它自己的计数清零。
+实时概览显示 VPN 的启动/连接/重连/失败状态、TUN、监听或远端地址、虚拟地址、活跃连接、IP 收发字节及丢弃数。带宽图选择 `VPN IP` 查看全部客户端的 VPN IP 负载（不含 TLS、QUIC、WebSocket 及外层 TCP/UDP/IP 封装开销，不按原代理的 IP 筛选）；原 TCP/QUIC 代理曲线保持其原有统计口径。VPN 重建时它自己的计数清零。
 
 运行权限不足、端口被占用或路由/DNS 操作失败时，VPN 状态会显示错误，管理网页继续运行；“配置已应用”不代表 VPN 已连通，应检查实时状态。修复后客户端点击“启动 VPN”重试，服务端再次应用可重试；客户端手动启动后连接失败会自动退避重连。配置候选校验不会创建 TUN、修改路由或启动 VPN。
 
 独立 VPN 的权限要求同样适用于集成模式：服务端与客户端均支持 macOS/Linux；进程需要 TUN 与网络管理权限（现有模板关闭降权/chroot）。通过网页更改路由/DNS 属于本机网络管理操作，开启前先停止其他全隧道 VPN。安装及本次自动化验证不会启用 VPN，也不会改动当前网络。
+
+## TCP / WSS 备用传输
+
+两端升级新二进制和管理页面后，在服务端“独立 VPN”配置中增加：
+
+```ini
+# Keep QUIC/UDP available.
+vpn-listen = 0.0.0.0:8444
+# TCP and WSS share this separate TLS listener.
+vpn-tcp-listen = 0.0.0.0:8444
+```
+
+TCP 与 UDP 可使用相同数字端口；该 TCP 端口不能被代理、管理服务或其他进程占用。放行云端及主机防火墙的 **TCP 8444**；原 QUIC 需要的 UDP 规则继续保留。若仅使用可靠传输，可将 `vpn-listen` 留空并保留 `vpn-tcp-listen`。新监听默认留空，升级不会自动开放 TCP 端口。
+
+客户端在同一 `vpn-server` 字段中选择一种方式：
+
+```ini
+vpn-server = tcp://i18n.webcool.cn:8444/vpn
+# Alternatively: wss://i18n.webcool.cn:8444/vpn
+# Original mode: quic://i18n.webcool.cn:8444/vpn
+```
+
+`tcp://` 使用 TLS 1.3 加密并升级为原生 VPN 帧协议，**不是明文 TCP**；`wss://` 在 TLS 上通过标准 WebSocket 二进制消息承载 VPN 帧。两者共用 `/vpn` 路径和同一证书/密钥配置，均要求显式端口，不支持 `ws://`、跳过证书验证或 URL 中携带认证信息。WSS 可经支持 WebSocket Upgrade 的 HTTPS 反向代理转发；使用原域名进行 SNI 和证书校验，不受 HTTP_PROXY 环境变量影响。
+
+先用“测试 VPN 连接”确认所选协议、TLS 与共享密钥认证通过，再保存并应用客户端配置，在实时概览手动启动 VPN。切换协议需要结束当前 VPN 会话并重建；现有业务连接会断开。当前采用手动选择，没有静默自动回退。概览显示实际传输方式；服务端额外显示 TCP/WSS 监听地址。客户端手动启停、网络清理、重连和 VPN 白噪音均适用于新增协议。
+
+可靠传输直接承载完整 IP 包，不沿用 UDP 的 1000 字节分片、两秒重组过期及 MSS 960 限制。外层 TCP 恢复丢失的数据，避免内层 TCP 直接承担每个外层丢包的恢复；仍可能出现 TCP 队头阻塞及内外层 TCP 相互影响，不保证所有网络条件下更快。原 QUIC 握手与数据格式不变，新客户端选择 `quic://` 时可继续连接旧 VPN 服务端；TCP/WSS 要求新版服务端启用监听。新版服务端可同时接入三种传输，虚拟 IP 唯一性和客户端数量限制跨传输统一生效。
+
+独立 `sgate-vpn` CLI 对应服务端 `tcp-listen`（可与 `listen` 同时配置）、客户端 `server` URL；其余参数相同。Linux 隔离测试脚本新增 `--transport quic|tcp|wss`，可分别使用 `--delay-ms 100 --loss-percent 2` 比较同条件弱网数据转发、完整性、启停和清理。此脚本需要 Linux/root/network namespace，macOS 本轮没有实测该特权路径。
 
 ## 编译、安装
 
@@ -253,3 +282,42 @@ python3 scripts/diagnose-vpn.py --label sgate --output /tmp/gmail-sgate-body.jso
 诊断 TCP 套接字同时绑定测试 TUN 网卡与虚拟源 IPv4，返回 `local_address` / `remote_address`，避免系统分流让测试流量绕过 sgate。每项记录首次响应时间、该时间段的 VPN IP 收发字节、`body_was_gzip_decoded`；Go 自动 gzip 解压后的正文大小与隧道 IP 字节不能直接比较。HTTP 200 后读正文超时表示响应未在测试期限内完成，不等同于认证失败或 Gmail 不可达；这类报告仍保留部分字节和具体错误。客户端零丢包计数不排除服务端发送方向或中间网络丢包。
 
 服务端实际排查曾观察到累计 1877 个过期丢弃、28 个满队列丢弃和约 3.43 KiB 拥塞窗口。这些不是同一请求的精确因果统计，但显示固定 250 ms 期限会在该链路大量主动丢弃。现在两端默认关闭时间过期，保留每连接 64 包上限、按流 DRR、公平入队及 QUIC 准入限制；满队列时仍从最长流淘汰最旧包。`vpn-queue-max-age` 可在两端配置及网页独立设置；独立 CLI 对应 `queue-max-age`。升级旧配置缺少此项时默认 0，不需要先补配置才能修正。启用过期策略仍可能牺牲 TCP 有效吞吐，不能仅凭 ping RTT 下降判定改善。
+
+### 无 root、无系统路由变更的用户态隔离测试
+
+`tools/vpn-diagnose` 是独立 Go 模块，使用 WireGuard 项目提供的用户态 TCP/IP 栈，将生成的 IP 包交给现有 `vpn.RunClient`；实际隧道仍是 sgate QUIC。它不创建系统 TUN、不调用网络配置函数，也不需要停止当前 OpenVPN。额外的 netstack 依赖只在此工具模块中，不进入正式客户端/服务端依赖。配置、共享密钥和 CA 文件须对当前用户可读；程序不输出密钥，不使用浏览器 cookies。已有同虚拟 IP 会话时拒绝运行，不抢占在线 sgate 客户端。
+
+```sh
+go -C tools/vpn-diagnose build -mod=mod -o /tmp/sgate-userspace-diagnose .
+/tmp/sgate-userspace-diagnose \
+  -config /opt/soft/sgate/conf/sgate-client.cf \
+  -output /tmp/sgate-userspace-system.json -dns-source system -http h2
+```
+
+`-dns-source vpn` 使用配置中的 VPN DNS，通过用户态隧道解析测试目标，帮助对比本机 `/etc/resolver` 规则的影响；`system` 使用系统 DNS 后将所选 IPv4 固定给测试连接。`-http h1|h2|h3` 分别控制 HTTP 版本，h3 强制通过用户态 UDP/QUIC 且不回退。`-only mail.google.com` 可只测试一个允许的主机；`-reference <旧报告>` 固定旧报告的 `target_ips`，避免两次 DNS 不同。内层 H3 固定使用 1200 字节 QUIC 初始包且关闭路径 MTU 扩展，以减少对照变量。仍会经过当前 VPN 的 IP 分片机制。
+
+报告记录每个请求的虚拟源地址、目标地址、协议、状态、首次响应、完整正文/采样上限、gzip 解压情况及该时间窗口的 VPN IP 字节。包观察仅记录 TCP/UDP/ICMP 计数及有限的 ICMP 错误类型、代码、MTU 和引用目标，不记录数据包内容。`-assets` 尝试从公开登录 HTML 提取最多 6 个允许域名的外部 script/stylesheet；`sampled_assets=0` 时没有验证外部脚本，不能将公开登录页通过视为登录后 Gmail 应用通过。
+
+2026-11-03 的实际测试：系统 DNS 下公开 Gmail/Accounts 正文约 953 KB，HTTP/2 分别在约 12.7/10.6 秒完整接收；VPN 内 DNS 下分别约 19.1/21.1 秒。两组客户端队列过期、满队列和总丢弃均为 0。顺序测量不足以断言某个 DNS 更快。强制 H3 时 Accounts 可完整接收，选中的 Gmail IP `108.177.125.18` 握手失败；相同 IP 在 OpenVPN 的本机路由对照中也出现远端拒绝，因此不能把该 H3 结果单独归因为 sgate。用户态单目标复测未收到 ICMP MTU 错误。未使用登录态、未执行浏览器 JavaScript、未验证真实系统 TUN/DNS 接管后的浏览器行为。
+
+#### 浏览器真实资源隔离测试
+
+工具的 `-browser-proxy` 模式可让浏览器沿用登录态，通过同一真实 VPN 会话测试 Gmail；TLS 仍由浏览器与 Google 端到端校验，工具不解密或记录 Cookie、URL 参数、HTTP 正文或邮件。仅监听 `127.0.0.1`，只允许 Google/Gstatic/Googleusercontent/Googleapis 域名的 HTTPS CONNECT，并限制并发和报告条目数。
+
+```sh
+/tmp/sgate-userspace-diagnose \
+  -config /opt/soft/sgate/conf/sgate-client.cf \
+  -output /tmp/sgate-browser.json -browser-proxy -dns-source system -budget 12m
+```
+
+启动后显示临时 PAC URL。先记录浏览器原代理设置，再暂时使用该 PAC；仅相关 Google 域名经过隔离会话，其余域名直连。结束测试必须恢复浏览器原代理设置，再用 SIGINT 停止工具。工具不自动修改或恢复浏览器设置。`-proxy-listen 127.0.0.1:端口` 可指定回环端口；默认随机分配。代理采用总测试预算，不对每个隧道另设短截止时间，避免把慢请求人工截断后误诊为产品故障。`-dns-source` 同时适用于代理，每个域名固定首次选中的公开 IPv4。`-asset-url` 可单独 GET 已观察到的公开 `mail-static` 资源，拒绝账号凭据、查询参数和范围外目标。
+
+2026-11-03 浏览器复测真实邮箱加载时，主脚本及样式请求失败，约 4.22 分钟后 Gmail 显示暂时性错误，帮助链接带 `error=1010`，技术数字代码为 4。Service Worker 的错误只表示资源请求失败，不能单独证明缓存损坏。一个实际公开主脚本共 1,394,702 字节：经 sgate、目标 `142.251.41.5` 完整传输约 98.45 秒；经同一美国服务器的临时 SSH/TCP 通道并固定同一 Google IP，约 6.71 秒完整传输。系统 DNS 的另一目标 `108.177.125.83` 经 sgate 在 120 秒收到 1,115,194 字节后超时。短请求/公开登录页通过不足以代表此场景通过。
+
+单脚本采样约 42 秒内，服务端 QUIC 丢包判定从 5194 增至 5297，应用队列满丢弃保持 1106、过期丢弃保持 0，拥塞窗口采样约 4.5–6.1 KiB。服务器 CPU 约 97% 空闲；另外 20 秒内核采样中 UDP 错误和 eth0 qdisc 丢包未增长，8444 套接字收发缓冲各 14 MiB、套接字丢弃为 0。历史累计丢包不是本次请求的丢包率。服务器 TCP 算法为 BBR；所用 quic-go v0.54.0 的发送实现选择 Reno，不能通过 Linux `tcp_congestion_control` 设置改变 QUIC 算法。
+
+这些证据将瓶颈缩小到 sgate 下载传输方向；高丢包/乱序下外层 QUIC 与内层 TCP 的拥塞响应是有依据的候选原因，但尚未区分运营商 UDP 限制、真实链路丢包、乱序以及用户态 TCP 栈差异，也未量化算法差异的贡献。上述诊断阶段增加的是诊断能力和既有 QUIC 丢包/PTO 计数显示，当时尚未实现 TCP/WSS 备用传输，也没有将传输瓶颈标记为已修复。首轮代理曾设置两分钟截止时间，其浏览器部分传输错误已排除，不能作为产品自然断流的证据。
+
+隔离诊断工具可用 `-server tcp://域名:8444/vpn` 或 `-server wss://域名:8444/vpn` 临时覆盖现有客户端的 VPN 地址，不保存配置，便于在服务端升级后对照 Gmail 的真实资源；其余密钥、CA、子网和 MTU 继续取自原配置。
+
+新增传输的本机验证已通过：主项目竞态回归、TCP/WSS/QUIC 混合接入、认证与证书拒绝、重连、白噪音、异常帧和停机清理；另以两端用户态 TCP/IP 栈通过三种传输完整下载约 2 MiB HTTP 资源并完成 64 KiB 上传回显。可运行 `go -C tools/vpn-diagnose test -mod=mod -race ./...` 复测，该测试不创建系统 TUN 或修改路由。已生成 macOS arm64 与 Linux amd64 二进制；尚未部署美国服务器，也未用新 TCP/WSS 模式验收真实 Gmail。

@@ -39,7 +39,8 @@ func Settings(role string) []Setting {
 	}
 	if role == "server" {
 		return append(s,
-			Setting{"vpn-listen", "0.0.0.0:8444", "独立 QUIC UDP 监听，不能与 quic-listen 共用 UDP 端口。"},
+			Setting{"vpn-listen", "0.0.0.0:8444", "独立 QUIC UDP 监听，不能与 quic-listen 共用 UDP 端口；配置 TCP 监听后可留空以关闭 UDP。"},
+			Setting{"vpn-tcp-listen", "", "可选 TLS/TCP 与 WSS 共用监听，例如 0.0.0.0:8444；可与 VPN UDP 使用相同数字端口，不能与其他 TCP 服务共用。"},
 			Setting{"vpn-tls-cert", "", "VPN 服务器证书；留空复用 tls-cert。"},
 			Setting{"vpn-tls-key", "", "VPN 证书私钥；留空复用 tls-key。"},
 			Setting{"vpn-max-clients", "64", "最多同时认证客户端数，1～254；各客户端须配置不同虚拟 IP。"},
@@ -47,7 +48,7 @@ func Settings(role string) []Setting {
 			Setting{"vpn-allow-private", "false", "允许访问服务器侧私网；始终禁止客户端互访。"})
 	}
 	return append(s,
-		Setting{"vpn-server", "", "VPN 服务端 quic://证书域名:8444/vpn；独立于代理 server。"},
+		Setting{"vpn-server", "", "VPN 服务端 quic://、tcp:// 或 wss://证书域名:8444/vpn；tcp 也强制 TLS 加密。独立于代理 server，手动切换传输。"},
 		Setting{"vpn-client-ip", "10.77.0.2", "该客户端固定虚拟 IPv4 地址，不能与其他客户端重复。"},
 		Setting{"vpn-tls-ca", "", "附加信任 CA；留空复用 tls-ca。自签名证书需要显式信任。"},
 		Setting{"vpn-routes", "0.0.0.0/1,128.0.0.0/1", "逗号分隔 IPv4 路由；服务端外层地址保留物理出口。"},
@@ -153,9 +154,13 @@ func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Pref
 		}
 		p.Config.TLS.Certificates = []tls.Certificate{cert}
 		p.Config.Address = get("vpn-listen")
+		p.Config.TCPListen = get("vpn-tcp-listen")
+		if p.Config.Address == "" && p.Config.TCPListen == "" {
+			return nil, invalidFields("至少配置一个 VPN 监听：vpn-listen (QUIC/UDP) 或 vpn-tcp-listen (TLS/TCP、WSS)。", "vpn-listen", "vpn-tcp-listen")
+		}
 		p.Config.MaxClients = fs.Lookup("vpn-max-clients").Value.(flag.Getter).Get().(int)
 		p.Config.AllowPrivate = get("vpn-allow-private") == "true"
-		if q := get("quic-listen"); q != "" {
+		if q := get("quic-listen"); q != "" && p.Config.Address != "" {
 			_, a, e1 := net.SplitHostPort(q)
 			_, b, e2 := net.SplitHostPort(p.Config.Address)
 			if e1 == nil && e2 == nil && a == b {
@@ -164,15 +169,17 @@ func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Pref
 		}
 	} else {
 		u, err := url.Parse(get("vpn-server"))
-		if err != nil || u.Scheme != "quic" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/vpn") {
-			return nil, invalidFields("启用 VPN 需要有效的 vpn-server，例如 quic://vpn.example.com:8444/vpn；不能使用代理的 server 地址代替。", "vpn-mode", "vpn-server")
+		if err != nil || (u.Scheme != "quic" && u.Scheme != "tcp" && u.Scheme != "wss") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/vpn") {
+			return nil, invalidFields("启用 VPN 需要有效的 vpn-server，例如 quic://、tcp:// 或 wss://vpn.example.com:8444/vpn；TCP/WSS 需要服务端启用 vpn-tcp-listen。", "vpn-mode", "vpn-server")
 		}
 		host, port, err := net.SplitHostPort(u.Host)
 		if err != nil || host == "" {
-			return nil, invalidFields("vpn-server 必须包含有效的服务器主机名和 UDP 端口，例如 quic://vpn.example.com:8444/vpn。", "vpn-mode", "vpn-server")
+			return nil, invalidFields("vpn-server 必须包含有效的服务器主机名和端口，例如 quic://vpn.example.com:8444/vpn。", "vpn-mode", "vpn-server")
 		}
 		p.Host, p.Port = host, port
 		p.Config.Address = u.Host
+		p.Config.Transport = u.Scheme
+		p.Config.Host = u.Host
 		p.Config.TLS.ServerName = host
 		roots, err := x509.SystemCertPool()
 		if err != nil {

@@ -181,6 +181,9 @@ service sgate-server {
     vpn-noise-idle-after = 1s
     # Separate QUIC UDP listener; cannot share a UDP port with quic-listen.
     vpn-listen = 0.0.0.0:8444
+    # Optional shared TLS/TCP and WSS listener; may use the same numeric port as UDP.
+    # Empty disables TCP/WSS. Set vpn-listen empty for TCP/WSS only.
+    vpn-tcp-listen = ''
     # VPN server certificate PEM; empty reuses tls-cert.
     vpn-tls-cert = ''
     # VPN certificate private key PEM; empty reuses tls-key.

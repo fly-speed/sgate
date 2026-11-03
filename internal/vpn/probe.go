@@ -65,12 +65,15 @@ func Probe(parent context.Context, config Config) (result ProbeResult) {
 		return result
 	}
 	result.Stage = "quic"
-	conn, err := quic.DialAddr(ctx, c.Address, c.TLS, quicConfig())
+	if c.Transport != "quic" {
+		result.Stage = "tls"
+	}
+	conn, err := dialConnection(ctx, c)
 	if err != nil {
 		return fail(err)
 	}
 	defer conn.CloseWithError(0, "VPN test completed")
-	if !conn.ConnectionState().SupportsDatagrams {
+	if !conn.supportsPackets() {
 		return fail(errors.New("server did not negotiate QUIC DATAGRAM"))
 	}
 	result.Stage = "auth"
@@ -138,9 +141,12 @@ func Probe(parent context.Context, config Config) (result ProbeResult) {
 	result.AddressInUse = reply.AddressInUse
 	result.ClientLimitReached = reply.ClientLimitReached
 	result.Detail = "QUIC、证书、共享密钥认证及 DATAGRAM 回显通过；未测试 TUN、NAT 或互联网转发。"
+	if c.Transport != "quic" {
+		result.Detail = "TLS/TCP、共享密钥认证及 VPN 数据帧回显通过；未测试 TUN、NAT 或互联网转发。"
+	}
 	return result
 }
-func (s *Server) serveProbe(ctx context.Context, conn *quic.Conn, control *quic.Stream, challenge string, h hello, ip netip.Addr) {
+func (s *Server) serveProbe(ctx context.Context, conn connection, control controlChannel, challenge string, h hello, ip netip.Addr) {
 	s.mu.Lock()
 	occupied := s.peers[ip] != nil
 	full := len(s.peers) >= s.cfg.MaxClients

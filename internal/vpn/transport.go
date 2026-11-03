@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"net/netip"
 	"strings"
 	"sync"
@@ -21,8 +22,8 @@ type networkSetupError struct{ err error }
 func (e *networkSetupError) Error() string { return "configure VPN network: " + e.err.Error() }
 
 type peer struct {
-	conn         *quic.Conn
-	control      *quic.Stream
+	conn         connection
+	control      controlChannel
 	id           string
 	ip           netip.Addr
 	queue        *packetQueue
@@ -54,11 +55,16 @@ func (p *peer) run(ctx context.Context, c Config, receive func([]byte) error) er
 		}
 		pacer := noisePacer{last: time.Now()}
 		send := func(packet []byte) error {
-			if clampTCPMSS(packet, c.MTU) {
+			if _, reliable := p.conn.(*recordConnection); !reliable && clampTCPMSS(packet, c.MTU) {
 				c.Stats.mssClamped.Add(1)
 			}
 			id++
-			err := fragments(packet, id, p.sendDatagram)
+			var err error
+			if reliable, ok := p.conn.(*recordConnection); ok {
+				err = reliable.sendIP(packet)
+			} else {
+				err = fragments(packet, id, p.sendDatagram)
+			}
 			if err != nil {
 				var tooLarge *quic.DatagramTooLargeError
 				if errors.As(err, &tooLarge) {
@@ -124,7 +130,12 @@ func (p *peer) run(ctx context.Context, c Config, receive func([]byte) error) er
 				}
 				continue
 			}
-			packet, err := r.push(data, c.MTU, time.Now())
+			var packet []byte
+			if _, reliable := p.conn.(*recordConnection); reliable && len(data) >= 2 && data[0] == 2 && data[1] == 0 {
+				packet = data[2:]
+			} else {
+				packet, err = r.push(data, c.MTU, time.Now())
+			}
 			if err != nil {
 				c.Stats.drops.Add(1)
 				continue
@@ -132,7 +143,7 @@ func (p *peer) run(ctx context.Context, c Config, receive func([]byte) error) er
 			if packet == nil {
 				continue
 			}
-			if clampTCPMSS(packet, c.MTU) {
+			if _, reliable := p.conn.(*recordConnection); !reliable && clampTCPMSS(packet, c.MTU) {
 				c.Stats.mssClamped.Add(1)
 			}
 			p.businessActivity()
@@ -171,16 +182,25 @@ func (p *peer) run(ctx context.Context, c Config, receive func([]byte) error) er
 }
 
 type Server struct {
-	cfg       Config
-	dev       Device
-	listener  *quic.Listener
-	transport *quic.Transport
-	packet    net.PacketConn
-	mu        sync.Mutex
-	peers     map[netip.Addr]*peer
-	writeMu   sync.Mutex
-	once      sync.Once
-	wg        sync.WaitGroup
+	cfg            Config
+	dev            Device
+	listener       *quic.Listener
+	tcp            net.Listener
+	http           *http.Server
+	incoming       chan connection
+	acceptErr      chan error
+	closed         chan struct{}
+	reliableConns  sync.Map
+	handlerMu      sync.Mutex
+	handlerWG      sync.WaitGroup
+	handlersClosed bool
+	transport      *quic.Transport
+	packet         net.PacketConn
+	mu             sync.Mutex
+	peers          map[netip.Addr]*peer
+	writeMu        sync.Mutex
+	once           sync.Once
+	wg             sync.WaitGroup
 }
 
 func ListenServer(config Config, dev Device) (*Server, error) {
@@ -194,8 +214,20 @@ func ListenServer(config Config, dev Device) (*Server, error) {
 	if len(c.TLS.Certificates) == 0 && c.TLS.GetCertificate == nil {
 		return nil, errors.New("VPN server certificate required")
 	}
+	s := &Server{cfg: c, dev: dev, peers: make(map[netip.Addr]*peer), incoming: make(chan connection), acceptErr: make(chan error, 2), closed: make(chan struct{})}
+	if c.TCPListen != "" {
+		if err := s.listenReliable(); err != nil {
+			return nil, err
+		}
+	}
+	if c.Address == "" {
+		return s, nil
+	}
 	udp, err := net.ListenPacket("udp", c.Address)
 	if err != nil {
+		if s.tcp != nil {
+			s.tcp.Close()
+		}
 		return nil, err
 	}
 	var admitted atomic.Int64
@@ -211,21 +243,53 @@ func ListenServer(config Config, dev Device) (*Server, error) {
 	if err != nil {
 		tr.Close()
 		udp.Close()
+		if s.tcp != nil {
+			s.tcp.Close()
+		}
 		return nil, err
 	}
-	return &Server{cfg: c, dev: dev, listener: listener, transport: tr, packet: udp, peers: make(map[netip.Addr]*peer)}, nil
+	s.listener, s.transport, s.packet = listener, tr, udp
+	return s, nil
 }
-func (s *Server) Addr() net.Addr { return s.listener.Addr() }
+func (s *Server) Addr() net.Addr {
+	if s.listener != nil {
+		return s.listener.Addr()
+	}
+	return s.tcp.Addr()
+}
+func (s *Server) TCPAddr() net.Addr {
+	if s.tcp != nil {
+		return s.tcp.Addr()
+	}
+	return nil
+}
 func (s *Server) Close() error {
 	s.once.Do(func() {
-		s.listener.Close()
+		s.handlerMu.Lock()
+		s.handlersClosed = true
+		s.handlerMu.Unlock()
+		close(s.closed)
+		if s.listener != nil {
+			s.listener.Close()
+		}
+		if s.http != nil {
+			s.http.Close()
+		}
+		if s.tcp != nil {
+			s.tcp.Close()
+		}
+		s.reliableConns.Range(func(k, v any) bool { k.(*recordConnection).CloseWithError(0, "VPN stopped"); return true })
 		s.mu.Lock()
 		for _, p := range s.peers {
 			p.conn.CloseWithError(0, "VPN stopped")
 		}
 		s.mu.Unlock()
-		s.transport.Close()
-		s.packet.Close()
+		if s.transport != nil {
+			s.transport.Close()
+		}
+		if s.packet != nil {
+			s.packet.Close()
+		}
 		s.dev.Close()
 	})
 	return nil
@@ -266,20 +330,26 @@ func (s *Server) Serve(parent context.Context) error {
 		}
 	}()
 	var result error
+	s.acceptConnections(ctx)
+acceptLoop:
 	for {
-		conn, err := s.listener.Accept(ctx)
-		if err != nil {
+		select {
+		case conn := <-s.incoming:
+			s.wg.Add(1)
+			go func() { defer s.wg.Done(); s.accept(ctx, conn) }()
+		case err := <-s.acceptErr:
 			if ctx.Err() == nil {
 				result = err
 			}
-			break
+			break acceptLoop
+		case <-ctx.Done():
+			break acceptLoop
 		}
-		s.wg.Add(1)
-		go func() { defer s.wg.Done(); s.accept(ctx, conn) }()
 	}
 	cancel()
 	s.Close()
 	s.wg.Wait()
+	s.handlerWG.Wait()
 	select {
 	case err := <-deviceErr:
 		return err
@@ -287,7 +357,7 @@ func (s *Server) Serve(parent context.Context) error {
 		return result
 	}
 }
-func (s *Server) accept(ctx context.Context, conn *quic.Conn) {
+func (s *Server) accept(ctx context.Context, conn connection) {
 	defer conn.CloseWithError(0, "VPN session ended")
 	authCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -336,7 +406,7 @@ func (s *Server) accept(ctx context.Context, conn *quic.Conn) {
 		reason = "invalid vpn-client-ip; choose an unused client host in " + s.cfg.Network.String()
 	case len(h.ID) != 64:
 		reason = "invalid VPN client identity"
-	case !conn.ConnectionState().SupportsDatagrams:
+	case !conn.supportsPackets():
 		reason = "QUIC DATAGRAM was not negotiated"
 	}
 	if reason != "" {
@@ -485,13 +555,16 @@ func RunClient(parent context.Context, config Config, dev Device) error {
 	}
 }
 func clientConnection(ctx context.Context, c Config, id string, active *atomic.Pointer[peer], dev Device, cleanup *func()) error {
-	flow := newDatagramFlow()
-	conn, err := quic.DialAddr(context.WithValue(ctx, flowContextKey{}, flow), c.Address, c.TLS, quicConfig(c.Stats))
+	var flow *datagramFlow
+	if c.Transport == "" || c.Transport == "quic" {
+		flow = newDatagramFlow()
+	}
+	conn, err := dialConnection(context.WithValue(ctx, flowContextKey{}, flow), c)
 	if err != nil {
 		return err
 	}
 	defer conn.CloseWithError(0, "VPN reconnecting")
-	if !conn.ConnectionState().SupportsDatagrams {
+	if !conn.supportsPackets() {
 		return errors.New("server did not negotiate QUIC DATAGRAM")
 	}
 	authCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -569,7 +642,7 @@ func clientConnection(ctx context.Context, c Config, id string, active *atomic.P
 
 // FIN delivers the rejection before connection teardown discards queued stream
 // bytes. A valid client closes promptly after reading it; stalled peers are bounded.
-func reject(control *quic.Stream, reason string) {
+func reject(control controlChannel, reason string) {
 	if writeJSON(control, welcome{Error: reason}) != nil {
 		return
 	}

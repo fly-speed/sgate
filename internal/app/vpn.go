@@ -21,6 +21,8 @@ type vpnHealth struct {
 	Mode         string       `json:"mode,omitempty"`
 	Device       string       `json:"device,omitempty"`
 	Address      string       `json:"address,omitempty"`
+	Transport    string       `json:"transport,omitempty"`
+	TCPAddress   string       `json:"tcp_address,omitempty"`
 	Network      string       `json:"network,omitempty"`
 	ClientIP     string       `json:"client_ip,omitempty"`
 	LastError    string       `json:"last_error,omitempty"`
@@ -81,7 +83,7 @@ func (i *instance) startVPNWithDevice(ctx context.Context, p *vpn.Prepared, open
 		return
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	v := &vpnWorker{stats: &vpn.Stats{}, cancel: cancel, done: make(chan struct{}), health: vpnHealth{Generation: strconv.FormatInt(time.Now().UnixNano(), 10), Enabled: true, QueueMaxAge: p.Config.QueueMaxAge.String(), NoiseRate: p.Config.Noise.Rate, NoiseTraffic: p.Config.Noise.Traffic, NoiseIdle: p.Config.Noise.Idle, State: "starting", Role: p.Role, Mode: p.Mode, Network: p.Config.Network.String()}}
+	v := &vpnWorker{stats: &vpn.Stats{}, cancel: cancel, done: make(chan struct{}), health: vpnHealth{Generation: strconv.FormatInt(time.Now().UnixNano(), 10), Enabled: true, Transport: p.Config.Transport, TCPAddress: p.Config.TCPListen, QueueMaxAge: p.Config.QueueMaxAge.String(), NoiseRate: p.Config.Noise.Rate, NoiseTraffic: p.Config.Noise.Traffic, NoiseIdle: p.Config.Noise.Idle, State: "starting", Role: p.Role, Mode: p.Mode, Network: p.Config.Network.String()}}
 	i.vpn = v
 	go func() {
 		defer close(v.done)
@@ -104,6 +106,19 @@ func (v *vpnWorker) run(ctx context.Context, p *vpn.Prepared, open func(string) 
 		return err
 	}
 	config.Stats = v.stats
+	v.mu.Lock()
+	v.health.Transport = config.Transport
+	if v.health.Transport == "" {
+		v.health.Transport = "quic"
+	}
+	if p.Role == "server" && config.TCPListen != "" {
+		if config.Address == "" {
+			v.health.Transport = "tcp,wss"
+		} else {
+			v.health.Transport = "quic,tcp,wss"
+		}
+	}
+	v.mu.Unlock()
 	config.Logf = func(format string, args ...any) {
 		message := fmt.Sprintf(format, args...)
 		log.Print(message)
@@ -143,6 +158,9 @@ func (v *vpnWorker) run(ctx context.Context, p *vpn.Prepared, open func(string) 
 		defer server.Close()
 		v.mu.Lock()
 		v.health.Address = server.Addr().String()
+		if server.TCPAddr() != nil {
+			v.health.TCPAddress = server.TCPAddr().String()
+		}
 		v.health.State = "listening"
 		v.health.Healthy = true
 		v.mu.Unlock()
@@ -178,7 +196,7 @@ func (c *controller) workerVPNStatus() vpnHealth {
 	}
 	if c.worker.vpn == nil && c.current.vpn != nil && c.role == "client" {
 		p := c.current.vpn
-		return vpnHealth{Enabled: true, Healthy: true, State: "stopped", Role: "client", Mode: p.Mode, Network: p.Config.Network.String(), QueueMaxAge: p.Config.QueueMaxAge.String(), NoiseRate: p.Config.Noise.Rate, NoiseTraffic: p.Config.Noise.Traffic, NoiseIdle: p.Config.Noise.Idle}
+		return vpnHealth{Enabled: true, Healthy: true, State: "stopped", Role: "client", Mode: p.Mode, Transport: p.Config.Transport, Network: p.Config.Network.String(), QueueMaxAge: p.Config.QueueMaxAge.String(), NoiseRate: p.Config.Noise.Rate, NoiseTraffic: p.Config.Noise.Traffic, NoiseIdle: p.Config.Noise.Idle}
 	}
 	h := c.worker.vpn.snapshot()
 	if c.role == "client" {

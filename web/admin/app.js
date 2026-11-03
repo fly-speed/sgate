@@ -322,6 +322,15 @@ function configValueError(key, value, rule = {}, values = {}) {
       configAddress(value, rule.type === "listen");
     else if (rule.type === "addresses")
       for (const address of value.split(",")) configAddress(address.trim());
+    else if (rule.type === "vpn-url") {
+      const u=new URL(value);
+      if(!["quic:","tcp:","wss:"].includes(u.protocol) || u.username || u.password || u.search || u.hash || (u.pathname!=="" && u.pathname!=="/vpn") || !u.hostname)
+        throw new Error(t("需要 quic://、tcp:// 或 wss://主机:端口/vpn 地址"));
+      // URL omits default WSS port 443; validate the explicit authority instead.
+      const authority=value.match(/^[a-z]+:\/\/([^/]+)(?:\/vpn)?$/)?.[1];
+      if(!authority || !/:[0-9]+$/.test(authority)) throw new Error(t("VPN 地址必须显式指定端口"));
+      configAddress(authority);
+    }
     else if (rule.type === "url")
       configURL(
         value,
@@ -929,7 +938,7 @@ async function testVPNConnection() {
   try{
     const result=await api("vpn-test",{method:"POST",body:JSON.stringify({fields})});
     if(p!==vpnProbeState||p.version!==version)return;
-    const stages={config:"客户端配置",resolve:"地址解析",quic:"QUIC/TLS 连接",auth:"VPN 认证",datagram:"数据报回显"};
+    const stages={config:"客户端配置",resolve:"地址解析",quic:"QUIC/TLS 连接",tls:"TCP/TLS 连接",auth:"VPN 认证",datagram:"VPN 数据帧回显"};
     p.result.classList.toggle("bad",!result.ok);
     localText(p.result,()=> (result.ok?t("VPN 测试成功"):t("VPN 测试失败"))+" · "+t(stages[result.stage]||result.stage)+
       (result.detail?" · "+t(result.detail):"")+(result.error?" · "+t(result.error):"")+
@@ -1192,7 +1201,7 @@ function vpnObservationText(v) {
  if (!v?.enabled) return t("独立 VPN") + " · " + t("已关闭");
  const names = {starting:"启动中",connecting:"连接中",connected:"已连接",reconnecting:"重连中",listening:"监听中",failed:"启动失败",stopped:"已停止"};
  const q=v.stats||{};
- return t("独立 VPN")+" · "+t(names[v.state]||v.state)+" · "+(v.device||"—")+" · "+(v.address||"")+" · "+(v.client_ip||v.network||"")+
+ return t("独立 VPN")+" · "+t(names[v.state]||v.state)+" · "+(v.device||"—")+" · "+(v.address||"")+" · "+(v.transport||"quic").toUpperCase()+(v.tcp_address?" · TCP/WSS "+v.tcp_address:"")+" · "+(v.client_ip||v.network||"")+
   " · "+t("活跃连接：")+(q.active_connections||0)+" · IP "+t("发送")+" "+units(q.tx_ip_bytes||0)+" / "+t("接收")+" "+units(q.rx_ip_bytes||0)+
   " · "+t("丢弃：")+(q.dropped_packets||0)+" · "+t("VPN 白噪音目标：")+units(v.noise_rate||0,true)+
   " · "+t("噪音累计发送/接收：")+units(q.noise_tx_bytes||0)+" / "+units(q.noise_rx_bytes||0)+
@@ -2284,14 +2293,15 @@ $("vpn-stop").addEventListener("click", () => controlVPN(false));
 function vpnQueueObservationText(v) {
  const q=v?.stats;
  if(!v?.enabled || !Number.isFinite(q?.send_queue_max_wait_ms))return "";
- return t("QUIC RTT 最近采样：")+Number(q.last_smoothed_rtt_ms||0).toFixed(1)+" ms · "+
+ return (v.transport && !v.transport.includes("quic") ? "" : t("QUIC RTT 最近采样：")+Number(q.last_smoothed_rtt_ms||0).toFixed(1)+" ms · "+
  t("拥塞窗口/在途：")+units(q.last_congestion_window_bytes||0)+" / "+units(q.last_bytes_in_flight||0)+" · "+
+ t("QUIC 丢包判定/PTO：")+(q.quic_lost_packets||0)+" / "+(q.quic_pto_events||0)+" · ")+
  t("VPN 发送队列峰值：")+(q.send_queue_peak_packets||0)+" / 64 · "+
  (v.queue_max_age ? (v.queue_max_age === "0s" ? t("队列过期丢弃：关闭") : t("队列过期时间：")+v.queue_max_age)+" · " : "")+
  t("最长排队：")+Number(q.send_queue_max_wait_ms||0).toFixed(1)+" ms · "+
  t("过期/满队列丢弃：")+(q.send_queue_expired_packets||0)+" / "+(q.send_queue_overflow_packets||0)+" · "+
- t("QUIC 提交最长耗时：")+Number(q.send_datagram_max_wait_ms||0).toFixed(1)+" ms · "+
- t("QUIC 准入等待累计：")+Number(q.send_admission_wait_ms||0).toFixed(1)+" ms · "+
+ t("VPN 发送最长耗时：")+Number(q.send_datagram_max_wait_ms||0).toFixed(1)+" ms · "+
+ (v.transport && !v.transport.includes("quic") ? "" : t("QUIC 准入等待累计：")+Number(q.send_admission_wait_ms||0).toFixed(1)+" ms · ")+
  t("TUN 交付最长耗时：")+Number(q.tun_delivery_max_wait_ms||0).toFixed(1)+" ms · "+
  t("TCP MSS 调整：")+(q.tcp_mss_clamped_packets||0)+" · "+
  t("分片重组超时/淘汰：")+(q.fragment_reassembly_expired_packets||0)+" / "+(q.fragment_reassembly_evicted_packets||0)+" · "+

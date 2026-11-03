@@ -2013,3 +2013,24 @@ test("VPN observations expose MSS and fragment eviction counters", async () => {
  const result=vm.runInContext('vpnQueueObservationText({enabled:true,stats:{send_queue_max_wait_ms:0,tcp_mss_clamped_packets:123,fragment_reassembly_expired_packets:45,fragment_reassembly_evicted_packets:67}})',context);
  assert.match(result,/123/);assert.match(result,/45 \/ 67/);
 });
+
+test("VPN URL validation accepts secure transport alternatives and preserves proxy rules", async () => {
+ const {context}=await page();
+ for(const address of ["quic://vpn.example.com:8444/vpn","tcp://vpn.example.com:8444/vpn","wss://vpn.example.com:443/vpn"]){
+  context.address=address;
+  assert.equal(vm.runInContext('configValueError("vpn-server",address,{type:"vpn-url"})',context),"",address);
+ }
+ for(const address of ["ws://vpn.example.com:8444/vpn","tcp://vpn.example.com/vpn","wss://vpn.example.com/vpn","wss://user:secret@vpn.example.com:443/vpn","wss://vpn.example.com:443/tunnel","wss://vpn.example.com:443/vpn?token=secret"]){
+  context.address=address;
+  assert.notEqual(vm.runInContext('configValueError("vpn-server",address,{type:"vpn-url"})',context),"",address);
+ }
+ assert.notEqual(vm.runInContext('configValueError("server","tcp://vpn.example.com:8444/vpn",{type:"url"})',context),"");
+});
+test("VPN overview distinguishes reliable transports without QUIC congestion labels", async () => {
+ const {context}=await page();
+ const text=vm.runInContext('vpnObservationText({enabled:true,state:"connected",transport:"wss",address:"vpn.example.com:8444",stats:{active_connections:1}})',context);
+ assert.match(text,/WSS/);
+ const metrics=vm.runInContext('vpnQueueObservationText({enabled:true,transport:"tcp",stats:{send_queue_max_wait_ms:5,send_datagram_max_wait_ms:3}})',context);
+ assert.doesNotMatch(metrics,/QUIC/);
+ assert.match(metrics,/3\.0 ms/);
+});

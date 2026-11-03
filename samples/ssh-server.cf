@@ -197,6 +197,8 @@ service ssh-server {
     vpn-noise-idle-after = 1s
     # Separate QUIC UDP listener; cannot share a UDP port with quic-listen.
     vpn-listen = 0.0.0.0:8444
+    # Optional TLS/TCP and WSS listener; may share the numeric UDP port.
+    vpn-tcp-listen = ''
     # VPN server certificate PEM; empty reuses tls-cert.
     vpn-tls-cert = ''
     # VPN certificate private key PEM; empty reuses tls-key.

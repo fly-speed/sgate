@@ -26,6 +26,7 @@ import (
 )
 
 type options struct {
+	tcpListen                                                                                             string
 	role, listen, server, keyFile, cert, key, ca, network, clientIP, tun, routes, dns, dnsService, egress string
 	noise                                                                                                 vpn.NoiseConfig
 	queueMaxAge                                                                                           time.Duration
@@ -38,7 +39,8 @@ func parse(args []string) (options, error) {
 	fs := flag.NewFlagSet("sgate-vpn", flag.ContinueOnError)
 	fs.StringVar(&o.role, "role", "client", "client or server")
 	fs.StringVar(&o.listen, "listen", ":8444", "server QUIC UDP listen address")
-	fs.StringVar(&o.server, "server", "", "client quic://hostname:port/vpn URL")
+	fs.StringVar(&o.tcpListen, "tcp-listen", "", "optional shared TLS/TCP and WSS server listener; empty disables")
+	fs.StringVar(&o.server, "server", "", "client quic://, tcp:// or wss://hostname:port/vpn URL (TCP always uses TLS)")
 	fs.StringVar(&o.keyFile, "key-file", "", "32-byte shared key file (same format as sgate)")
 	fs.StringVar(&o.cert, "tls-cert", "", "server certificate PEM")
 	fs.StringVar(&o.key, "tls-key", "", "server private key PEM")
@@ -107,11 +109,13 @@ func run(args []string) error {
 		}
 		config.TLS = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13}
 		config.Address = o.listen
+		config.TCPListen = o.tcpListen
 	} else {
 		u, err := url.Parse(o.server)
-		if err != nil || u.Scheme != "quic" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/vpn") {
-			return errors.New("server must be quic://hostname:port/vpn")
+		if err != nil || (u.Scheme != "quic" && u.Scheme != "tcp" && u.Scheme != "wss") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/vpn") {
+			return errors.New("server must be quic://, tcp:// or wss://hostname:port/vpn")
 		}
+		config.Transport, config.Host = u.Scheme, u.Host
 		host, port, err := net.SplitHostPort(u.Host)
 		if err != nil {
 			return err

@@ -95,6 +95,9 @@ func fixture(t *testing.T, maxClients int) (*Server, Config, *memoryDevice) {
 	return fixtureNoise(t, maxClients, NoiseConfig{})
 }
 func fixtureNoise(t *testing.T, maxClients int, noise NoiseConfig) (*Server, Config, *memoryDevice) {
+	return fixtureWire(t, maxClients, noise, "quic")
+}
+func fixtureWire(t *testing.T, maxClients int, noise NoiseConfig, transport string) (*Server, Config, *memoryDevice) {
 	t.Helper()
 	seed := httptest.NewTLSServer(nil)
 	defer seed.Close()
@@ -102,6 +105,13 @@ func fixtureNoise(t *testing.T, maxClients int, noise NoiseConfig) (*Server, Con
 	roots.AddCert(seed.Certificate())
 	dev := newMemoryDevice()
 	cfg := Config{Noise: noise, Address: "127.0.0.1:0", TLS: seed.TLS, Key: bytes.Repeat([]byte{23}, 32), Network: netip.MustParsePrefix("10.77.0.0/24"), MTU: 1280, MaxClients: maxClients, Stats: &Stats{}}
+	if transport != "quic" {
+		if transport != "mixed" {
+			cfg.Address = ""
+		}
+		// Keep UDP enabled for mixed-listener compatibility tests.
+		cfg.TCPListen = "127.0.0.1:0"
+	}
 	server, err := ListenServer(cfg, dev)
 	if err != nil {
 		t.Fatal(err)
@@ -122,6 +132,11 @@ func fixtureNoise(t *testing.T, maxClients int, noise NoiseConfig) (*Server, Con
 		}
 	})
 	cfg.Address = server.Addr().String()
+	cfg.Transport = transport
+	if transport == "mixed" {
+		cfg.Transport = "quic"
+	}
+	cfg.Host = cfg.Address
 	cfg.ClientIP = netip.MustParseAddr("10.77.0.2")
 	cfg.TLS = &tls.Config{RootCAs: roots, ServerName: "127.0.0.1"}
 	cfg.Stats = &Stats{}

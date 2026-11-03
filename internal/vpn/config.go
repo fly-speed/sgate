@@ -1,4 +1,4 @@
-// Package vpn carries IPv4 packets over authenticated QUIC datagrams.
+// Package vpn carries IPv4 packets over authenticated QUIC or TLS/TCP transports.
 package vpn
 
 import (
@@ -26,17 +26,18 @@ type Device interface {
 	Close() error
 }
 type Config struct {
-	Address            string
-	TLS                *tls.Config
-	Key                []byte
-	Network            netip.Prefix
-	ClientIP           netip.Addr
-	MTU                int
-	MaxClients         int
-	AllowPrivate       bool
-	Noise              NoiseConfig
-	QueueMaxAge        time.Duration
-	RetryMin, RetryMax time.Duration
+	Address                    string
+	Transport, Host, TCPListen string
+	TLS                        *tls.Config
+	Key                        []byte
+	Network                    netip.Prefix
+	ClientIP                   netip.Addr
+	MTU                        int
+	MaxClients                 int
+	AllowPrivate               bool
+	Noise                      NoiseConfig
+	QueueMaxAge                time.Duration
+	RetryMin, RetryMax         time.Duration
 	// Called after authentication, once per client process. Cleanup runs on exit.
 	Connected func() (func(), error)
 	Stats     *Stats
@@ -44,13 +45,30 @@ type Config struct {
 }
 
 func (c Config) normalized(server bool) (Config, error) {
-	_, port, err := net.SplitHostPort(c.Address)
+	address := c.Address
+	if server && address == "" {
+		address = c.TCPListen
+	}
+	_, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return c, errors.New("VPN address must be host:port")
 	}
 	n, err := strconv.Atoi(port)
 	if err != nil || n < 0 || n > 65535 || (!server && n == 0) {
 		return c, errors.New("invalid VPN port")
+	}
+	if c.Transport == "" {
+		c.Transport = "quic"
+	}
+	if c.Transport != "quic" && c.Transport != "tcp" && c.Transport != "wss" {
+		return c, errors.New("invalid VPN transport")
+	}
+	if server && c.TCPListen != "" {
+		_, port, err := net.SplitHostPort(c.TCPListen)
+		n, e := strconv.Atoi(port)
+		if err != nil || e != nil || n < 0 || n > 65535 {
+			return c, errors.New("invalid VPN TCP listen address")
+		}
 	}
 	if len(c.Key) != 32 {
 		return c, errors.New("VPN requires a 32-byte shared key")

@@ -120,6 +120,8 @@ func exampleConfigValue(field configField) string {
 		return "localhost:19001,[::1]:19002"
 	case "listeners":
 		return "127.0.0.1|19001"
+	case "vpn-url":
+		return "wss://vpn.example.com:8444/vpn"
 	case "url":
 		return "wss://localhost:19001/tunnel"
 	case "route":
@@ -238,5 +240,21 @@ func TestPublicCommandLineOptionsHaveFormRules(t *testing.T) {
 			}
 			return true
 		})
+	}
+}
+
+func TestVPNTransportURLRulesKeepProxySchemesSeparate(t *testing.T) {
+	for _, address := range []string{"quic://vpn.example.com:8444/vpn", "tcp://vpn.example.com:8444/vpn", "wss://vpn.example.com:443/vpn"} {
+		if _, err := updateConfigFields([]byte("vpn-server = quic://vpn.example.com:8444/vpn\n"), map[string]string{"vpn-server": address}); err != nil {
+			t.Fatal(address, err)
+		}
+	}
+	for _, address := range []string{"ws://vpn.example.com:8444/vpn", "tcp://vpn.example.com/vpn", "wss://user:secret@vpn.example.com:443/vpn", "wss://vpn.example.com:443/tunnel", "wss://vpn.example.com:443/vpn?token=secret"} {
+		if _, err := updateConfigFields([]byte("vpn-server = quic://vpn.example.com:8444/vpn\n"), map[string]string{"vpn-server": address}); err == nil {
+			t.Fatal("accepted invalid VPN URL", address)
+		}
+	}
+	if _, err := updateConfigFields([]byte("server = wss://vpn.example.com:8444/tunnel\n"), map[string]string{"server": "tcp://vpn.example.com:8444/tunnel"}); err == nil {
+		t.Fatal("VPN scheme leaked into proxy URL rules")
 	}
 }

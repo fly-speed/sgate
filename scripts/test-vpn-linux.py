@@ -23,6 +23,8 @@ def main():
     parser.add_argument("--client-binary", type=Path, help="integrated sgate-client; requires --server-binary")
     parser.add_argument("--server-binary", type=Path, help="integrated sgate-server; requires --client-binary")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--transport", choices=["quic", "tcp", "wss"], default="quic")
+    parser.add_argument("--transfer-timeout", type=float, default=120, help="TCP payload deadline, seconds (1..600)")
     parser.add_argument("--delay-ms", type=int, default=0, help="one-way outer-link delay")
     parser.add_argument("--loss-percent", type=float, default=0)
     args = parser.parse_args()
@@ -38,7 +40,7 @@ def main():
     binaries = [args.client_binary, args.server_binary] if args.client_binary else [args.binary]
     if any(not binary.is_file() or not os.access(binary, os.X_OK) for binary in binaries):
         parser.error("build the Linux VPN executables first")
-    if not 0 <= args.delay_ms <= 2000 or not 0 <= args.loss_percent <= 10:
+    if not 0 <= args.delay_ms <= 2000 or not 0 <= args.loss_percent <= 10 or not 1 <= args.transfer_timeout <= 600:
         parser.error("invalid delay or loss")
     binary = args.binary.resolve()
     out = args.output.resolve()
@@ -49,8 +51,8 @@ def main():
     result = dict(status="failed", platform=platform.platform(), namespaces=[client, server, internet],
                   binaries_sha256={str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in binaries},
                   mode="integrated" if args.client_binary else "standalone",
-                  delay_ms=args.delay_ms, loss_percent=args.loss_percent,
-                  scope="Private namespaces, real TUN, QUIC DATAGRAM, TCP/UDP/ICMP, NAT and shutdown cleanup")
+                  delay_ms=args.delay_ms, loss_percent=args.loss_percent, transport=args.transport,
+                  scope="Private namespaces, real TUN, selected VPN transport, TCP/UDP/ICMP, NAT and shutdown cleanup")
     env = {key: value for key, value in os.environ.items() if key.lower() not in
            ("http_proxy", "https_proxy", "all_proxy")}
 
@@ -171,13 +173,15 @@ if sys.argv[1]=='vpn-stop': assert call('stats')['health']['vpn']['state']=='sto
                               "-vpn-tls-cert", out / "tls-cert.pem", "-vpn-tls-key", out / "tls-key.pem",
                               "-vpn-egress-interface", "wan0"]
             client_command = [args.client_binary.resolve(), "-alone", "-config", client_config, "-vpn-mode", "only", "-listen", "127.0.0.1:0",
-                              "-key-file", out / "key", "-vpn-server", "quic://192.0.2.1:8444/vpn",
+                              "-key-file", out / "key", "-vpn-server", f"{args.transport}://192.0.2.1:8444/vpn",
                               "-vpn-tls-ca", out / "tls-cert.pem", "-vpn-dns", ""]
         else:
             server_command = [binary, "-role", "server", "-listen", "192.0.2.1:8444", "-key-file", out / "key",
                               "-tls-cert", out / "tls-cert.pem", "-tls-key", out / "tls-key.pem", "-egress-interface", "wan0"]
-            client_command = [binary, "-role", "client", "-server", "quic://192.0.2.1:8444/vpn",
+            client_command = [binary, "-role", "client", "-server", f"{args.transport}://192.0.2.1:8444/vpn",
                               "-key-file", out / "key", "-tls-ca", out / "tls-cert.pem", "-dns", ""]
+        if args.transport != "quic":
+            server_command += ["-vpn-tcp-listen" if args.server_binary else "-tcp-listen", "192.0.2.1:8444"]
         server_process = start("server", server_command, server)
         client_process = start("client", client_command, client)
         if args.client_binary:
@@ -198,8 +202,11 @@ if sys.argv[1]=='vpn-stop': assert call('stats')['health']['vpn']['state']=='sto
         endpoint_route = run(["ip", "route", "get", "192.0.2.1"], client).decode()
         if "sgate0" in endpoint_route:
             raise RuntimeError("VPN endpoint routes recursively into VPN")
-        fetch = "import urllib.request,sys; sys.stdout.buffer.write(urllib.request.urlopen('http://198.51.100.2:18080/payload',timeout=30).read())"
-        actual = run([sys.executable, "-c", fetch], client, timeout=40)
+        fetch = f"import urllib.request,sys; sys.stdout.buffer.write(urllib.request.urlopen('http://198.51.100.2:18080/payload',timeout={args.transfer_timeout!r}).read())"
+        began = time.monotonic()
+        actual = run([sys.executable, "-c", fetch], client, timeout=args.transfer_timeout + 10)
+        elapsed = time.monotonic() - began
+        result.update(tcp_elapsed_seconds=elapsed, tcp_bytes_per_second=len(actual)/elapsed, transfer_timeout_seconds=args.transfer_timeout)
         if actual != payload:
             raise RuntimeError("TCP payload mismatch")
         udp_test = "import socket; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.settimeout(5)\nfor n in [64,1000,1200]:\n p=bytes(i%251 for i in range(n)); s.sendto(p,('198.51.100.2',18081)); assert s.recv(65535)==p\nprint('UDP verified')"

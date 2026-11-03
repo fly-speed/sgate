@@ -87,14 +87,14 @@ func (n *noisePacer) budget(now time.Time, rate int, allowed bool) int {
 	return budget
 }
 func (p *peer) sendNoise(now time.Time, c Config, pacer *noisePacer) error {
-	allowed := p.noiseAllowed(now, c.Noise) && p.queue.len() == 0 && p.flow.allowNoise()
+	allowed := p.noiseAllowed(now, c.Noise) && p.queue.len() == 0 && (p.flow == nil || p.flow.allowNoise())
 	budget := pacer.budget(now, c.Noise.Rate, allowed)
 	if !allowed {
 		c.Stats.noiseSkipped.Add(1)
 		return nil
 	}
 	for budget > 0 {
-		if p.queue.len() > 0 || !p.flow.allowNoise() {
+		if p.queue.len() > 0 || (p.flow != nil && !p.flow.allowNoise()) {
 			c.Stats.noiseSkipped.Add(1)
 			break
 		}
