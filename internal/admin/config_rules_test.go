@@ -104,6 +104,9 @@ func exampleConfigValue(field configField) string {
 		if field.Key == "buffer-bytes" {
 			return "65536"
 		}
+		if minimum, err := strconv.ParseInt(field.Validation.Min, 10, 64); err == nil && minimum > 1 {
+			return field.Validation.Min
+		}
 		return "1"
 	case "seconds":
 		return "2"

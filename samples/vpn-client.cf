@@ -170,4 +170,36 @@ service vpn-client {
     admin_master_ctl = /opt/soft/acl-master/bin/master_ctl
     # Framework control socket path; leave empty for the master_ctl default, or set an absolute path.
     admin_master_socket =
+
+# 独立 IPv4 VPN（TUN + QUIC DATAGRAM）：默认关闭，不依赖 OpenVPN。
+# 客户端支持 macOS/Linux，服务端要求 Linux；启用需要系统网络管理权限。
+# 启用前先停止其他全隧道 VPN；本节参数可通过 Web 管理页面修改。
+# 此示例原有部分用于代理 OpenVPN；切换为独立 VPN 时选择 only 并停用 OpenVPN。
+    # 独立 VPN：disabled 关闭，both 与代理共存，only 仅 VPN（保留框架及管理监听）。应用时会中断 VPN 并恢复/重建网络。
+    vpn-mode = disabled
+    # 两端一致的 IPv4 VPN 子网，避免与现有网络重叠。
+    vpn-network = 10.77.0.0/24
+    # TUN MTU，576～1500 字节。
+    vpn-mtu = 1280
+    # 新建设备名；Linux 默认 sgate0，macOS 自动分配 utunN。
+    vpn-tun-name = ''
+    # 自动配置路由、DNS 或服务端 NAT；需要管理员权限。
+    vpn-manage-network = true
+    # VPN 共享密钥文件；留空复用 key-file；不是代理或 Web 账号认证。
+    vpn-key-file = ''
+    # VPN 服务端 quic://证书域名:8444/vpn；独立于代理 server。
+    vpn-server = ''
+    # 该客户端固定虚拟 IPv4 地址，不能与其他客户端重复。
+    vpn-client-ip = 10.77.0.2
+    # 附加信任 CA；留空复用 tls-ca。自签名证书需要显式信任。
+    vpn-tls-ca = ''
+    # 逗号分隔 IPv4 路由；服务端外层地址保留物理出口。
+    vpn-routes = 0.0.0.0/1,128.0.0.0/1
+    # VPN IPv4 DNS，逗号分隔；留空不改 DNS。
+    vpn-dns = 1.1.1.1
+    # macOS 网络服务名称；Linux 使用 resolvectl。
+    vpn-dns-service = Wi-Fi
+    # 首版不转发 IPv6；将公网 IPv6 导入 TUN 后丢弃，避免绕过 VPN。
+    vpn-block-ipv6 = true
+
 }
