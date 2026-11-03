@@ -17,6 +17,8 @@
 # Local builds and credentials
 /bin/
 /sgate.key
+#/tls-cert.pem
+#/tls-key.pem
 /artifacts/
 
 # Web management runtime credentials, cookies, initialization tokens and backups

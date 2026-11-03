@@ -21,6 +21,8 @@ The statistics API adds a `quic` object with packet bytes/counts, packets declar
 
 Independent QUIC windows and queue budgets, shared process buffer admission, listener recovery, authenticated health checks and transport metrics are available. See [delivery status](docs/quic-optimization-status.md) and [performance documentation](docs/quic-performance.md) for defaults, restart requirements and evidence. `memory-budget-bytes` defaults to 0 (unlimited) and bounds managed reservations, not RSS. The Linux TCP/UDP netem script is delivered but has not been run on Linux.
 
+Installations include a self-signed localhost certificate and a public test private key under `samples/test-tls/`. They are not enabled automatically and are for installation tests only; see [test TLS instructions](samples/test-tls/README.md).
+
 ## acl_master integration
 
 Only `sgate-client.cf` and `sgate-server.cf` remain at the project root for production use. Multiple client mappings use `proxies`; the server selects allowed backends through `/tunnel?addr=host:port`. See [samples/](samples/README.md) for the previous SSH, VPN and Web examples.

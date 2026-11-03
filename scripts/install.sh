@@ -61,6 +61,7 @@ for name in $programs; do
 done
 for name in $configs $scripts LICENSE; do require_file "$source_dir/$name"; done
 for name in $sample_configs $sample_scripts README.md; do require_file "$source_dir/samples/$name"; done
+for name in tls-cert.pem tls-key.pem README.md; do require_file "$source_dir/samples/test-tls/$name"; done
 for name in $assets; do require_file "$source_dir/web/admin/$name"; done
 for name in $licenses; do require_file "$source_dir/third_party/$name/LICENSE"; done
 if [ ! -f "$source_dir/sgate.key" ] && ! [ -e "$destination/conf/sgate.key" ] && ! [ -L "$destination/conf/sgate.key" ]; then
@@ -79,6 +80,7 @@ ensure_directory() {
 ensure_directory . 0755
 for name in sbin bin web/admin logs var share/licenses samples; do ensure_directory "$name" 0755; done
 ensure_directory conf 0700
+ensure_directory samples/test-tls 0700
 
 # 使用同一文件系统的临时目录再重命名，避免覆盖正在运行的 Linux 可执行文件。
 stage=$(mktemp -d "$destination/.install.XXXXXX")
@@ -93,6 +95,14 @@ for name in $programs; do replace_file "$binary_dir/$name" "$destination/sbin/$n
 for name in $scripts; do replace_file "$source_dir/$name" "$destination/bin/$name" 0755; done
 for name in $sample_scripts; do replace_file "$source_dir/samples/$name" "$destination/samples/$name" 0755; done
 replace_file "$source_dir/samples/README.md" "$destination/samples/README.md" 0644
+replace_file "$source_dir/samples/test-tls/README.md" "$destination/samples/test-tls/README.md" 0644
+# Keep a customized pair intact, including when only one path is present.
+if [ -e "$destination/samples/test-tls/tls-cert.pem" ] || [ -L "$destination/samples/test-tls/tls-cert.pem" ] || [ -e "$destination/samples/test-tls/tls-key.pem" ] || [ -L "$destination/samples/test-tls/tls-key.pem" ]; then
+    printf '%s\n' '保留现有 samples/test-tls 证书和私钥；未自动启用测试 TLS。'
+else
+    replace_file "$source_dir/samples/test-tls/tls-key.pem" "$destination/samples/test-tls/tls-key.pem" 0600
+    replace_file "$source_dir/samples/test-tls/tls-cert.pem" "$destination/samples/test-tls/tls-cert.pem" 0644
+fi
 for name in $assets; do replace_file "$source_dir/web/admin/$name" "$destination/web/admin/$name" 0644; done
 replace_file "$source_dir/LICENSE" "$destination/LICENSE" 0644
 for name in $licenses; do

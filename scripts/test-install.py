@@ -17,6 +17,7 @@ class InstallTests(unittest.TestCase):
         self.dest = pathlib.Path(self.tmp.name) / "package"
         self.target = self.dest / "opt/soft/sgate"
         names = ["Makefile", "LICENSE", "scripts/install.sh", "samples/README.md"]
+        names += ["samples/test-tls/" + name for name in ["README.md", "tls-cert.pem", "tls-key.pem"]]
         names += [str(p.relative_to(ROOT)) for p in (ROOT / "web/admin").iterdir() if p.is_file()]
         names += [str(p.relative_to(ROOT)) for p in ROOT.glob("sgate-*.cf")]
         names += [str(p.relative_to(ROOT)) for p in ROOT.glob("sgate-*-*.sh")]
@@ -53,6 +54,10 @@ class InstallTests(unittest.TestCase):
             self.assertEqual((self.target / "web/admin" / name).read_bytes(),
                              (self.root / "web/admin" / name).read_bytes())
         self.assertTrue((self.target / "conf/sgate.key").is_file())
+        for name in ["tls-cert.pem", "tls-key.pem", "README.md"]:
+            self.assertTrue((self.target / "samples/test-tls" / name).is_file())
+        self.assertEqual((self.target / "samples/test-tls/tls-key.pem").stat().st_mode & 0o777, 0o600)
+        self.assertEqual((self.target / "samples/test-tls").stat().st_mode & 0o777, 0o700)
         if role == "server":
             self.assertTrue((self.target / "samples/sgate-accounts.json").is_file())
             self.assertTrue((self.target / "samples/sgate-reverse-accounts.json").is_file())
@@ -89,6 +94,7 @@ class InstallTests(unittest.TestCase):
     def test_repeat_and_cross_role_install_preserve_user_state_and_other_program(self):
         self.install("install")
         keep = ["conf/sgate-client.cf", "conf/sgate-server.cf", "conf/sgate.key",
+                "samples/test-tls/tls-cert.pem", "samples/test-tls/tls-key.pem",
                 "conf/tunnel-accounts.json", "conf/sgate-proxies.json", "samples/sgate-accounts.json", "samples/sgate-reverse-accounts.json", "samples/sgate-proxies.json", "conf/admin-client-users.json", "conf/admin-server-sessions/session.json",
                 "sbin/sgate-client", "bin/sgate-client-start.sh", "samples/ssh-client.cf"]
         for name in keep:
@@ -108,6 +114,20 @@ class InstallTests(unittest.TestCase):
         (self.root / "bin/sgate-server").unlink()
         result = self.install("install", "server", success=False)
         self.assertIn("make build", result.stderr)
+        self.assertFalse(self.dest.exists())
+
+    def test_partial_existing_tls_pair_is_not_mixed_with_bundled_files(self):
+        directory = self.target / "samples/test-tls"
+        directory.mkdir(parents=True)
+        cert = directory / "tls-cert.pem"
+        cert.write_text("custom certificate awaiting its own key")
+        self.install("install", "server")
+        self.assertEqual(cert.read_text(), "custom certificate awaiting its own key")
+        self.assertFalse((directory / "tls-key.pem").exists())
+
+    def test_missing_test_tls_input_does_not_create_destination(self):
+        (self.root / "samples/test-tls/tls-key.pem").unlink()
+        self.install("install", "server", success=False)
         self.assertFalse(self.dest.exists())
 
     def test_standalone_build_targets_still_compile(self):

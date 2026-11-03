@@ -45,6 +45,8 @@ tls-ca = "/path/to/ca.crt"
 
 QUIC 独立资源配置、监听自动恢复、健康检查与新指标已提供；参数默认值、重启规则和验证边界见 [优化交付记录](docs/quic-optimization-status.md) 与 [性能文档](docs/quic-performance.md)。进程缓冲预算 `memory-budget-bytes` 默认 0（不限制），需显式配置；它不是 RSS 上限。Linux 同条件 TCP/UDP 弱网脚本已交付，尚未实测。
 
+安装包同时包含 `samples/test-tls/` 测试证书和公开测试私钥，适用于本机 QUIC/WSS 安装验证，不会自动启用；路径及配置见 [测试证书说明](samples/test-tls/README.md)。
+
 ## 功能
 
 - 两个独立程序：`sgate-client`、`sgate-server`。

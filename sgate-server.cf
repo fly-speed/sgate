@@ -62,6 +62,11 @@ service sgate-server {
     # Relative application paths resolve from the process working directory.
     # Standalone proxy listen address; shared management allows HTTP on any interface. Set tls-cert/tls-key for HTTPS/WSS.
     listen = 127.0.0.1:8081
+    # Optional QUIC UDP listener; empty disables QUIC. Requires tls-cert and tls-key below.
+    # Use host:port, not acl_master's IP|port syntax. TCP and UDP may share the same port.
+    # Example: 0.0.0.0:1080 matches master_service = |1080 in managed mode;
+    # 127.0.0.1:8081 matches listen above in standalone mode. Restart the process after changes.
+    quic-listen =
     # Default backend TCP address forwarded by the server, in host:port format.
     target = 127.0.0.1:8080
     # Comma-separated allowed backends selectable through client addr; exact host:port matching, with IPs or domain names.
