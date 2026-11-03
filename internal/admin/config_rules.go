@@ -61,6 +61,7 @@ func configurationRules() map[string]configRule {
 	add("vpn-noise-rate", configRule{Type: "bytes", Min: "0", Max: "10485760", Hint: "本端每条 VPN 连接每秒噪音负载字节，支持 K/M；0 关闭，上限 10M。拥塞或业务排队时让出，不补发暂停额度。"})
 	add("vpn-noise-idle-after", configRule{Type: "duration", Min: "0", Max: "9223372036854775807", Hint: "连续无双向业务 IP 数据的空闲阈值，支持 ms/s/m/h；0 使用 1s。"})
 	add("vpn-mode", configRule{Type: "enum", Choices: []string{"disabled", "both", "only"}, Hint: "关闭 / 代理与 VPN 共存 / 仅 VPN；客户端应用配置后需手动启动 VPN，服务端自动监听。"})
+	add("vpn-queue-max-age", configRule{Type: "duration", Min: "0", Max: "60000000000", Hint: "发送队列过期时间，0 关闭过期丢弃（默认），最多 1m；弱网 TCP 建议保持 0，队列容量仍有限制。"})
 	add("vpn-mtu", configRule{Type: "integer", Min: "576", Max: "1500", Hint: "IPv4 TUN MTU，默认 1280 字节。"})
 	add("vpn-max-clients", configRule{Type: "integer", Min: "1", Max: "254", Hint: "同时认证客户端数，1～254。"})
 	add("vpn-listen", configRule{Type: "listen", Required: true, Hint: "VPN 独立 UDP 地址，不能与 quic-listen 共用 UDP 端口。"})

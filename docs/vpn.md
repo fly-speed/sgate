@@ -188,7 +188,7 @@ sudo python3 scripts/test-vpn-linux.py \
 
 ### 负载下延迟与发送调度
 
-VPN 每个客户端仍使用一条 QUIC 连接，IP 数据通过 DATAGRAM 传输。发送端按内层 IPv4 源/目标地址、协议及 TCP/UDP 端口分流，采用 1500 字节量子的 DRR 公平调度；ICMP 回显按标识符区分，IP 分片按地址及协议归入同一流。每连接总缓存仍最多 64 个 IP 包；满时从最长流淘汰最旧包，让新短流有机会入队。排队超过 250 ms 的包在入队或出队时丢弃，避免长期发送过期积压。这是有界公平队列加驻留期限，并非完整 FQ-CoDel。
+VPN 每个客户端仍使用一条 QUIC 连接，IP 数据通过 DATAGRAM 传输。发送端按内层 IPv4 源/目标地址、协议及 TCP/UDP 端口分流，采用 1500 字节量子的 DRR 公平调度；ICMP 回显按标识符区分，IP 分片按地址及协议归入同一流。每连接总缓存仍最多 64 个 IP 包；满时从最长流淘汰最旧包，让新短流有机会入队。默认不按等待时间丢弃包（`vpn-queue-max-age=0s`）；可选配置最多 1m 的过期时间。此前固定 250 ms 的策略会在高 RTT、低拥塞窗口下频繁丢弃正常 TCP 包，已取消默认启用。这是有界公平队列加可选驻留期限，并非完整 FQ-CoDel。
 
 QUIC 待发送数据报达到 4 个后暂停从公平队列取包，等发送回调通知再继续；当前每个 IP 包最多分为 2 个数据报，因此 QUIC 内部业务/噪音积压最多约 5 个。这仅约束尚未交给 UDP 的数据报，不限制正常在途数据或改变 QUIC 拥塞控制。协议格式和认证不变，可逐端更新；下载应优先更新发送数据的服务端，双向优化需更新两端。
 
@@ -203,3 +203,53 @@ QUIC 待发送数据报达到 4 个后暂停从公平队列取包，等发送回
 此前最多 64 项的重组表满时会拒绝新分片，旧缺片记录持续到两秒过期；持续丢包可能令新完整包也无法进入。现在容量满时淘汰最旧的未完成记录，允许新包立即参与重组，保持 64 项上限和逐包独立交付。概览及 stats API 新增 `tcp_mss_clamped_packets`、`fragment_reassembly_expired_packets`、`fragment_reassembly_evicted_packets`；重组超时和淘汰均计入总 IP 丢弃。过期记录在后续分片到达时回收，计数不是公网丢包率。
 
 这些变化不修改线协议，可与旧端逐端升级，建议更新两端后重启 VPN。MSS 只影响新的 TCP 握手，测试前关闭并重新打开浏览器以建立新连接。MSS 变小可能增加内层 TCP 包数及头部开销，需要同时比较弱网可用性、吞吐与 CPU。本机验证覆盖 TCP 校验和、奇偶对齐及 IP/TCP 选项、分片表满时恢复和真实 QUIC 双向握手包传递；没有重现用户实际 Gmail 登录会话，也未验证中美公网收益。
+
+### 不依赖聊天连接的 Gmail 对照诊断
+
+切换到故障 VPN 可能同时中断远程协助或聊天连接。使用本地 `scripts/diagnose-vpn.py` 完成测试并保存报告，再恢复可用网络；无需在故障 VPN 下等待在线回复。脚本不启停 VPN、不改路由/DNS，不读取浏览器 cookies、账号凭据或邮件；只测试未登录的公共 HTTPS 入口，响应正文和头部均丢弃。报告默认私有权限且不覆盖已有文件，每个探测后保存进度；被中断时可读取已完成部分。
+
+先在 OpenVPN 下运行：
+
+```sh
+python3 scripts/diagnose-vpn.py --label openvpn --output /tmp/gmail-openvpn.json --timeout 8
+```
+
+然后手动停止 OpenVPN、启动 sgate VPN，在终端运行：
+
+```sh
+python3 scripts/diagnose-vpn.py --label sgate --output /tmp/gmail-sgate.json \
+  --reference /tmp/gmail-openvpn.json --timeout 8 --budget 90
+```
+
+输出 `Saved` 后停止 sgate、恢复 OpenVPN。`--reference` 同时测试上一份报告的固定 IPv4 地址，保留 HTTPS 主机名及证书校验，用于区分系统 DNS 差异与传输差异。脚本包含相关域名的 macOS DNS 覆盖规则、系统 DNS 结果、VPN 端点及默认互联网路由、HTTP/1.1 与可用时的 HTTP/2/HTTP/3。系统 curl 不支持 HTTP/3 时明确跳过，不能据此断言 HTTP/3 可用或失败；`--http2` 的实际协商结果见 `http_version`。预算耗尽或测试期间路由变化会标记报告，未执行的探测不视为网络失败。
+
+HEAD 的 302/404 仅证明对应端点的 HTTPS 已建立，不证明登录后的 Gmail、浏览器代理、JavaScript、HTTP/3 或全部资源可用。`--download` 可额外采样公开 Gmail 登录入口的有限下载，不登录账号；超时后有 HTTP 200 和已下载字节也不能视为完整页面成功。建议保持两次测试配置相同、白噪音关闭，报告保留原始错误码及各阶段耗时，而非仅比较 ping。
+
+若 HEAD 均通过但 Gmail 仍停在加载页，使用正文模式（本地独立运行，完成后恢复可用 VPN 再查看报告）：
+
+```sh
+python3 scripts/diagnose-vpn.py --label sgate --output /tmp/gmail-sgate-body.json \
+  --download-only --timeout 20 --budget 60
+```
+
+正文模式分别尝试 HTTP/1.1 和本机 curl 支持时的 HTTP/2，跟随公开入口重定向；记录 `size_download`、`transfer_completed` 及 `stage`，区分未建立连接、TLS 阶段、已收到部分正文但超时。公共入口测试仍不能代替登录后的 Gmail 资源请求；浏览器 Network 中关键脚本/Fetch 的域名、错误和 h2/h3 协议有助于定位，常驻长轮询 Pending 本身并不表示故障。不需要提供 cookies、Authorization 或带查询参数的完整 URL。
+
+### 使用客户端配置进行隔离的真实 VPN HTTPS 测试
+
+新版 `sgate-client -vpn-diagnose` 在启动框架/代理/管理界面之前进入一次性诊断，读取现有 `.cf` 的 VPN 服务端、密钥、CA、子网、虚拟 IP 和 MTU。先停止 sgate VPN（OpenVPN 可以保持连接），使用新版程序在管理员终端运行：
+
+```sh
+/绝对路径/sgate/bin/sgate-client -alone \
+  -f /opt/soft/sgate/conf/sgate-client.cf -vpn-diagnose \
+  > /tmp/sgate-vpn-isolated.json
+```
+
+只有配置关闭 VPN 时，才在上述命令另加 `-vpn-mode=only` 以诊断配置中已填写的 VPN 参数；不会保存这个覆盖。默认使用原配置文件路径；如果密钥/CA 路径为相对路径，须在正常客户端启动时相同的工作目录运行。既有 `master_args` 中通过命令行提供的覆盖需要在此命令中同样提供。
+
+诊断先执行不占用地址的认证/回显测试；已有同虚拟 IP 会话或客户端数达到上限时直接返回，不挤掉现有连接。随后独立创建 TUN，只为 mail.google.com、accounts.google.com、www.gstatic.com、ssl.gstatic.com 的解析 IPv4 地址添加临时 `/32` 路由；不修改默认路由、DNS、IPv6 路由或配置文件，诊断白噪音关闭。已有目标主机路由冲突时失败并回滚，不覆盖别人的路由。使用系统 TCP/TLS 和 HTTP/2（可协商时）通过真实 sgate 数据报进行公开 GET 下载，报告请求状态、字节数、耗时、错误及 VPN 指标。请求不使用浏览器代理、cookies、账号或邮箱数据，最多读取每个响应 2 MiB，单项 HTTPS 上限 45 秒，整个诊断限时 180 秒。
+
+正常完成、超时或 SIGINT/SIGTERM 时等待测试客户端退出并清理其临时网络，再输出 JSON。不要用 SIGKILL。此测试能验证真实 VPN 的 IP/TCP/TLS/公开正文传输，仍不等于登录后 Gmail 的所有资源或浏览器 HTTP/3 均通过。诊断代码已通过网络范围和占用地址保护测试；真实特权 TUN/路由步骤需要在用户机器的管理员终端验证。
+
+诊断 TCP 套接字同时绑定测试 TUN 网卡与虚拟源 IPv4，返回 `local_address` / `remote_address`，避免系统分流让测试流量绕过 sgate。每项记录首次响应时间、该时间段的 VPN IP 收发字节、`body_was_gzip_decoded`；Go 自动 gzip 解压后的正文大小与隧道 IP 字节不能直接比较。HTTP 200 后读正文超时表示响应未在测试期限内完成，不等同于认证失败或 Gmail 不可达；这类报告仍保留部分字节和具体错误。客户端零丢包计数不排除服务端发送方向或中间网络丢包。
+
+服务端实际排查曾观察到累计 1877 个过期丢弃、28 个满队列丢弃和约 3.43 KiB 拥塞窗口。这些不是同一请求的精确因果统计，但显示固定 250 ms 期限会在该链路大量主动丢弃。现在两端默认关闭时间过期，保留每连接 64 包上限、按流 DRR、公平入队及 QUIC 准入限制；满队列时仍从最长流淘汰最旧包。`vpn-queue-max-age` 可在两端配置及网页独立设置；独立 CLI 对应 `queue-max-age`。升级旧配置缺少此项时默认 0，不需要先补配置才能修正。启用过期策略仍可能牺牲 TCP 有效吞吐，不能仅凭 ping RTT 下降判定改善。

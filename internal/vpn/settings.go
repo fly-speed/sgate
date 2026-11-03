@@ -28,6 +28,7 @@ func Settings(role string) []Setting {
 		{"vpn-mode", "disabled", "独立 VPN：disabled 关闭，both 与代理共存，only 仅 VPN（保留框架及管理监听）。应用时会中断 VPN 并恢复/重建网络。"},
 		{"vpn-network", "10.77.0.0/24", "两端一致的 IPv4 VPN 子网，避免与现有网络重叠。"},
 		{"vpn-mtu", "1280", "TUN MTU，576～1500 字节。"},
+		{"vpn-queue-max-age", "0s", "发送队列过期时间，0 关闭过期丢弃（默认）；最多 1m。弱网 TCP 建议保持 0，队列容量仍有上限。"},
 		{"vpn-tun-name", "", "新建设备名；Linux 默认 sgate0，macOS 自动分配 utunN。"},
 		{"vpn-manage-network", "true", "自动配置路由、DNS 或服务端 NAT；需要管理员权限。"},
 		{"vpn-key-file", "", "VPN 共享密钥文件；留空复用 key-file；不是代理或 Web 账号认证。"},
@@ -63,6 +64,8 @@ func RegisterFlags(fs *flag.FlagSet, role string) {
 			cli.ByteSizeVar(fs, new(int), s.Key, 0, s.Description)
 		case "vpn-noise-idle-after":
 			fs.Duration(s.Key, time.Second, s.Description)
+		case "vpn-queue-max-age":
+			fs.Duration(s.Key, 0, s.Description)
 		case "vpn-mtu":
 			fs.Int(s.Key, 1280, s.Description)
 		case "vpn-max-clients":
@@ -127,6 +130,10 @@ func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Pref
 	}
 	p.Config = Config{Key: key, Network: network, MTU: mtu, ClientIP: netip.MustParseAddr("10.77.0.2"), Address: "127.0.0.1:8444", MaxClients: 64}
 	p.Network = NetworkOptions{Server: p.Role == "server", Network: network, MTU: mtu, Egress: get("vpn-egress-interface"), BlockIPv6: get("vpn-block-ipv6") == "true", DNSService: get("vpn-dns-service")}
+	p.Config.QueueMaxAge, noiseErr = time.ParseDuration(get("vpn-queue-max-age"))
+	if noiseErr != nil {
+		return nil, noiseErr
+	}
 	p.Config.Noise = NoiseConfig{Rate: noiseRate, Traffic: get("vpn-noise-traffic") == "true", Idle: get("vpn-noise-idle") == "true", IdleAfter: idleAfter}
 	p.Config.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
 	if p.Role == "server" {

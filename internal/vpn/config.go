@@ -35,6 +35,7 @@ type Config struct {
 	MaxClients         int
 	AllowPrivate       bool
 	Noise              NoiseConfig
+	QueueMaxAge        time.Duration
 	RetryMin, RetryMax time.Duration
 	// Called after authentication, once per client process. Cleanup runs on exit.
 	Connected func() (func(), error)
@@ -86,6 +87,9 @@ func (c Config) normalized(server bool) (Config, error) {
 	}
 	if c.RetryMin <= 0 || c.RetryMax < c.RetryMin {
 		return c, errors.New("invalid VPN retry interval")
+	}
+	if c.QueueMaxAge < 0 || c.QueueMaxAge > time.Minute {
+		return c, errors.New("VPN queue maximum age must be 0..1m; 0 disables age expiry")
 	}
 	if c.Noise.Rate < 0 || c.Noise.Rate > maxNoiseRate || c.Noise.IdleAfter < 0 {
 		return c, errors.New("invalid VPN noise rate (0..10M bytes/s) or idle threshold")

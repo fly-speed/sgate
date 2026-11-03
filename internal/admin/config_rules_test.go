@@ -228,6 +228,11 @@ func TestPublicCommandLineOptionsHaveFormRules(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			// One-shot operational diagnostics exit before starting the service;
+			// they are CLI actions rather than editable configuration settings.
+			if name == "vpn-diagnose" {
+				return true
+			}
 			if _, exists := configRules[name]; !exists {
 				t.Errorf("%s option %s has no form validation rule", role, name)
 			}

@@ -180,6 +180,8 @@ service vpn-server {
     vpn-network = 10.77.0.0/24
     # TUN MTU in bytes, from 576 to 1500.
     vpn-mtu = 1280
+    # Queue expiry: 0 disables age drops (recommended for weak-link TCP); maximum 1m.
+    vpn-queue-max-age = 0s
     # New TUN device name; empty uses sgate0 on Linux or automatically allocates utunN on macOS.
     vpn-tun-name = ''
     # Automatically configure routes, DNS or server NAT; requires administrator privileges.

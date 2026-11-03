@@ -24,6 +24,7 @@ type vpnHealth struct {
 	Network      string       `json:"network,omitempty"`
 	ClientIP     string       `json:"client_ip,omitempty"`
 	LastError    string       `json:"last_error,omitempty"`
+	QueueMaxAge  string       `json:"queue_max_age"`
 	NoiseRate    int          `json:"noise_rate"`
 	NoiseTraffic bool         `json:"noise_traffic"`
 	NoiseIdle    bool         `json:"noise_idle"`
@@ -80,7 +81,7 @@ func (i *instance) startVPNWithDevice(ctx context.Context, p *vpn.Prepared, open
 		return
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	v := &vpnWorker{stats: &vpn.Stats{}, cancel: cancel, done: make(chan struct{}), health: vpnHealth{Generation: strconv.FormatInt(time.Now().UnixNano(), 10), Enabled: true, NoiseRate: p.Config.Noise.Rate, NoiseTraffic: p.Config.Noise.Traffic, NoiseIdle: p.Config.Noise.Idle, State: "starting", Role: p.Role, Mode: p.Mode, Network: p.Config.Network.String()}}
+	v := &vpnWorker{stats: &vpn.Stats{}, cancel: cancel, done: make(chan struct{}), health: vpnHealth{Generation: strconv.FormatInt(time.Now().UnixNano(), 10), Enabled: true, QueueMaxAge: p.Config.QueueMaxAge.String(), NoiseRate: p.Config.Noise.Rate, NoiseTraffic: p.Config.Noise.Traffic, NoiseIdle: p.Config.Noise.Idle, State: "starting", Role: p.Role, Mode: p.Mode, Network: p.Config.Network.String()}}
 	i.vpn = v
 	go func() {
 		defer close(v.done)
@@ -177,7 +178,7 @@ func (c *controller) workerVPNStatus() vpnHealth {
 	}
 	if c.worker.vpn == nil && c.current.vpn != nil && c.role == "client" {
 		p := c.current.vpn
-		return vpnHealth{Enabled: true, Healthy: true, State: "stopped", Role: "client", Mode: p.Mode, Network: p.Config.Network.String(), NoiseRate: p.Config.Noise.Rate, NoiseTraffic: p.Config.Noise.Traffic, NoiseIdle: p.Config.Noise.Idle}
+		return vpnHealth{Enabled: true, Healthy: true, State: "stopped", Role: "client", Mode: p.Mode, Network: p.Config.Network.String(), QueueMaxAge: p.Config.QueueMaxAge.String(), NoiseRate: p.Config.Noise.Rate, NoiseTraffic: p.Config.Noise.Traffic, NoiseIdle: p.Config.Noise.Idle}
 	}
 	h := c.worker.vpn.snapshot()
 	if c.role == "client" {

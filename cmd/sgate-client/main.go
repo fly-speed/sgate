@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"os"
 	"os/signal"
+	"sgate/internal/vpn"
 	"syscall"
 
 	master "github.com/acl-dev/go-service"
@@ -29,6 +32,20 @@ func run() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if options.vpnDiagnose {
+		prepared, err := vpn.Prepare("client", flag.CommandLine)
+		if err != nil {
+			return err
+		}
+		report := vpn.Diagnose(ctx, prepared)
+		if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
+			return err
+		}
+		if report.Error != "" {
+			return fmt.Errorf("VPN diagnostic failed at %s", report.Stage)
+		}
+		return nil
+	}
 	proxy, err := app.NewClient(ctx, flag.CommandLine, os.Args[1:], options.adminConfig)
 	if err != nil {
 		return err

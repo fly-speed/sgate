@@ -8,8 +8,8 @@ import (
 )
 
 // Keep IP packets in the fair scheduler until QUIC is ready to send them.
-// This is bounded DRR with a residence deadline, not an implementation of CoDel.
-const maxQueueAge = 250 * time.Millisecond
+// Optional age expiry is disabled by default; short fixed deadlines can
+// repeatedly discard TCP retransmissions on congested high-RTT paths.
 const flowQuantum = 1500
 
 type flowKey [13]byte
@@ -23,13 +23,16 @@ type packetFlow struct {
 	deficit int
 }
 type packetQueue struct {
-	mu    sync.Mutex
-	flows []*packetFlow
-	count int
-	ready chan struct{}
+	mu     sync.Mutex
+	flows  []*packetFlow
+	count  int
+	ready  chan struct{}
+	maxAge time.Duration
 }
 
-func newPacketQueue() *packetQueue { return &packetQueue{ready: make(chan struct{}, 1)} }
+func newPacketQueue(maxAge time.Duration) *packetQueue {
+	return &packetQueue{ready: make(chan struct{}, 1), maxAge: maxAge}
+}
 func packetFlowKey(p []byte) (key flowKey) {
 	if len(p) < 20 {
 		return
@@ -76,7 +79,7 @@ func (q *packetQueue) dropHead(f *packetFlow, stats *Stats, expired bool) {
 func (q *packetQueue) prune(now time.Time, stats *Stats) {
 	active := q.flows[:0]
 	for _, f := range q.flows {
-		for len(f.packets) > 0 && now.Sub(f.packets[0].at) > maxQueueAge {
+		for q.maxAge > 0 && len(f.packets) > 0 && now.Sub(f.packets[0].at) > q.maxAge {
 			q.dropHead(f, stats, true)
 		}
 		if len(f.packets) > 0 {

@@ -352,7 +352,7 @@ func (s *Server) accept(ctx context.Context, conn *quic.Conn) {
 		return
 	}
 	flow, _ := conn.Context().Value(flowContextKey{}).(*datagramFlow)
-	p := &peer{conn: conn, control: control, id: h.ID, ip: ip, queue: newPacketQueue(), padding: h.Padding, flow: flow}
+	p := &peer{conn: conn, control: control, id: h.ID, ip: ip, queue: newPacketQueue(s.cfg.QueueMaxAge), padding: h.Padding, flow: flow}
 	s.mu.Lock()
 	old := s.peers[ip]
 	if (old != nil && old.id != h.ID) || (old == nil && len(s.peers) >= s.cfg.MaxClients) {
@@ -528,7 +528,7 @@ func clientConnection(ctx context.Context, c Config, id string, active *atomic.P
 		return errors.New("invalid VPN server assignment")
 	}
 	control.SetDeadline(time.Time{})
-	p := &peer{conn: conn, control: control, id: id, ip: c.ClientIP, queue: newPacketQueue(), padding: h.Padding && reply.Padding, flow: flow}
+	p := &peer{conn: conn, control: control, id: id, ip: c.ClientIP, queue: newPacketQueue(c.QueueMaxAge), padding: h.Padding && reply.Padding, flow: flow}
 	if c.Connected != nil && *cleanup == nil {
 		undo, err := c.Connected()
 		if err != nil {

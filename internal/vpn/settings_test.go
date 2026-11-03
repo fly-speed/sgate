@@ -72,3 +72,24 @@ func TestVPNNoiseSettingsAndLimits(t *testing.T) {
 		t.Fatal("negative idle threshold accepted")
 	}
 }
+
+func TestVPNQueueExpiryIsOptInForOldConfigurations(t *testing.T) {
+	fs := integratedSettings(t)
+	fs.Set("vpn-mode", "only")
+	p, err := Prepare("client", fs)
+	if err != nil || p.Config.QueueMaxAge != 0 {
+		t.Fatal("missing setting enabled age expiry", p, err)
+	}
+	before := p.Fingerprint
+	fs.Set("vpn-queue-max-age", "250ms")
+	p, err = Prepare("client", fs)
+	if err != nil || p.Config.QueueMaxAge.String() != "250ms" || p.Fingerprint == before {
+		t.Fatal("explicit expiry ignored", p, err)
+	}
+	for _, value := range []string{"-1ms", "61s"} {
+		fs.Set("vpn-queue-max-age", value)
+		if _, err := Prepare("client", fs); err == nil {
+			t.Fatal("invalid queue age accepted", value)
+		}
+	}
+}

@@ -2287,6 +2287,7 @@ function vpnQueueObservationText(v) {
  return t("QUIC RTT 最近采样：")+Number(q.last_smoothed_rtt_ms||0).toFixed(1)+" ms · "+
  t("拥塞窗口/在途：")+units(q.last_congestion_window_bytes||0)+" / "+units(q.last_bytes_in_flight||0)+" · "+
  t("VPN 发送队列峰值：")+(q.send_queue_peak_packets||0)+" / 64 · "+
+ (v.queue_max_age ? (v.queue_max_age === "0s" ? t("队列过期丢弃：关闭") : t("队列过期时间：")+v.queue_max_age)+" · " : "")+
  t("最长排队：")+Number(q.send_queue_max_wait_ms||0).toFixed(1)+" ms · "+
  t("过期/满队列丢弃：")+(q.send_queue_expired_packets||0)+" / "+(q.send_queue_overflow_packets||0)+" · "+
  t("QUIC 提交最长耗时：")+Number(q.send_datagram_max_wait_ms||0).toFixed(1)+" ms · "+

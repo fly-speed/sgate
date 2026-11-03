@@ -3,6 +3,10 @@
 // UI translations only: editable values and protocol/configuration keys are never translated.
 const sgateI18n = (() => {
   const messages = {
+ "队列过期丢弃：关闭": "Queue age expiry: disabled",
+ "队列过期时间：": "Queue expiry: ",
+ "发送队列过期时间，0 关闭过期丢弃（默认）；最多 1m。弱网 TCP 建议保持 0，队列容量仍有上限。": "Send queue expiry: 0 disables age drops (default), up to 1m. Keep 0 for weak-link TCP; queue capacity remains bounded.",
+ "发送队列过期时间，0 关闭过期丢弃（默认），最多 1m；弱网 TCP 建议保持 0，队列容量仍有限制。": "Send queue expiry: 0 disables age drops (default), up to 1m. Keep 0 for weak-link TCP; queue capacity remains bounded.",
  "TCP MSS 调整：": "TCP MSS adjustments: ",
  "分片重组超时/淘汰：": "Fragment reassembly expired/evicted: ",
  "QUIC RTT 最近采样：": "Latest QUIC RTT sample: ",

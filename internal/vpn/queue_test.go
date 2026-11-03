@@ -19,7 +19,7 @@ func queuePacket(port uint16, size int) []byte {
 	return p
 }
 func TestVPNQueueShortFlowEntersFullBulkQueue(t *testing.T) {
-	q, s := newPacketQueue(), &Stats{}
+	q, s := newPacketQueue(0), &Stats{}
 	now := time.Now()
 	for n := 0; n < queueSize; n++ {
 		q.push(queuePacket(1000, 1280), now, s)
@@ -42,7 +42,7 @@ func TestVPNQueueShortFlowEntersFullBulkQueue(t *testing.T) {
 	}
 }
 func TestVPNQueueByteFairnessAndPerFlowOrder(t *testing.T) {
-	q, s := newPacketQueue(), &Stats{}
+	q, s := newPacketQueue(0), &Stats{}
 	now := time.Now()
 	for n := 0; n < 32; n++ {
 		large := queuePacket(1000, 1500)
@@ -75,7 +75,8 @@ func TestVPNQueueByteFairnessAndPerFlowOrder(t *testing.T) {
 	}
 }
 func TestVPNQueueExpiryAndPacketOwnership(t *testing.T) {
-	q, s := newPacketQueue(), &Stats{}
+	maxQueueAge := 250 * time.Millisecond
+	q, s := newPacketQueue(maxQueueAge), &Stats{}
 	now := time.Now()
 	p := queuePacket(1000, 60)
 	q.push(p, now, s)
@@ -105,7 +106,7 @@ func TestVPNQueueClassifierAndConcurrentBounds(t *testing.T) {
 	for n := 0; n < 20; n++ {
 		packetFlowKey(a[:n])
 	}
-	q, s := newPacketQueue(), &Stats{}
+	q, s := newPacketQueue(0), &Stats{}
 	var wg sync.WaitGroup
 	for worker := 0; worker < 8; worker++ {
 		wg.Add(1)
@@ -127,7 +128,7 @@ func TestVPNQueueClassifierAndConcurrentBounds(t *testing.T) {
 func TestVPNAdmissionWaitIsCancelableAndKeepsShortFlowSchedulable(t *testing.T) {
 	flow := newDatagramFlow()
 	flow.queued.Store(4)
-	p := &peer{flow: flow, queue: newPacketQueue()}
+	p := &peer{flow: flow, queue: newPacketQueue(0)}
 	stats := &Stats{}
 	now := time.Now()
 	for n := 0; n < 30; n++ {
@@ -201,5 +202,25 @@ func TestVPNFairQueueContinuousDuplexFragmentedPackets(t *testing.T) {
 	server.mu.Unlock()
 	if p.flow.pending() > 5 {
 		t.Fatal("QUIC queue exceeded admission bound")
+	}
+}
+
+func TestVPNQueueDefaultDoesNotExpireDuringCongestion(t *testing.T) {
+	q, s := newPacketQueue(0), &Stats{}
+	now := time.Now()
+	for n := 0; n < queueSize; n++ {
+		q.push(queuePacket(1000, 1280), now, s)
+	}
+	// A prolonged QUIC pause must not expire every TCP packet and force another
+	// round of TCP retransmissions on top of outer congestion recovery.
+	packet := q.pop(now.Add(3*time.Second), s)
+	if packet == nil || s.Snapshot().QueueExpired != 0 || q.len() != queueSize-1 {
+		t.Fatal("default queue still drops by age", s.Snapshot())
+	}
+	for n := 0; n < queueSize*2; n++ {
+		q.push(queuePacket(2000, 60), now.Add(4*time.Second), s)
+	}
+	if q.len() != queueSize || s.Snapshot().QueuePeak > queueSize || s.Snapshot().QueueOverflow == 0 {
+		t.Fatal("disabling expiry removed the capacity bound", s.Snapshot())
 	}
 }

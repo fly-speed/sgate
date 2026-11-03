@@ -13,6 +13,7 @@ import (
 // clientOptions 集中保存命令行/配置文件合并后的值，main 只负责选择运行方式。
 type clientOptions struct {
 	adminEnabled     bool
+	vpnDiagnose      bool
 	adminConfig      string
 	listen           string
 	server           string
@@ -43,6 +44,7 @@ func parseClientOptions() (clientOptions, error) {
 	cli.ResourceFlags(flag.CommandLine)
 	vpn.RegisterFlags(flag.CommandLine, "client")
 	var options clientOptions
+	flag.BoolVar(&options.vpnDiagnose, "vpn-diagnose", false, "run isolated VPN HTTPS diagnostics and exit; no default route or DNS changes")
 	flag.BoolVar(
 		&options.adminEnabled,
 		"admin-enabled",
