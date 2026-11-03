@@ -2291,5 +2291,8 @@ function vpnQueueObservationText(v) {
  t("过期/满队列丢弃：")+(q.send_queue_expired_packets||0)+" / "+(q.send_queue_overflow_packets||0)+" · "+
  t("QUIC 提交最长耗时：")+Number(q.send_datagram_max_wait_ms||0).toFixed(1)+" ms · "+
  t("QUIC 准入等待累计：")+Number(q.send_admission_wait_ms||0).toFixed(1)+" ms · "+
- t("TUN 交付最长耗时：")+Number(q.tun_delivery_max_wait_ms||0).toFixed(1)+" ms · "+t("指标自 VPN 启动累计，包含各在线客户端。");
+ t("TUN 交付最长耗时：")+Number(q.tun_delivery_max_wait_ms||0).toFixed(1)+" ms · "+
+ t("TCP MSS 调整：")+(q.tcp_mss_clamped_packets||0)+" · "+
+ t("分片重组超时/淘汰：")+(q.fragment_reassembly_expired_packets||0)+" / "+(q.fragment_reassembly_evicted_packets||0)+" · "+
+ t("指标自 VPN 启动累计，包含各在线客户端。");
 }

@@ -54,6 +54,9 @@ func (p *peer) run(ctx context.Context, c Config, receive func([]byte) error) er
 		}
 		pacer := noisePacer{last: time.Now()}
 		send := func(packet []byte) error {
+			if clampTCPMSS(packet, c.MTU) {
+				c.Stats.mssClamped.Add(1)
+			}
 			id++
 			err := fragments(packet, id, p.sendDatagram)
 			if err != nil {
@@ -106,7 +109,7 @@ func (p *peer) run(ctx context.Context, c Config, receive func([]byte) error) er
 		}
 	}()
 	go func() {
-		r := reassembler{}
+		r := reassembler{stats: c.Stats}
 		for {
 			data, err := p.conn.ReceiveDatagram(ctx)
 			if err != nil {
@@ -128,6 +131,9 @@ func (p *peer) run(ctx context.Context, c Config, receive func([]byte) error) er
 			}
 			if packet == nil {
 				continue
+			}
+			if clampTCPMSS(packet, c.MTU) {
+				c.Stats.mssClamped.Add(1)
 			}
 			p.businessActivity()
 			began := time.Now()

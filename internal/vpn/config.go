@@ -153,6 +153,7 @@ func quicConfig(stats ...*Stats) *quic.Config {
 }
 
 type Stats struct {
+	mssClamped, fragmentExpired, fragmentEvicted              atomic.Uint64
 	cwnd, inflight                                            atomic.Int64
 	queuePeak, queueWaitMax, queueExpired, queueOverflow      atomic.Uint64
 	tunWriteMax, admissionBlocked, sendWaitMax, admissionWait atomic.Uint64
@@ -164,6 +165,10 @@ type Stats struct {
 	noiseUnsupported                                          atomic.Int64
 }
 type Snapshot struct {
+	MSSClamped      uint64 `json:"tcp_mss_clamped_packets"`
+	FragmentExpired uint64 `json:"fragment_reassembly_expired_packets"`
+	FragmentEvicted uint64 `json:"fragment_reassembly_evicted_packets"`
+
 	CongestionWindow int64   `json:"last_congestion_window_bytes"`
 	Inflight         int64   `json:"last_bytes_in_flight"`
 	TunWriteMaxMS    float64 `json:"tun_delivery_max_wait_ms"`
@@ -192,7 +197,7 @@ type Snapshot struct {
 }
 
 func (s *Stats) Snapshot() Snapshot {
-	return Snapshot{CongestionWindow: s.cwnd.Load(), Inflight: s.inflight.Load(), TunWriteMaxMS: float64(s.tunWriteMax.Load()) / 1e6, AdmissionBlocked: s.admissionBlocked.Load(), QueuePeak: s.queuePeak.Load(), QueueWaitMaxMS: float64(s.queueWaitMax.Load()) / 1e6, QueueExpired: s.queueExpired.Load(), QueueOverflow: s.queueOverflow.Load(), SendWaitMaxMS: float64(s.sendWaitMax.Load()) / 1e6, AdmissionWaitMS: float64(s.admissionWait.Load()) / 1e6, NoiseTX: s.noiseTX.Load(), NoiseRX: s.noiseRX.Load(), NoiseSkipped: s.noiseSkipped.Load(), NoiseUnsupported: s.noiseUnsupported.Load(), RTT: float64(s.rtt.Load()) / 1e6, Lost: s.lost.Load(), PTO: s.pto.Load(), TX: s.tx.Load(), RX: s.rx.Load(), Drops: s.drops.Load(), AuthRejected: s.auth.Load(), Connections: s.connections.Load(), Active: s.active.Load()}
+	return Snapshot{MSSClamped: s.mssClamped.Load(), FragmentExpired: s.fragmentExpired.Load(), FragmentEvicted: s.fragmentEvicted.Load(), CongestionWindow: s.cwnd.Load(), Inflight: s.inflight.Load(), TunWriteMaxMS: float64(s.tunWriteMax.Load()) / 1e6, AdmissionBlocked: s.admissionBlocked.Load(), QueuePeak: s.queuePeak.Load(), QueueWaitMaxMS: float64(s.queueWaitMax.Load()) / 1e6, QueueExpired: s.queueExpired.Load(), QueueOverflow: s.queueOverflow.Load(), SendWaitMaxMS: float64(s.sendWaitMax.Load()) / 1e6, AdmissionWaitMS: float64(s.admissionWait.Load()) / 1e6, NoiseTX: s.noiseTX.Load(), NoiseRX: s.noiseRX.Load(), NoiseSkipped: s.noiseSkipped.Load(), NoiseUnsupported: s.noiseUnsupported.Load(), RTT: float64(s.rtt.Load()) / 1e6, Lost: s.lost.Load(), PTO: s.pto.Load(), TX: s.tx.Load(), RX: s.rx.Load(), Drops: s.drops.Load(), AuthRejected: s.auth.Load(), Connections: s.connections.Load(), Active: s.active.Load()}
 }
 
 // ValidateConfig permits command entrypoints to reject unsafe input before TUN setup.

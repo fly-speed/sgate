@@ -29,7 +29,22 @@ type assembly struct {
 	total   int
 	chunks  [2][]byte
 }
-type reassembler struct{ packets map[uint64]*assembly }
+type reassembler struct {
+	packets map[uint64]*assembly
+	stats   *Stats
+}
+
+func (r *reassembler) discard(id uint64, expired bool) {
+	delete(r.packets, id)
+	if r.stats != nil {
+		r.stats.drops.Add(1)
+		if expired {
+			r.stats.fragmentExpired.Add(1)
+		} else {
+			r.stats.fragmentEvicted.Add(1)
+		}
+	}
+}
 
 func (r *reassembler) push(data []byte, mtu int, now time.Time) ([]byte, error) {
 	if len(data) < headerSize || data[0] != 1 || data[1] != 0 {
@@ -57,13 +72,23 @@ func (r *reassembler) push(data []byte, mtu int, now time.Time) ([]byte, error) 
 	}
 	for k, p := range r.packets {
 		if now.Sub(p.created) > 2*time.Second {
-			delete(r.packets, k)
+			r.discard(k, true)
 		}
 	}
 	p := r.packets[id]
 	if p == nil {
 		if len(r.packets) >= 64 {
-			return nil, errors.New("VPN reassembly capacity exceeded")
+			// A missing tail must not prevent unrelated complete packets from
+			// entering for the remainder of the two-second timeout.
+			var oldest uint64
+			var created time.Time
+			for id, entry := range r.packets {
+				if created.IsZero() || entry.created.Before(created) || entry.created.Equal(created) && id < oldest {
+					oldest = id
+					created = entry.created
+				}
+			}
+			r.discard(oldest, false)
 		}
 		p = &assembly{created: now, total: total}
 		r.packets[id] = p

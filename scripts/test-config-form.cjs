@@ -2007,3 +2007,9 @@ test("VPN queue observation exposes cumulative metrics and tolerates older serve
  const result=vm.runInContext('vpnQueueObservationText({enabled:true,stats:{send_queue_peak_packets:64,send_queue_max_wait_ms:123.45,send_queue_expired_packets:7,send_queue_overflow_packets:8,send_datagram_max_wait_ms:1.2,send_admission_wait_ms:456.7,tun_delivery_max_wait_ms:2.3}})',context);
  for(const text of ["64 / 64","123.5 ms","7 / 8","1.2 ms","456.7 ms","2.3 ms"]) assert.ok(result.includes(text),result);
 });
+
+test("VPN observations expose MSS and fragment eviction counters", async () => {
+ const {context}=await page();
+ const result=vm.runInContext('vpnQueueObservationText({enabled:true,stats:{send_queue_max_wait_ms:0,tcp_mss_clamped_packets:123,fragment_reassembly_expired_packets:45,fragment_reassembly_evicted_packets:67}})',context);
+ assert.match(result,/123/);assert.match(result,/45 \/ 67/);
+});

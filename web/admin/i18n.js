@@ -3,6 +3,8 @@
 // UI translations only: editable values and protocol/configuration keys are never translated.
 const sgateI18n = (() => {
   const messages = {
+ "TCP MSS 调整：": "TCP MSS adjustments: ",
+ "分片重组超时/淘汰：": "Fragment reassembly expired/evicted: ",
  "QUIC RTT 最近采样：": "Latest QUIC RTT sample: ",
  "拥塞窗口/在途：": "Congestion window/in flight: ",
  "VPN 发送队列峰值：": "VPN peak send queue: ",

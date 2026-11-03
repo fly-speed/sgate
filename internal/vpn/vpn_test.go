@@ -292,8 +292,11 @@ func TestVPNFragmentLossReorderAndBounds(t *testing.T) {
 	if len(r.packets) > 64 {
 		t.Fatal("unbounded reassembly")
 	}
-	if _, err = r.push(collect(a, 100)[0], 1280, now); err == nil {
-		t.Fatal("reassembly limit bypassed")
+	if _, err = r.push(collect(a, 100)[0], 1280, now); err != nil || len(r.packets) != 64 {
+		t.Fatal("fresh packet blocked by incomplete assemblies", err)
+	}
+	if got, e := r.push(collect(a, 100)[1], 1280, now); e != nil || !bytes.Equal(got, a) {
+		t.Fatal("complete packet blocked at reassembly capacity", e)
 	}
 	if _, err = r.push(collect(a, 100)[0], 1280, now.Add(3*time.Second)); err != nil || len(r.packets) != 1 {
 		t.Fatal("stale fragments retained", err)
