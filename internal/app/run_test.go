@@ -19,10 +19,12 @@ import (
 
 	"sgate/internal/cli"
 	"sgate/internal/tunnel"
+	"sgate/internal/vpn"
 )
 
 func appFlags(role string) *flag.FlagSet {
 	fs := flag.NewFlagSet(role, flag.ContinueOnError)
+	vpn.RegisterFlags(fs, role)
 	for _, v := range []struct{ n, v string }{
 		{"listen", "127.0.0.1:0"},
 		{"key-file", ""},

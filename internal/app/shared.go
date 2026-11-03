@@ -17,16 +17,26 @@ const managementPath = "/admin/"
 // sharedServer survives proxy replacement. In particular, an apply request
 // never closes or waits for the HTTP worker that is executing that request.
 type sharedServer struct {
-	mu     sync.Mutex
-	closed bool
-	admin  http.Handler
-	proxy  atomic.Pointer[tunnel.Server]
-	tls    atomic.Pointer[tls.Config]
+	mu      sync.Mutex
+	closed  bool
+	vpnOnly atomic.Bool
+	admin   http.Handler
+	proxy   atomic.Pointer[tunnel.Server]
+	tls     atomic.Pointer[tls.Config]
 }
 
-func (s *sharedServer) NativeQUICServer() *tunnel.Server { return s.proxy.Load() }
+func (s *sharedServer) NativeQUICServer() *tunnel.Server {
+	if s.vpnOnly.Load() {
+		return nil
+	}
+	return s.proxy.Load()
+}
 
 func (s *sharedServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if s.vpnOnly.Load() {
+		http.NotFound(w, r)
+		return
+	}
 	if proxy := s.proxy.Load(); proxy != nil {
 		proxy.ServeHTTP(w, r)
 	} else {
@@ -107,6 +117,8 @@ func (c *controller) replaceShared(next definition) error {
 		proxy.Close()
 		return e
 	}
+	c.replaceVPN(next)
+	c.shared.vpnOnly.Store(next.vpnOnly)
 	c.shared.proxy.Store(proxy)
 	if next.tls != nil {
 		c.shared.tls.Store(next.tls)

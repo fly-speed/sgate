@@ -15,6 +15,7 @@ import (
 	"sgate/internal/admin"
 	"sgate/internal/cli"
 	"sgate/internal/tunnel"
+	"sgate/internal/vpn"
 )
 
 // configValues 只读取已经完成类型校验和命令行覆盖合并的参数。
@@ -43,7 +44,29 @@ func (v configValues) duration(name string) time.Duration {
 
 func build(role string, fs *flag.FlagSet, stats *tunnel.Stats) (definition, error) {
 	values := configValues{flags: fs}
-	d := definition{listen: values.text("listen")}
+	prepared, vpnErr := vpn.Prepare(role, fs)
+	if vpnErr != nil {
+		return definition{}, vpnErr
+	}
+	d := definition{listen: values.text("listen"), vpn: prepared, vpnOnly: prepared != nil && prepared.Mode == "only"}
+	if d.vpnOnly {
+		secret := prepared.Config.Key
+		var e error
+		if role == "client" {
+			d.client = &tunnel.ClientConfig{Options: values.options(stats)}
+		} else {
+			d.tls, e = serverTLSConfig(values.text("tls-cert"), values.text("tls-key"))
+			if e != nil {
+				return d, e
+			}
+			d.quicListen = values.optionalText("quic-listen")
+			if d.quicListen != "" && d.tls == nil {
+				return d, errors.New("quic-listen requires tls-cert and tls-key")
+			}
+			d.server = &tunnel.ServerConfig{Key: secret, Target: "127.0.0.1:1", Path: values.text("path"), Accounts: []tunnel.Account{}, Options: values.options(stats)}
+		}
+		return d, nil
+	}
 	if role == "client" {
 		d.commonUsername = values.optionalText("username")
 		d.commonPassword = values.text("password")

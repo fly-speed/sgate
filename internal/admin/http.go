@@ -176,6 +176,7 @@ func (h *Handler) runtimeHealth() map[string]any {
 			result["healthy"] = value["running"] == true
 		}
 		result["quic"] = value["quic"]
+		result["vpn"] = value["vpn"]
 	}
 	return result
 }
@@ -553,6 +554,7 @@ func (h *Handler) getConfig(w http.ResponseWriter) {
 			fields[i].Validation.Options = argumentOptions(h.view.Role)
 		}
 	}
+	fields = vpnConfigFields(fields, h.view.Role)
 	configRevision := digest(b)
 	if h.view.Role == "client" {
 		fields = clientCredentialFields(fields)
@@ -592,6 +594,9 @@ func (h *Handler) getConfig(w http.ResponseWriter) {
 		}
 	}
 
+	if h.view.Role == "client" && h.vpnOnly(b) {
+		fields = slices.DeleteFunc(fields, func(f configField) bool { return f.Key == "proxies" || f.Key == "proxies-file" })
+	}
 	v := map[string]any{
 		"fields":               fields,
 		"content":              redactConfig(b),
@@ -639,6 +644,14 @@ func (h *Handler) putConfig(w http.ResponseWriter, r *http.Request) {
 		problem(w, 409, "配置已被其他操作修改，请重新加载后再编辑")
 		return
 	}
+	if h.view.Role == "client" && h.vpnOnly(current) {
+		_, fileEdit := input.Fields["proxies-file"]
+		_, inlineEdit := input.Fields["proxies"]
+		if input.Proxies != nil || fileEdit || inlineEdit {
+			problem(w, 400, "仅 VPN 模式不编辑代理映射；请先切换代理模式或通过完整配置文件设置")
+			return
+		}
+	}
 	if h.view.Role == "client" && input.Proxies == nil {
 		if path, changed := input.Fields["proxies-file"]; changed {
 			mappings, _, err := h.savedMappings(current)
@@ -668,9 +681,13 @@ func (h *Handler) putConfig(w http.ResponseWriter, r *http.Request) {
 			problem(w, 400, "不能同时提交表单和文件内容")
 			return
 		}
-		editable := current
+		editable, vpnErr := prepareVPNConfigEdits(current, input.Fields, h.view.Role)
+		if vpnErr != nil {
+			problem(w, 400, vpnErr.Error())
+			return
+		}
 		if h.view.Role == "client" {
-			editable, e = prepareClientConfigEdits(current, input.Fields)
+			editable, e = prepareClientConfigEdits(editable, input.Fields)
 			if e != nil {
 				problem(w, 400, e.Error())
 				return

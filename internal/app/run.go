@@ -136,12 +136,13 @@ func (c *controller) status() any {
 	if c.worker != nil {
 		quic = c.worker.quic.snapshot()
 	}
-	healthy := running && quic.Healthy
+	vpnStatus := c.workerVPNStatus()
+	healthy := running && quic.Healthy && vpnStatus.Healthy
 	if !quic.Healthy && quic.Enabled {
 		last = quic.LastError
 	}
 	return map[string]any{
-		"healthy": healthy, "quic": quic,
+		"healthy": healthy, "quic": quic, "vpn": vpnStatus, "vpn_mode": vpnStatus.Mode,
 		"websocket_listeners":       websocketListeners,
 		"pending_listeners":         pending,
 		"noise":                     c.current.noiseStatus(),

@@ -75,6 +75,8 @@ class Case(noise.Case):
 
     def value(self, field, role):
         key, value, kind = field["key"], field["value"], field["validation"]["type"]
+        if key == "vpn-server":
+            return "quic://vpn.invalid:8444/vpn"
         if key == "password":
             return "isolated-config-audit-password"
         if key == "master_args":

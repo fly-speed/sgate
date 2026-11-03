@@ -1,6 +1,6 @@
-# 默认编译两端；首次构建由 Go 自动下载缺少的模块，无需 Python 或 vendor。
+# 默认编译两端代理和独立 VPN；首次构建由 Go 自动下载缺少的模块，无需 Python 或 vendor。
 .DEFAULT_GOAL := build
-.PHONY: all help check deps build client server _build-client _build-server install install-files test framework-test vendor-sync stress weaknet vet clean
+.PHONY: all help check deps build client server _build-client _build-server install install-files test framework-test vendor-sync stress weaknet vet clean vpn _build-vpn install-vpn
 
 ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 GO ?= go
@@ -19,7 +19,7 @@ GO_CMD = $(GO) -C "$(ROOT)"
 OUTPUT_DIR := $(if $(filter /%,$(BINDIR)),$(BINDIR),$(ROOT)/$(BINDIR))
 SGATE_STRESS_REPORT ?= $(ROOT)/artifacts/stress.json
 # install 后的 client/server 是安装选择项，不运行同名编译目标。
-INSTALL_ROLE := $(if $(filter client,$(MAKECMDGOALS)),$(if $(filter server,$(MAKECMDGOALS)),all,client),$(if $(filter server,$(MAKECMDGOALS)),server,all))
+INSTALL_ROLE := $(if $(filter vpn,$(MAKECMDGOALS)),vpn,$(if $(filter client,$(MAKECMDGOALS)),$(if $(filter server,$(MAKECMDGOALS)),all,client),$(if $(filter server,$(MAKECMDGOALS)),server,all)))
 
 all: build
 
@@ -28,6 +28,8 @@ help:
 	  'make / make build    编译客户端和服务端到 bin/' \
 	  'make client          仅编译客户端' \
 	  'make server          仅编译服务端' \
+	  'make vpn             编译独立 TUN/QUIC DATAGRAM VPN' \
+	  'make install-vpn     安装已编译的独立 VPN 和示例（不启动）' \
 	  'make install         安装已编译程序到 /opt/soft/sgate（先以普通用户 make build）' \
 	  'make install server  只安装服务端（先以普通用户 make server）' \
 	  'make install client  只安装客户端（先以普通用户 make client）' \
@@ -40,7 +42,7 @@ help:
 	  'make vendor-sync     下载依赖并同步 vendor（需要 Python 3）' \
 	  'make stress          重连与资源压力测试' \
 	  'make weaknet         弱网竞态测试' \
-	  'make clean           删除本 Makefile 生成的两个程序' \
+	  'make clean           删除本 Makefile 生成的三个程序' \
 	  '可覆盖：GO、BINDIR、PREFIX、DESTDIR、BUILD_FLAGS、LDFLAGS、TEST_FLAGS、MOD；交叉编译使用 GOOS/GOARCH/CGO_ENABLED。'
 
 check:
@@ -55,14 +57,15 @@ check:
 deps: check
 	$(GO_CMD) mod download
 
-build: _build-client _build-server
+build: _build-client _build-server _build-vpn
 
 ifneq ($(filter install install-files,$(MAKECMDGOALS)),)
-client server:
+client server vpn:
 	@:
 else
 client: _build-client
 server: _build-server
+vpn: _build-vpn
 endif
 
 _build-client: check
@@ -72,6 +75,13 @@ _build-client: check
 _build-server: check
 	mkdir -p "$(OUTPUT_DIR)"
 	$(GO_CMD) build -mod=$(MOD) $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -o "$(OUTPUT_DIR)/sgate-server" ./cmd/sgate-server
+
+_build-vpn: check
+	mkdir -p "$(OUTPUT_DIR)"
+	$(GO_CMD) build -mod=$(MOD) $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -o "$(OUTPUT_DIR)/sgate-vpn" ./cmd/sgate-vpn
+
+install-vpn:
+	sh "$(ROOT)/scripts/install.sh" "$(ROOT)" "$(OUTPUT_DIR)" "$(PREFIX)" "$(DESTDIR)" vpn
 
 # 普通用户先 make build，再 sudo make install；sudo 环境无需 Go。
 # DESTDIR 仅用于暂存打包；写入配置的运行路径始终使用 PREFIX。
@@ -99,5 +109,5 @@ vet: check
 
 # 保留 bin/ 内其他工具、诊断程序；不清理配置、密钥和运行数据。
 clean:
-	rm -f "$(OUTPUT_DIR)/sgate-client" "$(OUTPUT_DIR)/sgate-server"
+	rm -f "$(OUTPUT_DIR)/sgate-client" "$(OUTPUT_DIR)/sgate-server" "$(OUTPUT_DIR)/sgate-vpn"
 	@rmdir "$(OUTPUT_DIR)" 2>/dev/null || true

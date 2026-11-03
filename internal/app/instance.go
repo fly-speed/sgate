@@ -10,10 +10,13 @@ import (
 
 	"sgate/internal/aclservice"
 	"sgate/internal/tunnel"
+	"sgate/internal/vpn"
 )
 
 // definition 是一次配置加载的结果；instance 拥有这次运行需要释放的资源。
 type definition struct {
+	vpn                            *vpn.Prepared
+	vpnOnly                        bool
 	accountsFile                   string
 	commonUsername, commonPassword string
 	commonAllowReverse             bool
@@ -30,6 +33,7 @@ type definition struct {
 	shared                         *sharedServer
 }
 type instance struct {
+	vpn          *vpnWorker
 	quic         *quicWorker
 	quicHTTP     *http.Server
 	quicListener net.Listener
@@ -46,6 +50,13 @@ type instance struct {
 }
 
 func (d definition) start(ctx context.Context, stats *tunnel.Stats) (*instance, error) {
+	i, err := d.startProxy(ctx, stats)
+	if err == nil {
+		i.startVPN(ctx, d.vpn)
+	}
+	return i, err
+}
+func (d definition) startProxy(ctx context.Context, stats *tunnel.Stats) (*instance, error) {
 	options := d.resourceOptions()
 	if err := stats.MemoryBudget().Configure(uint64(options.MemoryBudgetBytes)); err != nil {
 		return nil, err
@@ -84,7 +95,18 @@ func (d definition) start(ctx context.Context, stats *tunnel.Stats) (*instance, 
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	i := &instance{live: live, cancel: cancel, listener: l, done: make(chan struct{})}
-	if d.tcp != nil && (len(d.proxies) > 0 || d.client != nil) {
+	if d.vpnOnly && d.client != nil {
+		go func() {
+			defer close(i.done)
+			for {
+				conn, err := l.Accept()
+				if err != nil {
+					return
+				}
+				conn.Close()
+			}
+		}()
+	} else if d.tcp != nil && (len(d.proxies) > 0 || d.client != nil) {
 		group, err := newClientProxyGroup(runCtx, l, d.clientRoutes(l.Addr().String()))
 		if err != nil {
 			l.Close()
@@ -117,8 +139,11 @@ func (d definition) start(ctx context.Context, stats *tunnel.Stats) (*instance, 
 			transport = tls.NewListener(transport, d.tls.Clone())
 		}
 		var handler http.Handler = s
+		if d.vpnOnly {
+			handler = http.NotFoundHandler()
+		}
 		if d.wrapHTTP != nil {
-			handler = d.wrapHTTP(transport, s)
+			handler = d.wrapHTTP(transport, handler)
 		}
 		if e := i.startQUIC(d, s, d.tls, stats); e != nil {
 			s.Close()
@@ -144,6 +169,7 @@ func (d definition) start(ctx context.Context, stats *tunnel.Stats) (*instance, 
 	return i, nil
 }
 func (i *instance) stop() error {
+	i.vpn.stop()
 	i.stopQUIC()
 	if i.service != nil {
 		e := i.service.Close()
@@ -185,8 +211,12 @@ func (d definition) startService(stats *tunnel.Stats) (*instance, error) {
 		return nil, e
 	}
 	var handler http.Handler = s
+	if d.vpnOnly {
+		handler = http.NotFoundHandler()
+	}
 	tlsConfig, onStop := d.tls, s.Close
 	if d.shared != nil {
+		d.shared.vpnOnly.Store(d.vpnOnly)
 		d.shared.proxy.Store(s)
 		handler, tlsConfig, onStop = d.shared, d.shared.TLSConfig(d.tls), d.shared.Close
 	}

@@ -24,7 +24,8 @@ let configInputs = [],
 // 字段值由服务端解析；浏览器不解析或拼接 .cf，避免破坏引号、注释与密码。
 function renderConfigFields(fields, runtime, role) {
   configRole = role || state.role || "";
-  if (role === "client" && !fields.some((field) => field.key === "proxies")) {
+  const vpnOnly = (runtime.cli_overrides || []).includes("vpn-mode") ? runtime.vpn_mode === "only" : fields.some((field) => field.key === "vpn-mode" && field.value === "only");
+  if (role === "client" && !vpnOnly && !fields.some((field) => field.key === "proxies")) {
     fields = [...fields, { key: "proxies", kind: "proxies", mappings: [], group: t("代理与通道") }];
   }
   if (role === "client") {
@@ -297,6 +298,7 @@ function configValueError(key, value, rule = {}, values = {}) {
   if (/^(master_|app_)/.test(key) && (value.includes("#") || value !== value.trim()))
     return t("框架参数不能包含 # 或首尾空白");
   if (configByteLength(value) > 4095) return t("配置项过长，模板每行最多支持 4095 字节");
+  if (key === "target" && values["vpn-mode"] === "only" && !value) return "";
   if (!value) return rule.required ? t("不能为空") : "";
   try {
     if (rule.type === "arguments" && rule.options) {
@@ -409,8 +411,10 @@ function configRelationErrors(values) {
   ])
     if (has(cert, key) && !!values[cert] !== !!values[key])
       fail([cert, key], t("证书与私钥路径须同时填写或同时留空"));
-  if (has("server") && !values.server && !values.proxies?.length)
+  if (has("server") && values["vpn-mode"] !== "only" && !values.server && !values.proxies?.length)
     fail(["server"], t("单代理模式需要服务端 URL；或先配置至少一个映射"));
+  if (has("vpn-server") && ["both","only"].includes(values["vpn-mode"]) && !values["vpn-server"])
+    fail(["vpn-server"], t("VPN 模式需要独立的 VPN 服务端地址"));
   if (has("path") && (values.path === "/admin" || values.path.startsWith("/admin/")))
     fail(["path"], t("隧道路径不能占用 /admin 管理入口"));
   const loopback = (address) => /^(localhost|127(?:\.\d+){3}|\[::1\]):/i.test(address);
@@ -1113,6 +1117,14 @@ function quicObservationText(data) {
  t(" · 丢包判定累计：") + q.lost_packets + t(" · QUIC 包累计发送：") + units(q.packet_tx_bytes) +
  t(" · 接收：") + units(q.packet_rx_bytes) + t(" · 业务重放：") + units(q.application_replay_bytes) + t(" · 网络流重传：") + units(q.retransmitted_stream_bytes||0) + t(" · 阻塞帧：") + ((q.connection_blocked_frames||0)+(q.stream_blocked_frames||0));
 }
+function vpnObservationText(v) {
+ if (!v?.enabled) return t("独立 VPN") + " · " + t("已关闭");
+ const names = {starting:"启动中",connecting:"连接中",connected:"已连接",reconnecting:"重连中",listening:"监听中",failed:"启动失败",stopped:"已停止"};
+ const q=v.stats||{};
+ return t("独立 VPN")+" · "+t(names[v.state]||v.state)+" · "+(v.device||"—")+" · "+(v.address||"")+" · "+(v.client_ip||v.network||"")+
+  " · "+t("活跃连接：")+(q.active_connections||0)+" · IP "+t("发送")+" "+units(q.tx_ip_bytes||0)+" / "+t("接收")+" "+units(q.rx_ip_bytes||0)+
+  " · "+t("丢弃：")+(q.dropped_packets||0)+(v.last_error?" · "+v.last_error:"");
+}
 async function poll(run) {
   if (run !== epoch || !state.authenticated) return;
   try {
@@ -1129,6 +1141,7 @@ async function poll(run) {
     }
     localText($("tx-rate"), () => rates ? units(rates.tx, true) : t("采样中"));
     localText($("rx-rate"), () => rates ? units(rates.rx, true) : t("采样中"));
+    if($("vpn-summary")) localText($("vpn-summary"), () => vpnObservationText(data.health?.vpn));
     if($("quic-summary")) localText($("quic-summary"), () => quicObservationText(data));
     localText($("noise-observation"), () => noiseObservationText(data, rates));
     localText($("noise-activity"), () => noiseActivityText(data.noise_activity));
@@ -1187,6 +1200,9 @@ function renderTrafficPeers(data) {
   renderTrafficScope(data);
 }
 function renderTrafficScope(data = previous) {
+  const isVPN = $("traffic-metric").value === "vpn";
+  $("traffic-ip").disabled = isVPN;
+  if (isVPN) { localText($("traffic-ip-summary"), () => t("VPN IP 负载带宽（全部客户端）")); return; }
   const ip = $("traffic-ip").value;
   const peer = data?.by_ip?.find((peer) => peer.ip === ip);
   localText($("traffic-ip-summary"), () => ip
@@ -1195,6 +1211,7 @@ function renderTrafficScope(data = previous) {
     : t("全部连接 IP"));
 }
 function chartSamples() {
+  if ($("traffic-metric").value === "vpn") return points;
   const ip = $("traffic-ip").value;
   if (!ip) return points;
   return points.map((point) => point.byIP?.[ip] || { time_ms: point.time_ms });
@@ -1224,7 +1241,13 @@ function trafficRates(data, last) {
       }
     }
   }
+  const vpnRates = {};
+  for (const [key, field] of [["vpnTX", "tx_ip_bytes"], ["vpnRX", "rx_ip_bytes"]]) {
+    const next = data.health?.vpn?.stats?.[field], before = last.health?.vpn?.stats?.[field];
+    vpnRates[key] = Number.isFinite(next) && Number.isFinite(before) && next >= before && data.health?.vpn?.generation === last.health?.vpn?.generation ? (next - before) / seconds : null;
+  }
   return {
+    ...vpnRates,
     ...transports,
     time_ms: data.time_ms,
     tx: rate("tx_bytes"),
@@ -1307,6 +1330,8 @@ function chartMetric() {
       return { keys: ["tcpTX", "tcpRX"], labels: ["TCP 发送", "TCP 接收"], title: t("TCP 网络带宽") };
     case "quic":
       return { keys: ["quicTX", "quicRX"], labels: ["QUIC 发送", "QUIC 接收"], title: t("QUIC 流带宽") };
+    case "vpn":
+      return { keys: ["vpnTX", "vpnRX"], labels: ["VPN IP 发送", "VPN IP 接收"], title: t("VPN IP 负载带宽（全部客户端）") };
     case "noise":
       return { keys: ["noiseTX", "noiseRX"], title: t("白噪音负载带宽") };
     case "business":
@@ -1552,7 +1577,7 @@ function drawChart() {
   }
   drawChartHover(c, geometry, metric, max);
 }
-$("traffic-metric").addEventListener("change", drawChart);
+$("traffic-metric").addEventListener("change", () => { renderTrafficScope(); drawChart(); });
 $("traffic-ip").addEventListener("change", () => {
   clearChartHover();
   renderTrafficScope();

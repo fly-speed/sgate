@@ -4,6 +4,9 @@ A Go TCP tunnel with two executables, supporting WS/WSS over TCP and QUIC over U
 
 See [the Chinese documentation](README.md) for all options, protocol details, and reverse proxy configuration. The [architecture and tunnel protocol document (Chinese)](docs/architecture.md) covers frame classes, command IDs, forward/reverse flows, encrypted JSON probes, ACKs, flow control, and replay.
 
+
+An independent IPv4 VPN entrypoint, `sgate-vpn`, carries TUN packets over QUIC DATAGRAM without OpenVPN. It is also integrated into `sgate-client` / `sgate-server`: manage disabled, combined or VPN-only mode in the Web configuration. Use `make build` for the integrated programs, or `make vpn` / `make install-vpn` for the standalone entrypoint. Linux servers and macOS/Linux clients are implemented; privileged TUN/routing/DNS and Linux NAT runtime validation remain outstanding. See [VPN documentation](docs/vpn.md).
+
 ## UDP / QUIC tunnels
 
 Set `quic-listen = "0.0.0.0:8443"` on the server together with `tls-cert` and `tls-key`. Set `server = "quic://gateway.example.com:8443/tunnel"` on the client; use `tls-ca` for a private CA or self-signed certificate. Keep the existing key, password/account and backend configuration. Both peers must support QUIC. The TCP tunnel remains available, and TCP and UDP may use the same port number. Adding `tls-cert`/`tls-key` to a previously plaintext deployment also enables HTTPS/WSS on that TCP endpoint; update existing TCP clients to `wss://`.

@@ -18,6 +18,9 @@ func (c *controller) initializeAccountsFile() error {
 	if err := cli.Parse(fs, c.args); err != nil {
 		return err
 	}
+	if f := fs.Lookup("vpn-mode"); f != nil && f.Value.String() == "only" {
+		return nil
+	}
 	path := (configValues{flags: fs}).accountPath()
 	if path == "" {
 		return nil

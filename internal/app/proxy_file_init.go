@@ -18,6 +18,9 @@ func (c *controller) initializeProxyFile() error {
 	if err := cli.Parse(fs, c.args); err != nil {
 		return err
 	}
+	if f := fs.Lookup("vpn-mode"); f != nil && f.Value.String() == "only" {
+		return nil
+	}
 	values := configValues{flags: fs}
 	path := proxyconfig.Path(values.optionalText("config"), values.optionalText("proxies-file"))
 	if path == "" {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"sgate/internal/cli"
+	"sgate/internal/vpn"
 )
 
 // clientOptions 集中保存命令行/配置文件合并后的值，main 只负责选择运行方式。
@@ -40,6 +41,7 @@ type clientOptions struct {
 
 func parseClientOptions() (clientOptions, error) {
 	cli.ResourceFlags(flag.CommandLine)
+	vpn.RegisterFlags(flag.CommandLine, "client")
 	var options clientOptions
 	flag.BoolVar(
 		&options.adminEnabled,

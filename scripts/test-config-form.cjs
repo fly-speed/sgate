@@ -1838,3 +1838,40 @@ test("noise form explains QUIC per-second units independently of WS bursts", asy
   vm.runInContext('renderRuntime({running:true,noise:statusNoise})', context);
   assert.match(elements.get("runtime-state").textContent,/WS 每批 \/ QUIC 每秒/);
 });
+
+test("VPN status and IP bandwidth use independent counters and survive a VPN restart", async () => {
+  const { context } = await page();
+  const result = vm.runInContext(`JSON.stringify(trafficRates(
+    {time_ms:2000,tx_bytes:10,rx_bytes:20,health:{vpn:{stats:{tx_ip_bytes:4096,rx_ip_bytes:8192}}}},
+    {time_ms:1000,tx_bytes:10,rx_bytes:20,health:{vpn:{stats:{tx_ip_bytes:1024,rx_ip_bytes:2048}}}}
+  ))`, context);
+  const rates = JSON.parse(result);
+  assert.equal(rates.vpnTX, 3072);
+  assert.equal(rates.vpnRX, 6144);
+  assert.equal(rates.tx, 0);
+  const status = vm.runInContext('vpnObservationText({enabled:true,state:"failed",last_error:"permission denied",stats:{}})',context);
+  assert.match(status,/permission denied/);
+  assert.doesNotMatch(status,/undefined/);
+  assert.equal(vm.runInContext('trafficRates({time_ms:2000,tx_bytes:0,rx_bytes:0,health:{vpn:{stats:{tx_ip_bytes:0}}}},{time_ms:1000,tx_bytes:0,rx_bytes:0,health:{vpn:{stats:{tx_ip_bytes:100}}}}).vpnTX',context), null);
+});
+
+test("VPN-only configuration hides proxy creation and respects mode CLI overrides", async () => {
+  const {context} = await page();
+  vm.runInContext('fields=[{key:"vpn-mode",value:"only",group:"独立 VPN",validation:{type:"enum",choices:["disabled","both","only"]}}]; renderConfigFields(fields,{},"client")', context);
+  assert.equal(vm.runInContext('configInputs.some(row=>row.field?.key==="proxies")',context),false);
+  assert.equal(vm.runInContext('configInputs.length',context),1);
+  vm.runInContext('renderConfigFields([{key:"vpn-mode",value:"disabled",group:"独立 VPN"}],{cli_overrides:["vpn-mode"],vpn_mode:"only"},"client")',context);
+  assert.equal(vm.runInContext('configInputs.length',context),1);
+});
+
+test("VPN-only form can save without a proxy upstream or backend", async () => {
+  const {context} = await page();
+  vm.runInContext(`renderConfigFields([
+    {key:"vpn-mode",value:"only",group:"独立 VPN"},
+    {key:"vpn-server",value:"quic://vpn.example.com:8444/vpn",group:"独立 VPN",validation:{type:"url"}},
+    {key:"server",value:"",group:"代理与通道",validation:{type:"url"}},
+    {key:"target",value:"",group:"代理与通道",validation:{type:"address",required:true}}
+  ],{},"client")`,context);
+  assert.equal(vm.runInContext('validateConfigForm(null,false)',context),true);
+  assert.equal(vm.runInContext('configRelationErrors({"vpn-mode":"both","vpn-server":""}).has("vpn-server")',context),true);
+});

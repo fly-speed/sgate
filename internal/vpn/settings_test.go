@@ -1,0 +1,52 @@
+package vpn
+
+import (
+	"flag"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func integratedSettings(t *testing.T) *flag.FlagSet {
+	t.Helper()
+	fs := flag.NewFlagSet("vpn", flag.ContinueOnError)
+	RegisterFlags(fs, "client")
+	key := filepath.Join(t.TempDir(), "key")
+	if e := os.WriteFile(key, []byte(strings.Repeat("01", 32)), 0600); e != nil {
+		t.Fatal(e)
+	}
+	fs.String("key-file", key, "")
+	fs.String("tls-ca", "", "")
+	fs.Set("vpn-server", "quic://vpn.invalid:8444/vpn")
+	return fs
+}
+func TestIntegratedVPNPrepareIsOfflineAndValidatesBeforeTUN(t *testing.T) {
+	fs := integratedSettings(t)
+	p, e := Prepare("client", fs)
+	if e != nil || p != nil {
+		t.Fatal("disabled changed behavior", p, e)
+	}
+	fs.Set("vpn-mode", "only")
+	p, e = Prepare("client", fs)
+	if e != nil {
+		t.Fatal("must not resolve .invalid hostname", e)
+	}
+	if p.Mode != "only" || p.Config.TLS.ServerName != "vpn.invalid" || !p.Manage || p.Config.MTU != 1280 {
+		t.Fatal(p)
+	}
+	first := p.Fingerprint
+	fs.Set("vpn-mtu", "1200")
+	p, e = Prepare("client", fs)
+	if e != nil || first == p.Fingerprint {
+		t.Fatal("change not detected", e)
+	}
+	for _, change := range [][2]string{{"vpn-server", "wss://example.com:443/vpn"}, {"vpn-server", "quic://user:password@example.com:443/vpn"}, {"vpn-server", "quic://example.com:0/vpn"}, {"vpn-network", "10.77.0.2/24"}, {"vpn-client-ip", "10.77.0.1"}, {"vpn-mtu", "1501"}, {"vpn-dns", "::1"}, {"vpn-routes", "::/0"}} {
+		f := integratedSettings(t)
+		f.Set("vpn-mode", "both")
+		f.Set(change[0], change[1])
+		if _, e := Prepare("client", f); e == nil {
+			t.Fatal("invalid settings accepted", change[0])
+		}
+	}
+}

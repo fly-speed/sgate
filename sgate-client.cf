@@ -157,4 +157,8 @@ service sgate-client {
     admin_master_ctl = /opt/soft/acl-master/bin/master_ctl
     # Framework control socket path; leave empty for the master_ctl default, or set an absolute path.
     admin_master_socket =
+    # Independent TUN/QUIC DATAGRAM VPN: disabled, both, or only. Configure through Web management.
+    # Requires administrator network permissions; stop other full-tunnel VPNs before enabling.
+    vpn-mode = disabled
+
 }

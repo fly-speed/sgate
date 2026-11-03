@@ -152,7 +152,7 @@ func (c *controller) applyLive(keys []string) error {
 
 func (c *controller) liveFields() []string {
 	fields := tunnel.LiveFields()
-	if c.role == "client" && c.tcp != nil {
+	if c.role == "client" && c.tcp != nil && !c.current.vpnOnly {
 		fields = append(fields, "proxies", "proxies-file", "master_service")
 	}
 	if c.role == "server" {

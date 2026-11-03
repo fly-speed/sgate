@@ -24,3 +24,5 @@
 `sgate-reverse-accounts.json` demonstrates multiple server-side reverse TCP listeners for one account. `listen` binds on the server; `target` is reached from the authenticated client network. The example account is disabled. Replace its password and addresses, enable it, and apply it through server `accounts-file`. Both endpoints need reverse proxy support.
 
 Client mappings deny server reverse proxy access by default. In the client mapping form, explicitly check Allow server reverse proxy for each intended row (`"allow_reverse": true` in JSON). Other rows do not inherit it. Legacy single-proxy mode uses `allow-reverse = true`, default false.
+
+`sgate-vpn-client.conf` / `sgate-vpn-server.conf` 是独立 VPN 示例，由 `sgate-vpn` 读取；原 `vpn-client.cf` / `vpn-server.cf` 仍是 TCP OpenVPN 代理示例，二者不可混用。参见 [独立 VPN 文档](../docs/vpn.md)。

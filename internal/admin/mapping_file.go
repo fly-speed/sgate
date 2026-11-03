@@ -38,6 +38,9 @@ func (h *Handler) savedMappings(content []byte) ([]proxyMapping, string, error) 
 }
 
 func (h *Handler) mappingSnapshot(content []byte) ([]proxyMapping, string, string, error) {
+	if h.vpnOnly(content) {
+		return nil, "", digest(content), nil
+	}
 	mappings, path, err := mappingConfig(content)
 	if path == "" {
 		return mappings, "", digest(content), err
@@ -173,7 +176,7 @@ func (h *Handler) prepareMappingFile(current []byte, edits map[string]string, ma
 	protected := []string{h.view.AppConfigPath, h.view.AppConfigPath + ".bak", h.cfg.UsersFile, h.cfg.SetupTokenFile}
 	fields, _ := configFields(string(current))
 	for _, f := range fields {
-		if f.Key == "key-file" || f.Key == "tls-ca" || strings.HasPrefix(f.Key, "admin_") {
+		if f.Key == "key-file" || f.Key == "tls-ca" || f.Key == "vpn-key-file" || strings.HasPrefix(f.Key, "vpn-tls-") || strings.HasPrefix(f.Key, "admin_") {
 			protected = append(protected, proxyconfig.Path(h.view.AppConfigPath, f.Value))
 		}
 	}

@@ -16,13 +16,14 @@ class InstallTests(unittest.TestCase):
         self.root = pathlib.Path(self.tmp.name) / "source"
         self.dest = pathlib.Path(self.tmp.name) / "package"
         self.target = self.dest / "opt/soft/sgate"
-        names = ["Makefile", "LICENSE", "scripts/install.sh", "samples/README.md"]
+        names = ["Makefile", "LICENSE", "scripts/install.sh", "samples/README.md", "docs/vpn.md", "scripts/test-vpn-linux.py"]
         names += ["samples/test-tls/" + name for name in ["README.md", "tls-cert.pem", "tls-key.pem"]]
         names += [str(p.relative_to(ROOT)) for p in (ROOT / "web/admin").iterdir() if p.is_file()]
         names += [str(p.relative_to(ROOT)) for p in ROOT.glob("sgate-*.cf")]
         names += [str(p.relative_to(ROOT)) for p in ROOT.glob("sgate-*-*.sh")]
         names += [str(p.relative_to(ROOT)) for p in (ROOT / "samples").glob("*.cf")]
         names += [str(p.relative_to(ROOT)) for p in (ROOT / "samples").glob("*.sh")]
+        names += ["samples/sgate-vpn-client.conf", "samples/sgate-vpn-server.conf"]
         names += ["sgate-proxies.json", "samples/sgate-accounts.json", "samples/sgate-reverse-accounts.json", "samples/sgate-proxies.json"]
         names += ["third_party/" + role + "/LICENSE" for role in ["go-service", "gin-service"]]
         for name in names:
@@ -111,6 +112,27 @@ class InstallTests(unittest.TestCase):
         for name in keep:
             if name.startswith(("conf/", "samples/")):
                 self.assertEqual((self.target / name).read_bytes(), before[name], name)
+
+    def test_independent_vpn_install_and_custom_paths(self):
+        binary = self.root / "bin/sgate-vpn"
+        binary.write_text("#!/bin/sh\nexit 0\n")
+        binary.chmod(0o755)
+        self.install("install", "vpn")
+        self.assertTrue((self.target / "sbin/sgate-vpn").is_file())
+        self.assertTrue((self.target / "docs/vpn.md").is_file())
+        self.assertTrue((self.target / "bin/test-vpn-linux.py").is_file())
+        self.assertFalse((self.target / "sbin/sgate-client").exists())
+        self.assertFalse((self.target / "sbin/sgate-server").exists())
+        for role in ["client", "server"]:
+            self.assertTrue((self.target / f"samples/sgate-vpn-{role}.conf").is_file())
+        result = subprocess.run(["make", "-C", str(self.root), "install-vpn", "PREFIX=/custom/sgate", "DESTDIR="+str(self.dest)], capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        config = (self.dest / "custom/sgate/samples/sgate-vpn-server.conf").read_text()
+        self.assertIn('/custom/sgate/conf/tls-cert.pem', config)
+        self.install("install")
+        self.check_role("client")
+        self.check_role("server")
+        self.assertTrue((self.target / "sbin/sgate-vpn").is_file())
 
     def test_missing_selected_binary_does_not_create_destination(self):
         (self.root / "bin/sgate-server").unlink()

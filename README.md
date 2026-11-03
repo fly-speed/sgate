@@ -9,6 +9,9 @@ Go 编写的通用 TCP 加密通道，支持 TCP 上的 WS/WSS 和 UDP 上的 QU
 
 实现说明：[整体架构与隧道协议](docs/architecture.md)。
 
+
+新增独立 IPv4 VPN 入口 `sgate-vpn`：Linux 服务端、macOS/Linux 客户端通过 TUN＋QUIC DATAGRAM 直接传输 IP 包，不依赖 OpenVPN。也已集成至 `sgate-client` / `sgate-server` 的管理网页，在“独立 VPN”分组选择关闭、共存或仅 VPN 模式。使用 `make build` 更新现有程序；独立入口使用 `make vpn` / `make install-vpn`；配置、权限、路由/DNS 恢复及未完成的系统级实测范围见 [独立 VPN 文档](docs/vpn.md)。
+
 ## UDP / QUIC 隧道
 
 客户端可使用 `quic://服务器:端口/tunnel`，服务端通过 `quic-listen` 增加 UDP 监听。既有 TCP 隧道入口保留；TCP 和 UDP 可以使用同一个端口号。两端必须升级到支持 QUIC 的版本。

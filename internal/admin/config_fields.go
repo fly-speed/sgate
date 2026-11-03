@@ -90,6 +90,9 @@ func configFields(content string) ([]configField, error) {
 			return nil, err
 		}
 		group := "代理与通道"
+		if strings.HasPrefix(key, "vpn-") {
+			group = "独立 VPN"
+		}
 		if serviceconfig.FrameworkKey(key) {
 			group = "服务框架"
 		} else if strings.HasPrefix(key, "admin_") || key == "admin-config" || key == "admin-enabled" {

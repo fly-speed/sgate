@@ -20,7 +20,8 @@ role=${5:-all}
 case "$role" in
     all) roles='client server' ;;
     client|server) roles=$role ;;
-    *) printf '未知安装类型：%s；请选择 all、client 或 server。\n' "$role" >&2; exit 1 ;;
+    vpn) roles='' ;;
+    *) printf '未知安装类型：%s；请选择 all、client、server 或 vpn。\n' "$role" >&2; exit 1 ;;
 esac
 programs=''
 configs=''
@@ -43,6 +44,13 @@ for selected in $roles; do
         licenses="$licenses gin-service"
     fi
 done
+vpn_selected=no
+# A full build includes VPN; explicit install-vpn also checks for its binary.
+if [ "$role" = vpn ] || { [ "$role" = all ] && [ -f "$binary_dir/sgate-vpn" ]; }; then
+    vpn_selected=yes
+    programs="$programs sgate-vpn"
+    sample_configs="$sample_configs sgate-vpn-client.conf sgate-vpn-server.conf"
+fi
 assets='index.html app.css i18n.js app.js'
 
 require_file() {
@@ -62,6 +70,8 @@ done
 for name in $configs $scripts LICENSE; do require_file "$source_dir/$name"; done
 for name in $sample_configs $sample_scripts README.md; do require_file "$source_dir/samples/$name"; done
 for name in tls-cert.pem tls-key.pem README.md; do require_file "$source_dir/samples/test-tls/$name"; done
+require_file "$source_dir/docs/vpn.md"
+require_file "$source_dir/scripts/test-vpn-linux.py"
 for name in $assets; do require_file "$source_dir/web/admin/$name"; done
 for name in $licenses; do require_file "$source_dir/third_party/$name/LICENSE"; done
 if [ ! -f "$source_dir/sgate.key" ] && ! [ -e "$destination/conf/sgate.key" ] && ! [ -L "$destination/conf/sgate.key" ]; then
@@ -78,7 +88,7 @@ ensure_directory() {
 }
 
 ensure_directory . 0755
-for name in sbin bin web/admin logs var share/licenses samples; do ensure_directory "$name" 0755; done
+for name in sbin bin web/admin logs var share/licenses samples docs; do ensure_directory "$name" 0755; done
 ensure_directory conf 0700
 ensure_directory samples/test-tls 0700
 
@@ -103,6 +113,9 @@ else
     replace_file "$source_dir/samples/test-tls/tls-key.pem" "$destination/conf/tls-key.pem" 0600
     replace_file "$source_dir/samples/test-tls/tls-cert.pem" "$destination/conf/tls-cert.pem" 0644
 fi
+# Integrated client/server builds also include VPN, so ship its guide and Linux verifier in every role.
+replace_file "$source_dir/docs/vpn.md" "$destination/docs/vpn.md" 0644
+replace_file "$source_dir/scripts/test-vpn-linux.py" "$destination/bin/test-vpn-linux.py" 0755
 for name in $assets; do replace_file "$source_dir/web/admin/$name" "$destination/web/admin/$name" 0644; done
 replace_file "$source_dir/LICENSE" "$destination/LICENSE" 0644
 for name in $licenses; do
@@ -125,7 +138,7 @@ render_config() {
             equal = index($0, "=")
             if (!equal) { print; next }
             key = trim(substr($0, 1, equal - 1))
-            if (key !~ /^(master_command|master_home|master_log|master_stdout|master_stderr|key-file|admin_web_dir|admin_users_file|admin_session_dir|admin_setup_token_file)$/) {
+            if (key !~ /^(master_command|master_home|master_log|master_stdout|master_stderr|key-file|tls-cert|tls-key|tls-ca|vpn-key-file|vpn-tls-cert|vpn-tls-key|vpn-tls-ca|admin_web_dir|admin_users_file|admin_session_dir|admin_setup_token_file)$/) {
                 print; next
             }
             value = trim(substr($0, equal + 1))
