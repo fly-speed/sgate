@@ -121,6 +121,7 @@ type View struct {
 	MappingCandidate     func(path, target, staged string) ([]string, error)
 	TestProxy            func(context.Context, ProxyMapping) (tunnel.ProbeResult, error)
 	ControlVPN           func(bool) error
+	RestartVPN           func() error
 	TestVPN              func(context.Context, map[string]string) (vpn.ProbeResult, error)
 	ManageTunnelAccounts func(*TunnelAccountChange) (TunnelAccountsSnapshot, error)
 	Apply                func() error

@@ -28,10 +28,15 @@ type packetQueue struct {
 	count  int
 	ready  chan struct{}
 	maxAge time.Duration
+	live   *LiveSettings
 }
 
-func newPacketQueue(maxAge time.Duration) *packetQueue {
-	return &packetQueue{ready: make(chan struct{}, 1), maxAge: maxAge}
+func newPacketQueue(maxAge time.Duration, live ...*LiveSettings) *packetQueue {
+	q := &packetQueue{ready: make(chan struct{}, 1), maxAge: maxAge}
+	if len(live) > 0 {
+		q.live = live[0]
+	}
+	return q
 }
 func packetFlowKey(p []byte) (key flowKey) {
 	if len(p) < 20 {
@@ -77,9 +82,13 @@ func (q *packetQueue) dropHead(f *packetFlow, stats *Stats, expired bool) {
 	}
 }
 func (q *packetQueue) prune(now time.Time, stats *Stats) {
+	maxAge := q.maxAge
+	if q.live != nil {
+		maxAge = q.live.Snapshot().QueueMaxAge
+	}
 	active := q.flows[:0]
 	for _, f := range q.flows {
-		for q.maxAge > 0 && len(f.packets) > 0 && now.Sub(f.packets[0].at) > q.maxAge {
+		for maxAge > 0 && len(f.packets) > 0 && now.Sub(f.packets[0].at) > maxAge {
 			q.dropHead(f, stats, true)
 		}
 		if len(f.packets) > 0 {

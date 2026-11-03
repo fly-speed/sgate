@@ -180,7 +180,7 @@ service vpn-server {
     vpn-network = 10.77.0.0/24
     # TUN MTU in bytes, from 576 to 1500.
     vpn-mtu = 1280
-    # Queue expiry: 0 disables age drops (recommended for weak-link TCP); maximum 1m.
+    # Queue expiry: 0 disables age drops (recommended for weak-link TCP); maximum 1m. LIVE: Web saves apply without VPN reconnection.
     vpn-queue-max-age = 0s
     # New TUN device name; empty uses sgate0 on Linux or automatically allocates utunN on macOS.
     vpn-tun-name = ''
@@ -188,27 +188,31 @@ service vpn-server {
     vpn-manage-network = true
     # VPN shared key file; empty reuses key-file. VPN authentication is separate from proxy and Web accounts.
     vpn-key-file = ''
-    # Per authenticated VPN connection, local padding payload bytes/second; K/M supported, 0 disables, maximum 10M.
+    # Per authenticated VPN connection, local padding payload bytes/second; K/M supported, 0 disables, maximum 10M. LIVE: Web saves apply without VPN reconnection.
     vpn-noise-rate = 0
-    # Allow padding during business IP traffic; queued business data and congestion take priority.
+    # Allow padding during business IP traffic; queued business data and congestion take priority. LIVE: Web saves apply without VPN reconnection.
     vpn-noise-traffic = true
-    # Allow padding on connected but idle VPN tunnels; no business connection is required.
+    # Allow padding on connected but idle VPN tunnels; no business connection is required. LIVE: Web saves apply without VPN reconnection.
     vpn-noise-idle = true
-    # IP inactivity threshold; padding does not reset it. Zero uses 1s.
+    # IP inactivity threshold; padding does not reset it. Zero uses 1s. LIVE: Web saves apply without VPN reconnection.
     vpn-noise-idle-after = 1s
     # Separate QUIC UDP listener; cannot share a UDP port with quic-listen.
     vpn-listen = 0.0.0.0:8444
-    # Optional TLS/TCP and WSS listener; may share the numeric UDP port.
+    # Optional shared TLS/TCP and WSS listener; empty disables both transports.
+    # To enable: set vpn-tcp-listen = 0.0.0.0:8444 and allow TCP 8444 in the firewall.
+    # TCP and UDP may use the same numeric port; other TCP services cannot share it.
+    # Leave vpn-listen empty only when TCP/WSS-only operation is intended.
+    # The listener reuses vpn-tls-cert/vpn-tls-key (or tls-cert/tls-key).
     vpn-tcp-listen = ''
     # VPN server certificate PEM; empty reuses tls-cert.
     vpn-tls-cert = ''
     # VPN certificate private key PEM; empty reuses tls-key.
     vpn-tls-key = ''
-    # Maximum simultaneous authenticated clients, from 1 to 254; each client needs a unique virtual IP.
+    # Maximum simultaneous authenticated clients, from 1 to 254; each client needs a unique virtual IP. LIVE: new admissions only; existing clients remain connected.
     vpn-max-clients = 64
     # macOS/Linux physical egress interface; empty detects it from the current route.
     vpn-egress-interface = ''
-    # Allow access to private networks on the server side; inter-client traffic is always denied.
+    # Allow access to private networks on the server side; inter-client traffic is always denied. LIVE: applies to subsequent packets in both directions.
     vpn-allow-private = false
 
 }

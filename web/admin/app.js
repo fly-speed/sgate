@@ -17,6 +17,7 @@ let tunnelAccountCreateMappings = null;
 let configRole = "";
 let vpnConfigSupport = null;
 let vpnProbeState = null;
+let vpnRestartButtons = [];
 // Keep each role's expanded sections across saves and language changes.
 const configGroupOpen = new Map();
 let configInputs = [],
@@ -41,6 +42,7 @@ function renderConfigFields(fields, runtime, role) {
   const container = $("config-fields");
   container.replaceChildren();
   configInputs = [];
+  vpnRestartButtons=[];
   const groups = new Map();
   const overrides = new Set(runtime.cli_overrides || []);
   for (const field of fields) {
@@ -53,6 +55,14 @@ function renderConfigFields(fields, runtime, role) {
       group.addEventListener("toggle", () => configGroupOpen.set(groupKey, group.open));
       const summary = document.createElement("summary");
       localText(summary, () => t(field.group));
+      if(field.group==="独立 VPN" && runtime.vpn_restart_supported){
+        const restart=document.createElement("button");restart.type="button";restart.className="secondary";
+        localText(restart,()=>t("重启 VPN 使配置生效"));
+        localAttr(restart,"title",()=>t("应用已保存的 VPN 参数并重启隧道；现有连接会断开，未保存修改保留。模式切换请使用保存并应用。"));
+        restart.disabled=configSaving||serviceRestarting;
+        restart.addEventListener("click",event=>{event.preventDefault();event.stopPropagation();restartSavedVPN()});
+        summary.append(restart);vpnRestartButtons.push(restart);
+      }
       group.append(summary);
       container.append(group);
       groups.set(field.group, group);
@@ -90,8 +100,14 @@ function renderConfigFields(fields, runtime, role) {
     if (field.validation?.live) {
       const badge = document.createElement("span");
       badge.className = "live-badge";
-      localText(badge, () => overridden ? t("支持即时生效 · 命令行已覆盖") : t("保存后立即生效"));
-      localAttr(badge, "title", () => t("同步写入配置文件，无需重启代理；命令行显式参数优先。"));
+      localText(badge, () => field.key === "vpn-server" ? (overridden ? t("保存后自动重连 · 命令行已覆盖") : t("保存后自动重连")) : overridden ? t("支持即时生效 · 命令行已覆盖") : t("保存后立即生效"));
+      localAttr(badge, "title", () => field.key === "vpn-server" ? t("保存后切换 VPN 服务端或协议，现有业务连接会断开；已停止的 VPN 不会自动启动，命令行覆盖仍优先。") : t("同步写入配置文件，无需重启代理；命令行显式参数优先。"));
+      label.append(badge);
+    }
+    if(field.key.startsWith("vpn-") && !field.validation?.live){
+      const badge=document.createElement("span");badge.className="override-badge";
+      localText(badge,()=>t("应用后生效"));
+      localAttr(badge,"title",()=>t("需要应用配置并重建 VPN，可能中断现有连接。"));
       label.append(badge);
     }
     const boolean =
@@ -829,6 +845,7 @@ function configEdits() {
 }
 
 function setConfigBusy(busy) {
+  vpnRestartButtons.forEach(button=>button.disabled=busy);
   for (const entry of configInputs) {
     if (entry.kind === "proxies") {
       entry.controls.forEach((control) => (control.disabled = busy));
@@ -1717,6 +1734,12 @@ $("reload-config").addEventListener("click", () =>
 // 以服务端实际应用结果提示，不根据点击的按钮猜测是否发生重启。
 function configSaveMessage(result, key = t("配置")) {
   if (result.applied) return key + t("已应用，业务代理已重启。管理登录继续有效。");
+  if(result.live_applied?.includes("vpn-server") && !result.runtime?.cli_overrides?.includes("vpn-server")){
+    return key+t(result.runtime?.vpn?.state==="stopped" || !result.runtime?.vpn?.enabled
+      ? "已保存，VPN 服务端地址将在下次启动 VPN 时使用。"
+      : "已保存，已发起 VPN 服务端切换和重新连接，原业务连接会断开；请查看实时概览确认连接结果。")+
+      (result.requires_restart?t("其他配置仍待应用或重启。"):"");
+  }
   if (result.live_applied?.length) {
     const overrides = result.runtime?.cli_overrides || [];
     const covered = result.live_applied.filter((name) => overrides.includes(name));
@@ -1728,6 +1751,18 @@ function configSaveMessage(result, key = t("配置")) {
     );
   }
   return key + t("已校验并保存，尚未重启代理。");
+}
+async function restartSavedVPN(){
+  if(configSaving||serviceRestarting)return;
+  configSaving=true;setConfigBusy(true);
+  notice(()=>t("正在应用已保存的 VPN 配置并重启隧道…"));
+  try{
+    const result=await api("vpn-restart",{method:"POST",body:JSON.stringify({revision})});
+    if(result.runtime)renderRuntime(result.runtime);
+    localText($("pending-label"),()=> (Object.keys(configEdits()).length?t("有未保存修改 · "):"")+(result.requires_restart?t("其他配置仍待应用或重启。"):t("已保存项已生效")));
+    notice(()=>t(result.runtime?.vpn?.enabled===false ? "VPN 已关闭，已保存配置已应用，未启动隧道。" : "已发起 VPN 重启，请在实时概览查看连接结果。管理界面及其他未保存修改已保留。"));
+  }catch(error){notice(()=>errorText(error),true)}
+  finally{configSaving=false;setConfigBusy(serviceRestarting)}
 }
 async function saveConfig(apply) {
   if (serviceRestarting || configSaving) return;

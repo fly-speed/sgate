@@ -11,8 +11,8 @@ import (
 	"flag"
 	"net"
 	"net/netip"
-	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -43,12 +43,12 @@ func Settings(role string) []Setting {
 			Setting{"vpn-tcp-listen", "", "可选 TLS/TCP 与 WSS 共用监听，例如 0.0.0.0:8444；可与 VPN UDP 使用相同数字端口，不能与其他 TCP 服务共用。"},
 			Setting{"vpn-tls-cert", "", "VPN 服务器证书；留空复用 tls-cert。"},
 			Setting{"vpn-tls-key", "", "VPN 证书私钥；留空复用 tls-key。"},
-			Setting{"vpn-max-clients", "64", "最多同时认证客户端数，1～254；各客户端须配置不同虚拟 IP。"},
+			Setting{"vpn-max-clients", "64", "最多同时认证客户端数，1～254；降低上限不踢现有客户端，仅限制新连接；各客户端虚拟 IP 唯一。"},
 			Setting{"vpn-egress-interface", "", "macOS/Linux 物理出口网卡；留空按当前路由识别。"},
 			Setting{"vpn-allow-private", "false", "允许访问服务器侧私网；始终禁止客户端互访。"})
 	}
 	return append(s,
-		Setting{"vpn-server", "", "VPN 服务端 quic://、tcp:// 或 wss://证书域名:8444/vpn；tcp 也强制 TLS 加密。独立于代理 server，手动切换传输。"},
+		Setting{"vpn-server", "", "VPN 服务端 quic://、tcp:// 或 wss://证书域名:8444/vpn；tcp 也强制 TLS 加密。保存后自动重连，已停止的 VPN 不会自动启动。"},
 		Setting{"vpn-client-ip", "10.77.0.2", "该客户端固定虚拟 IPv4 地址，不能与其他客户端重复。"},
 		Setting{"vpn-tls-ca", "", "附加信任 CA；留空复用 tls-ca。自签名证书需要显式信任。"},
 		Setting{"vpn-routes", "0.0.0.0/1,128.0.0.0/1", "逗号分隔 IPv4 路由；服务端外层地址保留物理出口。"},
@@ -78,6 +78,7 @@ func RegisterFlags(fs *flag.FlagSet, role string) {
 }
 
 type Prepared struct {
+	baseFingerprint              string
 	Config                       Config
 	Network                      NetworkOptions
 	Role, Mode, TUN, Fingerprint string
@@ -168,19 +169,9 @@ func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Pref
 			}
 		}
 	} else {
-		u, err := url.Parse(get("vpn-server"))
-		if err != nil || (u.Scheme != "quic" && u.Scheme != "tcp" && u.Scheme != "wss") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/vpn") {
-			return nil, invalidFields("启用 VPN 需要有效的 vpn-server，例如 quic://、tcp:// 或 wss://vpn.example.com:8444/vpn；TCP/WSS 需要服务端启用 vpn-tcp-listen。", "vpn-mode", "vpn-server")
+		if err := setServerURL(p, get("vpn-server")); err != nil {
+			return nil, err
 		}
-		host, port, err := net.SplitHostPort(u.Host)
-		if err != nil || host == "" {
-			return nil, invalidFields("vpn-server 必须包含有效的服务器主机名和端口，例如 quic://vpn.example.com:8444/vpn。", "vpn-mode", "vpn-server")
-		}
-		p.Host, p.Port = host, port
-		p.Config.Address = u.Host
-		p.Config.Transport = u.Scheme
-		p.Config.Host = u.Host
-		p.Config.TLS.ServerName = host
 		roots, err := x509.SystemCertPool()
 		if err != nil {
 			roots = x509.NewCertPool()
@@ -234,7 +225,9 @@ func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Pref
 	// Include certificate material: reapplying after replacing a PEM also restarts VPN.
 	values := map[string]string{}
 	for _, s := range Settings(p.Role) {
-		values[s.Key] = get(s.Key)
+		if !slices.Contains(LiveFields(p.Role), s.Key) && s.Key != "vpn-server" {
+			values[s.Key] = get(s.Key)
+		}
 	}
 	for _, k := range []string{"key-file", "tls-cert", "tls-key", "tls-ca"} {
 		values[k] = get(k)
@@ -253,7 +246,11 @@ func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Pref
 			h.Write(der)
 		}
 	}
-	p.Fingerprint = hex.EncodeToString(h.Sum(nil))
+	p.baseFingerprint = hex.EncodeToString(h.Sum(nil))
+	p.Fingerprint = p.baseFingerprint
+	if p.Role == "client" {
+		p.Fingerprint = endpointFingerprint(p.baseFingerprint, get("vpn-server"))
+	}
 	return p, nil
 }
 func (p *Prepared) Resolve(ctx context.Context) (Config, NetworkOptions, error) {

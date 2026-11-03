@@ -94,7 +94,7 @@ func (p *peer) sendNoise(now time.Time, c Config, pacer *noisePacer) error {
 		return nil
 	}
 	for budget > 0 {
-		if p.queue.len() > 0 || (p.flow != nil && !p.flow.allowNoise()) {
+		if p.queue.len() > 0 || (p.flow != nil && !p.flow.allowNoise()) || (c.Live != nil && c.Live.Snapshot().Noise != c.Noise) {
 			c.Stats.noiseSkipped.Add(1)
 			break
 		}

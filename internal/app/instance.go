@@ -33,6 +33,8 @@ type definition struct {
 	shared                         *sharedServer
 }
 type instance struct {
+	vpnIdentity  string
+	openTUN      func(string) (vpnDevice, error)
 	vpn          *vpnWorker
 	quic         *quicWorker
 	quicHTTP     *http.Server

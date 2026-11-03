@@ -128,6 +128,7 @@ func (c *controller) managementView() admin.View {
 		TestProxy:            c.testProxy,
 		TestVPN:              c.testVPN,
 		ControlVPN:           c.controlVPN,
+		RestartVPN:           c.restartVPN,
 		ManageTunnelAccounts: c.manageTunnelAccounts,
 		ApplyLive:            c.applyLive,
 		LiveFields:           c.liveFields(),

@@ -3,8 +3,10 @@ package app
 import (
 	"errors"
 	"slices"
+	"strings"
 
 	"sgate/internal/tunnel"
+	"sgate/internal/vpn"
 )
 
 func (d definition) liveConfig() tunnel.LiveConfig {
@@ -106,7 +108,15 @@ func (c *controller) applyLive(keys []string) error {
 		return errors.New("代理已停止，不能立即应用")
 	default:
 	}
-	next, err := c.load("")
+	next := c.current
+	var err error
+	if slices.ContainsFunc(keys, func(key string) bool { return !strings.HasPrefix(key, "vpn-") }) {
+		next, err = c.load("")
+		if err != nil {
+			return err
+		}
+	}
+	vpnPrepared, vpnLive, endpointChanged, err := c.prepareVPNLive(keys)
 	if err != nil {
 		return err
 	}
@@ -138,6 +148,22 @@ func (c *controller) applyLive(keys []string) error {
 	if err = c.worker.live.Update(value); err != nil {
 		return err
 	}
+	if vpnLive != nil {
+		if endpointChanged {
+			started := c.worker.vpn != nil
+			c.worker.vpn.stop()
+			c.worker.vpn = nil
+			c.current.vpn = vpnPrepared
+			if started {
+				c.worker.startVPN(c.ctx, vpnPrepared)
+			}
+		} else if worker := c.worker.vpn; worker != nil && worker.live != nil {
+			if err := worker.live.Update(*vpnLive); err != nil {
+				return err
+			}
+		}
+		c.current.vpn = vpnPrepared
+	}
 	c.current = c.current.withLiveConfig(value)
 	if c.role == "server" && slices.Contains(keys, "accounts-file") {
 		c.current.accountsFile = next.accountsFile
@@ -151,7 +177,10 @@ func (c *controller) applyLive(keys []string) error {
 }
 
 func (c *controller) liveFields() []string {
-	fields := tunnel.LiveFields()
+	fields := append(tunnel.LiveFields(), vpn.LiveFields(c.role)...)
+	if c.role == "client" {
+		fields = append(fields, "vpn-server")
+	}
 	if c.role == "client" && c.tcp != nil && !c.current.vpnOnly {
 		fields = append(fields, "proxies", "proxies-file", "master_service")
 	}

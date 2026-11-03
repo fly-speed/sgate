@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"sgate/internal/cli"
 	"sgate/internal/vpn"
 )
 
@@ -40,6 +41,7 @@ type vpnWorker struct {
 	mu     sync.Mutex
 	health vpnHealth
 	stats  *vpn.Stats
+	live   *vpn.LiveSettings
 	cancel context.CancelFunc
 	done   chan struct{}
 	once   sync.Once
@@ -53,6 +55,13 @@ func (v *vpnWorker) snapshot() vpnHealth {
 	defer v.mu.Unlock()
 	h := v.health
 	h.Stats = v.stats.Snapshot()
+	if v.live != nil {
+		live := v.live.Snapshot()
+		h.NoiseRate = live.Noise.Rate
+		h.NoiseTraffic = live.Noise.Traffic
+		h.NoiseIdle = live.Noise.Idle
+		h.QueueMaxAge = live.QueueMaxAge.String()
+	}
 	if h.State == "connecting" || h.State == "connected" || h.State == "reconnecting" {
 		h.Healthy = h.Stats.Active > 0
 		if h.Healthy {
@@ -76,15 +85,39 @@ func (v *vpnWorker) stop() {
 	<-v.done
 }
 func (i *instance) startVPN(ctx context.Context, p *vpn.Prepared) {
+	if i.openTUN != nil {
+		i.startVPNWithDevice(ctx, p, i.openTUN)
+		return
+	}
 	i.startVPNWithDevice(ctx, p, func(name string) (vpnDevice, error) { return vpn.OpenTUN(name) })
 }
 func (i *instance) startVPNWithDevice(ctx context.Context, p *vpn.Prepared, open func(string) (vpnDevice, error)) {
 	if p == nil {
 		return
 	}
+	var identityErr error
+	if p.Role == "client" {
+		if i.vpnIdentity == "" {
+			i.vpnIdentity, identityErr = vpn.NewClientIdentity()
+		}
+		copy := *p
+		copy.Config = p.Config
+		copy.Config.ClientID = i.vpnIdentity
+		p = &copy
+	}
 	ctx, cancel := context.WithCancel(ctx)
-	v := &vpnWorker{stats: &vpn.Stats{}, cancel: cancel, done: make(chan struct{}), health: vpnHealth{Generation: strconv.FormatInt(time.Now().UnixNano(), 10), Enabled: true, Transport: p.Config.Transport, TCPAddress: p.Config.TCPListen, QueueMaxAge: p.Config.QueueMaxAge.String(), NoiseRate: p.Config.Noise.Rate, NoiseTraffic: p.Config.Noise.Traffic, NoiseIdle: p.Config.Noise.Idle, State: "starting", Role: p.Role, Mode: p.Mode, Network: p.Config.Network.String()}}
+	live, liveErr := vpn.NewLiveSettings(vpn.LiveFromConfig(p.Config))
+	v := &vpnWorker{live: live, stats: &vpn.Stats{}, cancel: cancel, done: make(chan struct{}), health: vpnHealth{Generation: strconv.FormatInt(time.Now().UnixNano(), 10), Enabled: true, Transport: p.Config.Transport, TCPAddress: p.Config.TCPListen, QueueMaxAge: p.Config.QueueMaxAge.String(), NoiseRate: p.Config.Noise.Rate, NoiseTraffic: p.Config.Noise.Traffic, NoiseIdle: p.Config.Noise.Idle, State: "starting", Role: p.Role, Mode: p.Mode, Network: p.Config.Network.String()}}
 	i.vpn = v
+	if liveErr == nil {
+		liveErr = identityErr
+	}
+	if liveErr != nil {
+		v.health.State = "failed"
+		v.health.LastError = liveErr.Error()
+		close(v.done)
+		return
+	}
 	go func() {
 		defer close(v.done)
 		err := v.run(ctx, p, open)
@@ -106,6 +139,7 @@ func (v *vpnWorker) run(ctx context.Context, p *vpn.Prepared, open func(string) 
 		return err
 	}
 	config.Stats = v.stats
+	config.Live = v.live
 	v.mu.Lock()
 	v.health.Transport = config.Transport
 	if v.health.Transport == "" {
@@ -182,6 +216,9 @@ func (c *controller) replaceVPN(next definition) {
 	if old != nil && next.vpn != nil && old.Fingerprint == next.vpn.Fingerprint {
 		h := c.worker.vpn.snapshot()
 		if h.State != "failed" && h.State != "stopped" {
+			if c.worker.vpn != nil && c.worker.vpn.live != nil {
+				c.worker.vpn.live.Update(vpn.LiveFromConfig(next.vpn.Config))
+			}
 			return
 		}
 	}
@@ -235,5 +272,34 @@ func (c *controller) controlVPN(start bool) error {
 		v.stop()
 	}
 	c.worker.startVPN(c.ctx, c.current.vpn)
+	return nil
+}
+
+// restartVPN applies saved VPN settings without applying pending proxy edits.
+func (c *controller) restartVPN() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ctx.Err() != nil || c.restartPending || c.worker == nil {
+		return errors.New("服务正在停止或重启，无法重启 VPN")
+	}
+	fs := cli.CloneFlags(c.original)
+	if err := cli.Parse(fs, c.args); err != nil {
+		return err
+	}
+	prepared, err := vpn.Prepare(c.role, fs)
+	if err != nil {
+		return err
+	}
+	only := prepared != nil && prepared.Mode == "only"
+	if only != c.current.vpnOnly {
+		return errors.New("vpn-mode 改变了代理运行模式，请使用全局“保存并应用”切换模式")
+	}
+
+	c.worker.vpn.stop()
+	c.worker.vpn = nil
+	c.current.vpn = prepared
+	if prepared != nil {
+		c.worker.startVPN(c.ctx, prepared)
+	}
 	return nil
 }

@@ -4,6 +4,7 @@ package vpn
 import (
 	"context"
 	"crypto/tls"
+	"encoding/hex"
 	"errors"
 	"net"
 	"net/netip"
@@ -26,6 +27,9 @@ type Device interface {
 	Close() error
 }
 type Config struct {
+	ClientID                   string
+	Live                       *LiveSettings
+	server                     bool
 	Address                    string
 	Transport, Host, TCPListen string
 	TLS                        *tls.Config
@@ -68,6 +72,12 @@ func (c Config) normalized(server bool) (Config, error) {
 		n, e := strconv.Atoi(port)
 		if err != nil || e != nil || n < 0 || n > 65535 {
 			return c, errors.New("invalid VPN TCP listen address")
+		}
+	}
+	if c.ClientID != "" {
+		id, err := hex.DecodeString(c.ClientID)
+		if err != nil || len(id) != 32 {
+			return c, errors.New("invalid VPN client identity")
 		}
 	}
 	if len(c.Key) != 32 {
@@ -124,6 +134,14 @@ func (c Config) normalized(server bool) (Config, error) {
 	if c.TLS.InsecureSkipVerify {
 		return c, errors.New("VPN certificate verification cannot be disabled")
 	}
+	if c.Live == nil {
+		var err error
+		c.Live, err = NewLiveSettings(LiveFromConfig(c))
+		if err != nil {
+			return c, err
+		}
+	}
+	c.server = server
 	return c, nil
 }
 func validClientIP(network netip.Prefix, ip netip.Addr) bool {

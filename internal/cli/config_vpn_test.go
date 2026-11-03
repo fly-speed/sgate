@@ -89,3 +89,18 @@ func TestDisabledVPNDoesNotRelaxOtherConfigurationErrors(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+func TestRawVPNValuesRetainDormantValuesForSelectiveLiveUpdates(t *testing.T) {
+	for _, body := range []string{
+		"\ufeff# test\nvpn-mode = disabled\nvpn-noise-rate = '8K'\nvpn-mtu = invalid-but-dormant\n",
+		"service vpn {\n vpn-mode = disabled\n vpn-noise-rate = '8K'\n vpn-mtu = invalid-but-dormant\n}\n",
+	} {
+		values, err := ReadValues(configFile(t, body))
+		if err != nil || values["vpn-noise-rate"] != "8K" || values["vpn-mtu"] != "invalid-but-dormant" {
+			t.Fatal(values, err)
+		}
+	}
+	if _, err := ReadValues(configFile(t, "vpn-noise-rate=1K\nvpn-noise-rate=2K\n")); err == nil {
+		t.Fatal("duplicate accepted")
+	}
+}

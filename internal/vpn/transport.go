@@ -40,21 +40,32 @@ func (p *peer) run(ctx context.Context, c Config, receive func([]byte) error) er
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	p.started = time.Now()
-	if c.Noise.Rate > 0 && !p.padding {
-		c.Stats.noiseUnsupported.Add(1)
-		defer c.Stats.noiseUnsupported.Add(-1)
-	}
+
 	done := make(chan error, 3)
 	go func() {
 		var id uint64
+		var ticker *time.Ticker
 		var tick <-chan time.Time
-		if p.padding && c.Noise.Rate > 0 {
-			ticker := time.NewTicker(noiseTick)
-			defer ticker.Stop()
-			tick = ticker.C
-		}
+		var previous LiveConfig
+		var unsupported bool
 		pacer := noisePacer{last: time.Now()}
+		defer func() {
+			if ticker != nil {
+				ticker.Stop()
+			}
+			if unsupported {
+				c.Stats.noiseUnsupported.Add(-1)
+			}
+		}()
+
 		send := func(packet []byte) error {
+			if c.server && !c.Live.Snapshot().AllowPrivate {
+				src, _, valid := ipv4(packet, c.MTU)
+				if valid && src != c.Network.Addr().Next() && !publicDestination(src) {
+					c.Stats.drops.Add(1)
+					return nil
+				}
+			}
 			if _, reliable := p.conn.(*recordConnection); !reliable && clampTCPMSS(packet, c.MTU) {
 				c.Stats.mssClamped.Add(1)
 			}
@@ -79,6 +90,29 @@ func (p *peer) run(ctx context.Context, c Config, receive func([]byte) error) er
 		}
 
 		for {
+			live, changed := c.Live.Watch()
+			if live != previous {
+
+				pacer = noisePacer{last: time.Now()}
+				if ticker != nil {
+					ticker.Stop()
+					ticker = nil
+					tick = nil
+				}
+				if p.padding && live.Noise.Rate > 0 && (live.Noise.Idle || live.Noise.Traffic) {
+					ticker = time.NewTicker(noiseTick)
+					tick = ticker.C
+				}
+				if want := !p.padding && live.Noise.Rate > 0; want != unsupported {
+					if want {
+						c.Stats.noiseUnsupported.Add(1)
+					} else {
+						c.Stats.noiseUnsupported.Add(-1)
+					}
+					unsupported = want
+				}
+				previous = live
+			}
 			if ctx.Err() != nil {
 				done <- ctx.Err()
 				return
@@ -106,8 +140,11 @@ func (p *peer) run(ctx context.Context, c Config, receive func([]byte) error) er
 				done <- ctx.Err()
 				return
 			case <-p.queue.ready:
+			case <-changed:
 			case <-tick:
-				if err := p.sendNoise(time.Now(), c, &pacer); err != nil {
+				noiseConfig := c
+				noiseConfig.Noise = c.Live.Snapshot().Noise
+				if err := p.sendNoise(time.Now(), noiseConfig, &pacer); err != nil {
 					done <- err
 					return
 				}
@@ -232,7 +269,7 @@ func ListenServer(config Config, dev Device) (*Server, error) {
 	}
 	var admitted atomic.Int64
 	tr := &quic.Transport{Conn: udp, ConnContext: func(ctx context.Context, _ *quic.ClientInfo) (context.Context, error) {
-		if admitted.Add(1) > int64(c.MaxClients+16) {
+		if admitted.Add(1) > int64(max(c.Live.Snapshot().MaxClients, int(c.Stats.active.Load()))+16) {
 			admitted.Add(-1)
 			return nil, errors.New("VPN connection limit")
 		}
@@ -422,10 +459,10 @@ func (s *Server) accept(ctx context.Context, conn connection) {
 		return
 	}
 	flow, _ := conn.Context().Value(flowContextKey{}).(*datagramFlow)
-	p := &peer{conn: conn, control: control, id: h.ID, ip: ip, queue: newPacketQueue(s.cfg.QueueMaxAge), padding: h.Padding, flow: flow}
+	p := &peer{conn: conn, control: control, id: h.ID, ip: ip, queue: newPacketQueue(s.cfg.QueueMaxAge, s.cfg.Live), padding: h.Padding, flow: flow}
 	s.mu.Lock()
 	old := s.peers[ip]
-	if (old != nil && old.id != h.ID) || (old == nil && len(s.peers) >= s.cfg.MaxClients) {
+	if (old != nil && old.id != h.ID) || (old == nil && len(s.peers) >= s.cfg.Live.Snapshot().MaxClients) {
 		s.mu.Unlock()
 		reject(control, "VPN address in use or client limit reached")
 		return
@@ -457,7 +494,7 @@ func (s *Server) accept(ctx context.Context, conn connection) {
 	_ = p.run(ctx, s.cfg, func(packet []byte) error {
 		src, dst, ok := ipv4(packet, s.cfg.MTU)
 		gateway := s.cfg.Network.Addr().Next()
-		if !ok || src != ip || (s.cfg.Network.Contains(dst) && dst != gateway) || (dst != gateway && !publicDestination(dst) && !s.cfg.AllowPrivate) {
+		if !ok || src != ip || (s.cfg.Network.Contains(dst) && dst != gateway) || (dst != gateway && !publicDestination(dst) && !s.cfg.Live.Snapshot().AllowPrivate) {
 			s.cfg.Stats.drops.Add(1)
 			return nil
 		}
@@ -486,9 +523,12 @@ func RunClient(parent context.Context, config Config, dev Device) error {
 	if dev == nil {
 		return errors.New("VPN packet device required")
 	}
-	id, err := randomNonce()
-	if err != nil {
-		return err
+	id := c.ClientID
+	if id == "" {
+		id, err = randomNonce()
+		if err != nil {
+			return err
+		}
 	}
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
@@ -601,7 +641,7 @@ func clientConnection(ctx context.Context, c Config, id string, active *atomic.P
 		return errors.New("invalid VPN server assignment")
 	}
 	control.SetDeadline(time.Time{})
-	p := &peer{conn: conn, control: control, id: id, ip: c.ClientIP, queue: newPacketQueue(c.QueueMaxAge), padding: h.Padding && reply.Padding, flow: flow}
+	p := &peer{conn: conn, control: control, id: id, ip: c.ClientIP, queue: newPacketQueue(c.QueueMaxAge, c.Live), padding: h.Padding && reply.Padding, flow: flow}
 	if c.Connected != nil && *cleanup == nil {
 		undo, err := c.Connected()
 		if err != nil {

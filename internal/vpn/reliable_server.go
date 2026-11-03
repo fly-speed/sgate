@@ -38,7 +38,7 @@ func (s *Server) listenReliable() error {
 			http.NotFound(w, r)
 			return
 		}
-		if admitted.Add(1) > int64(s.cfg.MaxClients+16) {
+		if admitted.Add(1) > int64(max(s.cfg.Live.Snapshot().MaxClients, int(s.cfg.Stats.active.Load()))+16) {
 			admitted.Add(-1)
 			http.Error(w, "VPN connection limit", 503)
 			return

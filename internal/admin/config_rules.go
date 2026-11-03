@@ -63,7 +63,7 @@ func configurationRules() map[string]configRule {
 	add("vpn-mode", configRule{Type: "enum", Choices: []string{"disabled", "both", "only"}, Hint: "关闭 / 代理与 VPN 共存 / 仅 VPN；客户端应用配置后需手动启动 VPN，服务端自动监听。"})
 	add("vpn-queue-max-age", configRule{Type: "duration", Min: "0", Max: "60000000000", Hint: "发送队列过期时间，0 关闭过期丢弃（默认），最多 1m；弱网 TCP 建议保持 0，队列容量仍有限制。"})
 	add("vpn-mtu", configRule{Type: "integer", Min: "576", Max: "1500", Hint: "IPv4 TUN MTU，默认 1280 字节。"})
-	add("vpn-max-clients", configRule{Type: "integer", Min: "1", Max: "254", Hint: "同时认证客户端数，1～254。"})
+	add("vpn-max-clients", configRule{Type: "integer", Min: "1", Max: "254", Hint: "同时认证客户端数，1～254；在线调整仅限制新接入，不踢现有客户端。"})
 	add("vpn-listen", configRule{Type: "listen", Hint: "VPN 独立 UDP 地址；启用 TCP 监听后可留空，不能与 quic-listen 共用 UDP 端口。"})
 	add("vpn-tcp-listen", configRule{Type: "listen", Hint: "可选 TLS/TCP 与 WSS 共用监听，可与 VPN UDP 使用同一数字端口；两种监听至少填写一个。"})
 	add("vpn-server", configRule{Type: "vpn-url", Hint: "quic://、tcp:// 或 wss://证书域名:8444/vpn；tcp 也使用 TLS，TCP/WSS 需服务端启用 vpn-tcp-listen。"})

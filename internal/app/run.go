@@ -142,7 +142,7 @@ func (c *controller) status() any {
 		last = quic.LastError
 	}
 	return map[string]any{
-		"healthy": healthy, "quic": quic, "vpn": vpnStatus, "vpn_mode": vpnStatus.Mode,
+		"healthy": healthy, "quic": quic, "vpn": vpnStatus, "vpn_mode": vpnStatus.Mode, "vpn_restart_supported": true,
 		"websocket_listeners":       websocketListeners,
 		"pending_listeners":         pending,
 		"noise":                     c.current.noiseStatus(),

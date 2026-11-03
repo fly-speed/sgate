@@ -164,3 +164,28 @@ func TestReliableIPUsesWholePacketRecordsWithoutDatagramReassembly(t *testing.T)
 		t.Fatal("whole IP frame not preserved", len(got), err)
 	}
 }
+
+func TestStableClientIdentityReplacesStaleSessionAcrossTransports(t *testing.T) {
+	server, cfg, remote := fixtureWire(t, 1, NoiseConfig{}, "mixed")
+	id, err := NewClientIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ClientID = id
+	cfg.RetryMin = 5 * time.Second
+	cfg.RetryMax = 5 * time.Second
+	_, stopOld, _ := startClient(t, cfg)
+	await(t, "old QUIC client", func() bool { return cfg.Stats.Snapshot().Active == 1 })
+	next := cfg
+	next.Transport = "wss"
+	next.Address = server.TCPAddr().String()
+	next.Host = next.Address
+	next.Stats = &Stats{}
+	local, _, _ := startClient(t, next)
+	await(t, "WSS replaces stale lease", func() bool { return next.Stats.Snapshot().Active == 1 })
+	stopOld()
+	await(t, "one current lease", func() bool { return server.cfg.Stats.Snapshot().Active == 1 })
+	packet := ipPacket(next.ClientIP.String(), "8.8.8.8", 1280)
+	local.out <- packet
+	receivePacket(t, remote, packet)
+}

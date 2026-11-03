@@ -110,3 +110,6 @@ func welcomeProof(key []byte, challenge string, h hello, w welcome) string {
 	m.Write(b)
 	return hex.EncodeToString(m.Sum(nil))
 }
+
+// NewClientIdentity creates a process-local identity reusable across endpoint switches.
+func NewClientIdentity() (string, error) { return randomNonce() }

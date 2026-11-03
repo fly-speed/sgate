@@ -148,6 +148,8 @@ func (h *Handler) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		h.getConfig(w)
 	case r.URL.Path == "/api/config" && r.Method == "PUT":
 		h.putConfig(w, r)
+	case r.URL.Path == "/api/vpn-restart" && r.Method == "POST":
+		h.restartVPN(w, r)
 	case (r.URL.Path == "/api/vpn-start" || r.URL.Path == "/api/vpn-stop") && r.Method == "POST":
 		h.controlVPN(w, r)
 	case r.URL.Path == "/api/vpn-test" && r.Method == "POST":
@@ -549,6 +551,7 @@ func (h *Handler) getConfig(w http.ResponseWriter) {
 		}
 		fields = visible
 	}
+	fields = vpnConfigFields(fields, h.view.Role)
 	for i := range fields {
 		for _, key := range h.view.LiveFields {
 			if key == fields[i].Key && h.view.ApplyLive != nil {
@@ -559,7 +562,6 @@ func (h *Handler) getConfig(w http.ResponseWriter) {
 			fields[i].Validation.Options = argumentOptions(h.view.Role)
 		}
 	}
-	fields = vpnConfigFields(fields, h.view.Role)
 	configRevision := digest(b)
 	if h.view.Role == "client" {
 		fields = clientCredentialFields(fields)

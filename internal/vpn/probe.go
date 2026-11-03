@@ -149,7 +149,7 @@ func Probe(parent context.Context, config Config) (result ProbeResult) {
 func (s *Server) serveProbe(ctx context.Context, conn connection, control controlChannel, challenge string, h hello, ip netip.Addr) {
 	s.mu.Lock()
 	occupied := s.peers[ip] != nil
-	full := len(s.peers) >= s.cfg.MaxClients
+	full := len(s.peers) >= s.cfg.Live.Snapshot().MaxClients
 	s.mu.Unlock()
 	reply := welcome{Probe: true, IP: ip.String(), Network: s.cfg.Network.String(), Gateway: s.cfg.Network.Addr().Next().String(), MTU: s.cfg.MTU, AddressInUse: occupied, ClientLimitReached: full}
 	reply.Proof = welcomeProof(s.cfg.Key, challenge, h, reply)

@@ -224,3 +224,52 @@ func plainVPNDisabled(fs *flag.FlagSet, path string, explicit map[string]bool) b
 	}
 	return vpnDisabled(fs, "", explicit)
 }
+
+// ReadValues decodes file syntax without applying flag types or dormant-mode
+// filtering. Callers still validate selected values and command-line precedence.
+func ReadValues(path string) (map[string]string, error) {
+	if path == "" {
+		return map[string]string{}, nil
+	}
+	values, merged, err := serviceconfig.Read(path)
+	if err != nil || merged {
+		return values, err
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	values = map[string]string{}
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 4096), 1024*1024)
+	line := 0
+	for scanner.Scan() {
+		line++
+		text := scanner.Text()
+		if line == 1 {
+			text = strings.TrimPrefix(text, "\uFEFF")
+		}
+		if !utf8.ValidString(text) {
+			return nil, fmt.Errorf("configuration line %d: UTF-8 required", line)
+		}
+		text = strings.TrimSpace(text)
+		if text == "" || strings.HasPrefix(text, "#") || strings.HasPrefix(text, ";") {
+			continue
+		}
+		key, value, ok := strings.Cut(text, "=")
+		if !ok {
+			return nil, fmt.Errorf("configuration line %d: expected key = value", line)
+		}
+		key = strings.TrimSpace(key)
+		if _, exists := values[key]; exists {
+			return nil, fmt.Errorf("configuration line %d: duplicate option", line)
+		}
+		value, err = configValue(strings.TrimSpace(value))
+		if err != nil {
+			return nil, fmt.Errorf("configuration line %d: invalid quoted value", line)
+		}
+		values[key] = value
+	}
+	return values, scanner.Err()
+}

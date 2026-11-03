@@ -2034,3 +2034,34 @@ test("VPN overview distinguishes reliable transports without QUIC congestion lab
  assert.doesNotMatch(metrics,/QUIC/);
  assert.match(metrics,/3\.0 ms/);
 });
+
+test("VPN fields distinguish live saves from apply-required settings", async () => {
+ const {context,elements}=await page();
+ context.fields=[
+  {key:"vpn-noise-rate",value:"0",group:"独立 VPN",validation:{type:"bytes",live:true}},
+  {key:"vpn-mtu",value:"1280",group:"独立 VPN",validation:{type:"integer"}}
+ ];
+ vm.runInContext('renderConfigFields(fields,{cli_overrides:[]},"server")',context);
+ const group=elements.get("config-fields").children[0];
+ assert.match(group.children[1].children[0].children.at(-1).textContent,/保存后立即生效/);
+ assert.match(group.children[2].children[0].children.at(-1).textContent,/应用后生效/);
+});
+
+test("VPN endpoint uses reconnect badge and scoped restart preserves unsaved drafts", async () => {
+ const {context,elements}=await page();
+ context.fields=[
+ {key:"vpn-server",value:"tcp://vpn.example.com:8444/vpn",group:"独立 VPN",validation:{type:"vpn-url",live:true}},
+ {key:"vpn-mtu",value:"1280",group:"独立 VPN",validation:{type:"integer"}}];
+ vm.runInContext('revision="saved-version";renderConfigFields(fields,{vpn_restart_supported:true},"server");configInputs[1].input.value="1200";configInputs[1].dirty=true',context);
+ const group=elements.get("config-fields").children[0];
+ assert.match(group.children[1].children[0].children.at(-1).textContent,/保存后自动重连/);
+ assert.equal(vm.runInContext('vpnRestartButtons.length',context),1);
+ const calls=[];context.api=async(path,options)=>{calls.push({path,body:JSON.parse(options.body)});return {runtime:{},requires_restart:true}};
+ await vm.runInContext('restartSavedVPN()',context);
+ assert.deepEqual(calls,[{path:"vpn-restart",body:{revision:"saved-version"}}]);
+ assert.equal(vm.runInContext('configInputs[1].input.value',context),"1200");
+ assert.equal(vm.runInContext('configInputs[1].dirty',context),true);
+ assert.equal(vm.runInContext('vpnRestartButtons[0].disabled',context),false);
+ assert.match(vm.runInContext('configSaveMessage({live_applied:["vpn-server"],runtime:{vpn:{enabled:true,state:"connecting"}}})',context),/重新连接/);
+ assert.match(vm.runInContext('configSaveMessage({live_applied:["vpn-server"],runtime:{vpn:{enabled:true,state:"stopped"}}})',context),/下次启动/);
+});

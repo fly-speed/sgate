@@ -83,8 +83,8 @@ func TestVPNQueueExpiryIsOptInForOldConfigurations(t *testing.T) {
 	before := p.Fingerprint
 	fs.Set("vpn-queue-max-age", "250ms")
 	p, err = Prepare("client", fs)
-	if err != nil || p.Config.QueueMaxAge.String() != "250ms" || p.Fingerprint == before {
-		t.Fatal("explicit expiry ignored", p, err)
+	if err != nil || p.Config.QueueMaxAge.String() != "250ms" || p.Fingerprint != before {
+		t.Fatal("live queue age changed static VPN identity", p, err)
 	}
 	for _, value := range []string{"-1ms", "61s"} {
 		fs.Set("vpn-queue-max-age", value)
@@ -108,5 +108,27 @@ func TestIntegratedVPNTransportSelectionAndFingerprint(t *testing.T) {
 			t.Fatal(scheme, p)
 		}
 		previous = p.Fingerprint
+	}
+}
+
+func TestVPNServerCandidateMatchesFreshFingerprintWithoutChangingAppliedNetwork(t *testing.T) {
+	fs := integratedSettings(t)
+	fs.Set("vpn-mode", "both")
+	applied, err := Prepare("client", fs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := "wss://vpn-next.invalid:443/vpn"
+	candidate, err := applied.WithServerURL(address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs.Set("vpn-server", address)
+	fresh, err := Prepare("client", fs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if candidate.Fingerprint != fresh.Fingerprint || candidate.Config.TLS.ServerName != "vpn-next.invalid" || applied.Config.TLS.ServerName != "vpn.invalid" || candidate.Network.MTU != applied.Network.MTU {
+		t.Fatal("endpoint candidate changed unrelated settings or identity")
 	}
 }

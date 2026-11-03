@@ -168,7 +168,7 @@ service sgate-client {
     vpn-network = 10.77.0.0/24
     # TUN MTU in bytes, from 576 to 1500.
     vpn-mtu = 1280
-    # Queue expiry: 0 disables age drops (recommended for weak-link TCP); maximum 1m.
+    # Queue expiry: 0 disables age drops (recommended for weak-link TCP); maximum 1m. LIVE: Web saves apply without VPN reconnection.
     vpn-queue-max-age = 0s
     # New TUN device name; empty uses sgate0 on Linux or automatically allocates utunN on macOS.
     vpn-tun-name = ''
@@ -176,17 +176,20 @@ service sgate-client {
     vpn-manage-network = true
     # VPN shared key file; empty reuses key-file. VPN authentication is separate from proxy and Web accounts.
     vpn-key-file = ''
-    # Per authenticated VPN connection, local padding payload bytes/second; K/M supported, 0 disables, maximum 10M.
+    # Per authenticated VPN connection, local padding payload bytes/second; K/M supported, 0 disables, maximum 10M. LIVE: Web saves apply without VPN reconnection.
     vpn-noise-rate = 0
-    # Allow padding during business IP traffic; queued business data and congestion take priority.
+    # Allow padding during business IP traffic; queued business data and congestion take priority. LIVE: Web saves apply without VPN reconnection.
     vpn-noise-traffic = true
-    # Allow padding on connected but idle VPN tunnels; no business connection is required.
+    # Allow padding on connected but idle VPN tunnels; no business connection is required. LIVE: Web saves apply without VPN reconnection.
     vpn-noise-idle = true
-    # IP inactivity threshold; padding does not reset it. Zero uses 1s.
+    # IP inactivity threshold; padding does not reset it. Zero uses 1s. LIVE: Web saves apply without VPN reconnection.
     vpn-noise-idle-after = 1s
-    # VPN server URL, e.g. quic://vpn.example.com:8444/vpn; the hostname must match the certificate. Separate from the proxy server setting.
-    # Select quic://, tcp:// or wss://host:8444/vpn. TCP is always TLS encrypted.
-    # TCP/WSS requires vpn-tcp-listen on the server; switching is manual.
+    # VPN endpoint, separate from the proxy server setting; use one transport at a time.
+    # QUIC/UDP: quic://vpn.example.com:8444/vpn
+    # TLS/TCP:  tcp://vpn.example.com:8444/vpn
+    # WSS/TCP:  wss://vpn.example.com:8444/vpn
+    # TCP is always TLS encrypted; the hostname must match the certificate SAN.
+    # TCP/WSS requires vpn-tcp-listen on the server. Web saves reconnect a running VPN; a stopped VPN stays stopped.
     vpn-server = ''
     # Fixed virtual IPv4 address for this client; must be unique among clients.
     vpn-client-ip = 10.77.0.2
