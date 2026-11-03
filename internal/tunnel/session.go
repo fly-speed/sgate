@@ -81,6 +81,9 @@ type stream struct {
 // session 保存跨 WebSocket 重连保留的状态，不能与单次传输的生命周期混用。
 // mu 保护序列号、业务流和重放缓存；transportMu 保证同一会话只有一个传输读者。
 type session struct {
+	releaseMemory                          func()
+	initErr                                error
+	native                                 *nativeState
 	lastBusiness                           time.Time // Protected by mu; monotonic application activity, not control traffic.
 	ctx                                    context.Context
 	cancel                                 context.CancelFunc
@@ -107,7 +110,13 @@ type session struct {
 
 func newSession(parent context.Context, target string, opts Options) *session {
 	ctx, cancel := context.WithCancel(parent)
+	release, err := opts.Budget.reserve(opts.sessionReservation())
+	if err != nil {
+		cancel()
+		return &session{ctx: ctx, cancel: cancel, opts: opts, target: target, closed: true, initErr: err, streams: make(map[uint64]*stream), changed: make(chan struct{})}
+	}
 	s := &session{
+		releaseMemory:      release,
 		ctx:                ctx,
 		cancel:             cancel,
 		target:             target,
@@ -120,7 +129,11 @@ func newSession(parent context.Context, target string, opts Options) *session {
 	if opts.Stats != nil {
 		opts.Stats.registerSession(s)
 	}
-	go s.deliverIncoming()
+	if opts.nativeQUIC {
+		s.native = &nativeState{flows: make(map[uint64]*nativeFlow)}
+	} else {
+		go s.deliverIncoming()
+	}
 	go func() {
 		defer s.close()
 		for {
@@ -158,7 +171,13 @@ func (s *session) close() {
 	if s.active != nil && s.activeCloseProof != "" && s.ctx.Err() == nil {
 		_ = s.active.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, sessionClosePrefix+s.activeCloseProof), time.Now().Add(100*time.Millisecond))
 	}
+	if s.native != nil && s.native.active != nil {
+		s.native.active.endSession()
+	}
 	s.closed = true
+	if s.releaseMemory != nil {
+		s.releaseMemory()
+	}
 	if s.opts.Stats != nil {
 		s.opts.Stats.unregisterSession(s)
 	}
@@ -176,6 +195,9 @@ func (s *session) close() {
 		st.conn.Close()
 	}
 	s.streams = make(map[uint64]*stream)
+	if s.native != nil {
+		s.native.flows = make(map[uint64]*nativeFlow)
+	}
 	s.pending = nil
 	s.pendingBytes = 0
 	s.incoming = nil
@@ -189,6 +211,9 @@ func (s *session) enqueue(op byte, id uint64, data []byte) error {
 // A producer belongs to a particular stream. Resetting that stream must wake
 // blocked producers without waiting for unrelated traffic to be acknowledged.
 func (s *session) enqueueStream(op byte, id uint64, data []byte, st *stream) error {
+	if s.native != nil {
+		return s.nativeEnqueue(op, id, data, st)
+	}
 	cost := len(data) + frameHeader
 	for {
 		s.mu.Lock()
@@ -226,6 +251,11 @@ func (s *session) drop(id uint64) bool {
 	if st := s.streams[id]; st != nil {
 		st.conn.Close()
 		delete(s.streams, id)
+		if s.native != nil {
+			if f := s.native.flows[id]; f != nil {
+				f.resetPending = true
+			}
+		}
 		s.signalLocked()
 		return true
 	}
@@ -270,6 +300,9 @@ func (s *session) halfDone(id uint64, read bool) {
 	if st.readEnded && st.writeEnded {
 		st.conn.Close()
 		delete(s.streams, id)
+		if s.native != nil {
+			s.signalLocked()
+		}
 	}
 }
 func (s *session) readStream(id uint64, st *stream) {
@@ -317,7 +350,7 @@ func (s *session) addLocal(c net.Conn) error {
 		c.Close()
 		return errSessionClosed
 	}
-	if len(s.streams) >= s.opts.MaxStreams {
+	if len(s.streams) >= s.opts.MaxStreams || (s.native != nil && len(s.native.flows) >= s.opts.MaxStreams) {
 		s.mu.Unlock()
 		c.Close()
 		return errors.New("client stream limit reached")
@@ -334,6 +367,18 @@ func (s *session) addLocal(c net.Conn) error {
 		s.lastBusiness = time.Time{}
 	}
 	s.streams[id] = st
+	if s.native != nil {
+		if s.pendingBytes+frameHeader > s.opts.ReplayBytes {
+			delete(s.streams, id)
+			s.mu.Unlock()
+			c.Close()
+			return errors.New("native admission buffer full")
+		}
+		s.nativeEnqueueLocked(opOpen, id, nil)
+		s.mu.Unlock()
+		go s.readStream(id, st)
+		return nil
+	}
 	s.mu.Unlock()
 	if err := s.enqueueStream(opOpen, id, nil, st); err != nil {
 		s.drop(id)
@@ -357,11 +402,13 @@ func (s *session) apply(f frame) error {
 			return errors.New("server cannot open client streams")
 		}
 		s.mu.Lock()
-		if f.stream <= s.lastOpened {
+		if s.native == nil && f.stream <= s.lastOpened {
 			s.mu.Unlock()
 			return errors.New("stream ID reused")
 		}
-		s.lastOpened = f.stream
+		if s.native == nil {
+			s.lastOpened = f.stream
+		}
 		full := len(s.streams) >= s.opts.MaxStreams
 		s.mu.Unlock()
 		if full {
@@ -459,6 +506,14 @@ func (s *session) apply(f frame) error {
 		s.halfDone(f.stream, false)
 	case opReset:
 		if s.drop(f.stream) {
+			if s.native != nil {
+				s.mu.Lock()
+				if flow := s.native.flows[f.stream]; flow != nil {
+					flow.resetPending = false
+				}
+				s.signalLocked()
+				s.mu.Unlock()
+			}
 			reason := 0
 			if len(f.data) == 1 {
 				reason = int(f.data[0])

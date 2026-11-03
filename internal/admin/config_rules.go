@@ -38,6 +38,7 @@ func configurationRules() map[string]configRule {
 	})
 	add("admin_session_timeout", configRule{Type: "duration", Min: "1000000000", Max: strconv.FormatInt(int64(365*24*time.Hour), 10), Hint: "时间单位 s/m/h 等，例如 12h；范围 1s～8760h。"})
 	add("noise-min-bytes noise-max-bytes", configRule{Type: "bytes", Min: "0", Max: "10485760", Hint: "单位为字节，支持 K/KB/KiB、M/MB/MiB；1K=1024，1M=1048576；上限 10M，0 使用默认值。"})
+	add("quic-stream-window quic-connection-window quic-stream-buffer quic-replay-bytes quic-receive-bytes memory-budget-bytes", configRule{Type: "bytes", Min: "0", Max: "1099511627776", Hint: "受管缓存或 QUIC 窗口，支持 K/M；0 使用默认值，进程预算 0 表示不限制。"})
 	add("buffer-bytes", configRule{Type: "integer", Min: "0", Max: strconv.Itoa(int(^uint(0) >> 1)), Hint: "单位为字节，只填整数，不支持 K/M 后缀；0 使用默认 4194304，否则至少 16409。"})
 	add("max-streams max-sessions", configRule{Type: "integer", Min: "0", Max: strconv.Itoa(int(^uint(0) >> 1)), Hint: "单位为个，填写非负整数；0 使用默认 128。"})
 	add("admin_max_sessions", configRule{Type: "integer", Min: "1", Max: "10000", Hint: "单位为个，范围 1～10000。"})
@@ -51,6 +52,8 @@ func configurationRules() map[string]configRule {
 	for _, key := range strings.Fields("master_reuseport master_status_notify master_unpriv master_chroot") {
 		rules[key] = configRule{Type: "boolean", Choices: []string{"no", "false", "n", "0"}, Hint: "sgate 托管模式要求关闭：no/false/n/0。"}
 	}
+	add("quic-initial-packet-bytes", configRule{Type: "integer", Min: "1200", Max: "1452", Hint: "QUIC 初始 UDP 负载，1200～1452 字节；后续仍自动探测路径 MTU。"})
+	add("quic-mode", configRule{Type: "enum", Choices: []string{"native", "legacy"}, Hint: "QUIC 原生多流或旧版单流协议；修改后重启代理。"})
 	add("master_type", configRule{Type: "enum", Choices: []string{"sock", "inet", "unix"}, Hint: "服务套接字类型：sock、inet 或 unix。"})
 	add("listen admin_listen", configRule{Type: "listen", Required: true, Hint: "格式为 主机:端口；IPv6 使用 [地址]:端口；端口为 0～65535，0 表示自动分配。"})
 	add("quic-listen", configRule{Type: "listen", Hint: "可选 UDP 监听地址，需配置 tls-cert/tls-key；更改后重启进程。"})
@@ -215,7 +218,7 @@ func validateFormAddress(value string, listen bool) error {
 // 只发布参数类型，不包含命令行的真实取值或密码。
 func argumentOptions(role string) map[string]configRule {
 	options := map[string]configRule{}
-	clientOnly := " username proxies proxies-file server addr send-addr allow-reverse tls-ca reconnect-min reconnect-max offline-timeout "
+	clientOnly := " quic-mode username proxies proxies-file server addr send-addr allow-reverse tls-ca reconnect-min reconnect-max offline-timeout "
 	serverOnly := " quic-listen accounts-file target allowed-targets path tls-cert tls-key session-ttl max-sessions "
 	for key, rule := range configRules {
 		if strings.Contains(key, "_") || key == "master_args" || strings.HasPrefix(key, "app_") {

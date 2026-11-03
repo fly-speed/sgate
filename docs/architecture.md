@@ -2,7 +2,13 @@
 
 本文依据当前仓库实现编写，协议标识为 `sgate-v1`。重点说明客户端与服务端之间的数据分类、命令、收发顺序、可靠性和生命周期；部署参数见 [README](../README.md)。文中的“包”是逻辑协议帧，不等同于 TCP/IP 网络包。
 
-UDP 传输入口为 `quic://`，服务端以 `quic-listen` 监听 UDP，ALPN 为 `sgate-quic-v1`，TLS 最低版本为 1.3。每条 QUIC 连接仅接收一条双向流，通过 `quicStreamConn` 适配 `net.Conn`，在该流上复用现有 HTTP Upgrade、WebSocket 消息、认证及会话恢复逻辑；下文的逻辑协议同样适用。它不是 HTTP/3，不提供原始 UDP 业务转发，且当前仍有单条有序流导致的跨业务流等待。UDP 监听属于应用 worker；共享入口更新仅替换其目标处理器，整进程关闭时释放 QUIC transport 和 UDP socket。关闭单条流时先发送 FIN，并在有界等待期间保留 QUIC 重传机会，避免立即关闭连接丢失最终探测响应。
+UDP 传输入口为 `quic://`，服务端以 `quic-listen` 监听 UDP，TLS 最低版本为 1.3。默认 ALPN 为 `sgate-quic-v2`：认证控制流传输有长度上限的握手 JSON、READY、OPEN、逐流 ACK、PING/PONG、NOISE 和带证明的 CLOSE；每条业务 TCP 对应一条独立 QUIC 双向流。原生握手在 TLS 内复用原有凭据验证、后端允许列表、账号策略及 nonce 防重放校验，不传输 HTTP Upgrade 或 WebSocket 帧。
+
+每条业务 QUIC 流先发送 8 字节业务流 ID，再传输“4 字节大端长度 + AEAD 密文”记录。密文内继续使用下文的 25 字节帧头，但 `seq` 为该业务流方向内的序号，`ack` 字段为 0，ACK 在控制流中按业务流 ID 发送。每条流按业务 ID 和本次传输 nonce 派生独立编解码器，保留应用 AES-GCM 认证加密。仅支持 DATA、FIN、RESET 业务记录；OPEN 在控制流按递增 ID 宣告，后端拨号/逐流交付互不串行，收到 OPEN 的应用确认后发起业务 QUIC 流。
+
+`nativeFlow` 保存逐流发送、已接受及已交付序号、未确认帧和接收队列。ACK 仅在写入业务 TCP 完成后推进；已接受但尚未交付的数据跨重连保留，重放不会再次入队。重连仅替换 QUIC 连接和数据通道，业务 TCP 和逐流状态保留。控制流的 READY 确认不能延长原有恢复期限。具名客户端主动停止时发送携带本次会话证明的 QUIC application close，绕过可能拥塞的控制流；服务端只有验证证明后才销毁会话，普通/伪造关闭仍保留恢复状态。帧数、帧长度、单流缓存及会话总缓存受限；发送窗口按对端公布的缓存预算限制在途帧。流关闭且队列确认后回收元数据；已宣告 ID 的高水位防止重放 OPEN 重新拨号，必要时回复 RETIRED，双方均不会无限保存历史流列表。
+
+控制读者只入队 Pong/退休回复，不等待控制写锁；业务流各自读写和交付。UDP 监听归 worker 所有，共享入口替换时动态解析当前代理；关闭 worker 会释放 QUIC transport 和 UDP socket。原生流与全局序号的旧会话禁止相互恢复。客户端可显式选择 `quic-mode=legacy`，使用同端口兼容的 `sgate-quic-v1`（WebSocket 单流封装）；下文描述的全局序号/交付顺序专指 WS/WSS 和这个旧模式。两种 QUIC 模式均不是 HTTP/3，也不提供 UDP 业务端口转发。
 
 ## 1. 当前实现的结论
 

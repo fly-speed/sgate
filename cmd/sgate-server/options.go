@@ -9,6 +9,7 @@ import (
 
 // parseOptions 保留原有命令行和配置文件优先级，启动流程无需展开参数定义。
 func parseOptions(args []string) (string, error) {
+	cli.ResourceFlags(flag.CommandLine)
 	adminEnabled := flag.Bool("admin-enabled", false, "enable management configured in the same service .cf")
 	adminConfig := flag.String("admin-config", "", "separate Web management configuration (disabled when empty)")
 	flag.String("listen", ":8081", "HTTP listen address")

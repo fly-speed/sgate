@@ -240,7 +240,7 @@ func (s *session) reserveReverse(conn net.Conn, target string) error {
 
 func (s *session) reserveReverseMode(conn net.Conn, target string, secure bool) error {
 	s.mu.Lock()
-	if s.closed || s.active == nil || len(s.streams) >= s.opts.MaxStreams || s.nextStream >= reverseStreamBase-1 || s.pendingBytes+frameHeader+len(target) > s.opts.BufferBytes {
+	if s.closed || (s.active == nil && (s.native == nil || s.native.active == nil)) || (s.native != nil && len(s.native.flows) >= s.opts.MaxStreams) || len(s.streams) >= s.opts.MaxStreams || s.nextStream >= reverseStreamBase-1 || s.pendingBytes+frameHeader+len(target) > s.replayLimit() {
 		s.mu.Unlock()
 		return errors.New("reverse session unavailable or stream limit reached")
 	}
@@ -251,13 +251,19 @@ func (s *session) reserveReverseMode(conn net.Conn, target string, secure bool) 
 		s.lastBusiness = time.Time{}
 	}
 	s.streams[id] = st
-	s.next++
+	if s.native == nil {
+		s.next++
+	}
 	op := opReverseOpen
 	if secure {
 		op = opReverseOpenTLS
 	}
-	s.pending = append(s.pending, frame{op: op, seq: s.next, stream: id, data: []byte(target)})
-	s.pendingBytes += frameHeader + len(target)
+	if s.native != nil {
+		s.nativeEnqueueLocked(op, id, []byte(target))
+	} else {
+		s.pending = append(s.pending, frame{op: op, seq: s.next, stream: id, data: []byte(target)})
+		s.pendingBytes += frameHeader + len(target)
+	}
 	s.signalLocked()
 	s.mu.Unlock()
 	go s.readStream(id, st)

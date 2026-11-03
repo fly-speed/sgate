@@ -14,24 +14,32 @@ import (
 // With shared server management, bytes and connections on that HTTP/TLS
 // listener also include management traffic.
 type Stats struct {
-	peersMu                sync.Mutex
-	peers                  map[string]*peerTraffic
-	mu                     sync.Mutex
-	noiseSessions          map[*session]int
-	sessions               map[*session]struct{}
-	disconnects            uint64
-	lastDisconnect         string
-	lastDisconnectTime     int64
-	businessTX, businessRX atomic.Uint64
-	tx, rx                 atomic.Uint64
-	noiseTX, noiseRX       atomic.Uint64
-	active                 atomic.Int64
-	started                time.Time
+	quicRetransmitted, quicRetransmitPackets, quicTrackingEvictions, quicConnectionBlocked, quicStreamBlocked, quicStreamCountBlocked, quicApplicationBlocked, quicBlockedNanos, quicPTO atomic.Uint64
+	quicCloseReasons                                                                                                                                                                     map[string]uint64
+	budget                                                                                                                                                                               *MemoryBudget
+	quicMu                                                                                                                                                                               sync.Mutex
+	quicActive                                                                                                                                                                           map[*quicMetrics]struct{}
+	quicConnections, quicPacketsTX, quicPacketsRX, quicBytesTX, quicBytesRX, quicLost, quicStreams, quicReplay                                                                           atomic.Uint64
+	peersMu                                                                                                                                                                              sync.Mutex
+	peers                                                                                                                                                                                map[string]*peerTraffic
+	mu                                                                                                                                                                                   sync.Mutex
+	noiseSessions                                                                                                                                                                        map[*session]int
+	sessions                                                                                                                                                                             map[*session]struct{}
+	disconnects                                                                                                                                                                          uint64
+	lastDisconnect                                                                                                                                                                       string
+	lastDisconnectTime                                                                                                                                                                   int64
+	businessTX, businessRX                                                                                                                                                               atomic.Uint64
+	tx, rx                                                                                                                                                                               atomic.Uint64
+	noiseTX, noiseRX                                                                                                                                                                     atomic.Uint64
+	active                                                                                                                                                                               atomic.Int64
+	started                                                                                                                                                                              time.Time
 }
 
 // BusinessTX/RX 是实际加密帧中的业务负载，包含重放，不代表应用重复交付。
 // NoiseActivity 是采样时刻的状态；Permitted 表示策略允许，不保证该秒有噪音帧。
 type TrafficSnapshot struct {
+	Memory        MemorySnapshot        `json:"memory"`
+	QUIC          QUICSnapshot          `json:"quic"`
 	ByIP          []PeerTrafficSnapshot `json:"by_ip"`
 	BusinessTX    uint64                `json:"business_tx_bytes"`
 	BusinessRX    uint64                `json:"business_rx_bytes"`
@@ -45,9 +53,11 @@ type TrafficSnapshot struct {
 	Uptime        int64                 `json:"uptime_seconds"`
 }
 
-func NewStats() *Stats { return &Stats{started: time.Now()} }
+func NewStats() *Stats { return &Stats{started: time.Now(), budget: NewMemoryBudget(0)} }
 func (s *Stats) Snapshot() TrafficSnapshot {
 	return TrafficSnapshot{
+		Memory:     s.MemoryBudget().Snapshot(),
+		QUIC:       s.quicSnapshot(),
 		ByIP:       s.peerSnapshots(),
 		BusinessTX: s.businessTX.Load(), BusinessRX: s.businessRX.Load(), NoiseActivity: s.noiseActivity(),
 		NoiseTX: s.noiseTX.Load(), NoiseRX: s.noiseRX.Load(),

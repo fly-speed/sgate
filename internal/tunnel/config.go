@@ -12,14 +12,18 @@ import (
 const maxNoiseBytes = 10 * 1024 * 1024
 
 type Options struct {
-	Live             *LiveSettings // 可选的进程内热参数，生命周期随代理实例。
-	Stats            *Stats
-	BufferBytes      int
-	MaxStreams       int
-	DialTimeout      time.Duration
-	WriteTimeout     time.Duration
-	Heartbeat        time.Duration
-	HeartbeatTimeout time.Duration
+	QUICInitialPacketSize                                                                                    int
+	Budget                                                                                                   *MemoryBudget
+	QUICStreamWindow, QUICConnectionWindow, NativeStreamBuffer, ReplayBytes, ReceiveBytes, MemoryBudgetBytes int
+	nativeQUIC                                                                                               bool
+	Live                                                                                                     *LiveSettings // 可选的进程内热参数，生命周期随代理实例。
+	Stats                                                                                                    *Stats
+	BufferBytes                                                                                              int
+	MaxStreams                                                                                               int
+	DialTimeout                                                                                              time.Duration
+	WriteTimeout                                                                                             time.Duration
+	Heartbeat                                                                                                time.Duration
+	HeartbeatTimeout                                                                                         time.Duration
 	// 使用禁止标志，保持直接构造 Options 的零值与旧版本行为一致。
 	NoiseSuppressTraffic bool
 	NoiseSuppressIdle    bool
@@ -97,5 +101,5 @@ func (o Options) defaults() (Options, error) {
 		o.HeartbeatTimeout <= o.WriteTimeout {
 		return o, errors.New("heartbeat timeout must exceed heartbeat interval, dial timeout and write timeout")
 	}
-	return o, nil
+	return o.resourceDefaults()
 }

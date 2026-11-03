@@ -35,6 +35,7 @@ func appFlags(role string) *flag.FlagSet {
 		fs.String(v.n, v.v, "")
 	}
 	fs.Int("max-streams", 128, "")
+	cli.ResourceFlags(fs)
 	fs.Int("buffer-bytes", 4194304, "")
 	fs.Duration("heartbeat", 20*time.Second, "")
 	fs.Duration("heartbeat-timeout", 0, "")
@@ -48,6 +49,7 @@ func appFlags(role string) *flag.FlagSet {
 		fs.String("proxies", "", "")
 		fs.String("proxies-file", "", "")
 		fs.String("username", "", "")
+		fs.String("quic-mode", "native", "")
 		fs.String("server", "", "")
 		fs.String("addr", "", "")
 		fs.Bool("send-addr", true, "")

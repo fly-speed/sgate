@@ -24,6 +24,8 @@ type sharedServer struct {
 	tls    atomic.Pointer[tls.Config]
 }
 
+func (s *sharedServer) NativeQUICServer() *tunnel.Server { return s.proxy.Load() }
+
 func (s *sharedServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if proxy := s.proxy.Load(); proxy != nil {
 		proxy.ServeHTTP(w, r)
@@ -62,6 +64,14 @@ func validateShared(d definition) error {
 func (c *controller) replaceShared(next definition) error {
 	// 这里由管理 API 同步调用，不能关闭承载当前请求的 HTTP Worker。
 	// 只交换业务代理；原代理关闭后释放其业务连接、缓存和传输定时器。
+	resource, previous := next.resourceOptions(), c.current.resourceOptions()
+	if (next.quicListen != "" && resource.MaxStreams != previous.MaxStreams) ||
+		resource.QUICInitialPacketSize != previous.QUICInitialPacketSize ||
+		resource.QUICStreamWindow != previous.QUICStreamWindow ||
+		resource.QUICConnectionWindow != previous.QUICConnectionWindow ||
+		resource.MemoryBudgetBytes != previous.MemoryBudgetBytes {
+		return errors.New("QUIC 窗口、初始包大小、最大流数或进程内存预算修改需要重启整个进程")
+	}
 	if next.listen != c.current.listen || next.quicListen != c.current.quicListen || (next.tls == nil) != (c.current.tls == nil) {
 		return errors.New("共享管理端口的监听地址、QUIC UDP 监听或 HTTP/HTTPS 模式改变；请保存配置后重启整个进程")
 	}

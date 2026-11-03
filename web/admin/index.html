@@ -17,7 +17,7 @@
             ><span data-i18n="管理代理配置，观察实时流量。">管理代理配置，观察实时流量。</span><br /><span data-i18n="从一个安全、简洁的工作台开始。">从一个安全、简洁的工作台开始。</span></p
           ></div
         ><div class="intro-bottom"
-          ><span class="pulse"></span> TCP · WebSocket · Encrypted</div
+          ><span class="pulse"></span> TCP · WebSocket / QUIC · Encrypted</div
         ></section
       ><section class="auth-form"
         ><div class="auth-card"
@@ -85,7 +85,7 @@
         ><div id="notice" role="status" hidden></div>
         <section id="overview" class="tab"
           ><div class="section-heading"
-            ><div><h2><span data-i18n="流量脉搏">流量脉搏</span></h2><p class="muted"><span data-i18n="代理监听 TCP 实际收发 · 每秒更新">代理监听 TCP 实际收发 · 每秒更新</span></p></div
+            ><div><h2><span data-i18n="流量脉搏">流量脉搏</span></h2><p class="muted"><span data-i18n="隧道流量 · 每秒更新">隧道流量 · 每秒更新</span></p></div
             ><span class="subtle-tag"><span data-i18n="最近 60 秒">最近 60 秒</span></span></div
           ><div class="cards"
             ><article class="metric"
@@ -95,12 +95,15 @@
               ><p><span data-i18n="↓ 总接收速率">↓ 总接收速率</span></p><strong id="rx-rate">—</strong
               ><small id="rx-total"><span data-i18n="累计接收 —">累计接收 —</span></small></article
             ><article class="metric"
-              ><p><span data-i18n="监听 TCP 连接">监听 TCP 连接</span></p><strong id="connections">—</strong
-              ><small><span data-i18n="含握手连接；服务端含同端口管理连接">含握手连接；服务端含同端口管理连接</span></small></article
+              ><p><span data-i18n="传输连接">传输连接</span></p><strong id="connections">—</strong
+              ><small><span data-i18n="TCP 含握手及同端口管理连接；QUIC 按已接入连接计数">TCP 含握手及同端口管理连接；QUIC 按已接入连接计数</span></small></article
             ><article class="metric"
               ><p><span data-i18n="统计持续时间">统计持续时间</span></p><strong id="uptime">—</strong
               ><small><span data-i18n="进程启动后累计，代理重启不清零">进程启动后累计，代理重启不清零</span></small></article
             ></div
+          ><p id="memory-summary" class="muted"></p
+          ><p id="quic-health" class="muted"></p
+          ><p id="quic-summary" class="muted"></p
           ><article class="chart-card"
             ><div class="chart-header"
               ><h3 id="traffic-chart-title"><span data-i18n="实时网络带宽">实时网络带宽</span></h3

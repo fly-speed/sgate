@@ -30,6 +30,7 @@ type definition struct {
 	shared                         *sharedServer
 }
 type instance struct {
+	quic         *quicWorker
 	quicHTTP     *http.Server
 	quicListener net.Listener
 	quicDone     chan struct{}
@@ -45,6 +46,10 @@ type instance struct {
 }
 
 func (d definition) start(ctx context.Context, stats *tunnel.Stats) (*instance, error) {
+	options := d.resourceOptions()
+	if err := stats.MemoryBudget().Configure(uint64(options.MemoryBudgetBytes)); err != nil {
+		return nil, err
+	}
 	live, err := tunnel.NewLiveSettings(d.liveConfig())
 	if err != nil {
 		return nil, err
@@ -224,32 +229,12 @@ func startTunnelServer(cfg tunnel.ServerConfig) (*tunnel.Server, error) {
 	return s, nil
 }
 
-// The UDP listener belongs to the worker, so shared-port proxy replacement can
-// retain it while routing new handshakes to the replacement tunnel server.
-func (i *instance) startQUIC(d definition, handler http.Handler, config *tls.Config, stats *tunnel.Stats) error {
-	if d.quicListen == "" {
-		return nil
+func (d definition) resourceOptions() tunnel.Options {
+	if d.server != nil {
+		return d.server.Options
 	}
-	listener, err := tunnel.ListenQUIC(d.quicListen, config, d.server.Options)
-	if err != nil {
-		return err
+	if d.client != nil {
+		return d.client.Options
 	}
-	i.quicListener = listener
-	i.quicHTTP = &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: time.Minute, MaxHeaderBytes: 16 * 1024}
-	i.quicDone = make(chan struct{})
-	go func() {
-		defer close(i.quicDone)
-		if err := i.quicHTTP.Serve(stats.Listener(listener)); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
-			if logf := d.server.Options.Logf; logf != nil {
-				logf("QUIC listener stopped: %v", err)
-			}
-		}
-	}()
-	return nil
-}
-func (i *instance) stopQUIC() {
-	if i.quicHTTP != nil {
-		_ = i.quicHTTP.Close()
-		<-i.quicDone
-	}
+	return d.proxies[0].config.Options
 }

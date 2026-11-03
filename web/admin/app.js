@@ -1071,7 +1071,7 @@ function renderRuntime(rt) {
   $("restart-service").hidden = $("restart-service-help").hidden = !rt.service_restart_available;
   $("restart-service").disabled = serviceRestarting || !!rt.service_restart_pending;
   localText($("runtime-state"), () => (t("代理状态：") +
-    (rt.running ? t("运行中") : t("未运行")) +
+    (rt.running ? (rt.healthy===false ? t("运行中 · 降级") : t("运行中")) : t("未运行")) +
     t(" · 配置代次 ") +
     (rt.generation || "—") +
     t(" · 生效监听 ") +
@@ -1105,6 +1105,14 @@ function noiseDescription(noise) {
         (noise.idle_after || "1s"))
   );
 }
+function quicObservationText(data) {
+ const q=data.quic;
+ if(!q || !q.connections_total) return "";
+ return t("QUIC 活跃连接：") + q.active_connections + t(" · 最大平滑 RTT：") +
+ (q.active_connections ? Number(q.max_smoothed_rtt_ms || 0).toFixed(2)+" ms" : "—") +
+ t(" · 丢包判定累计：") + q.lost_packets + t(" · QUIC 包累计发送：") + units(q.packet_tx_bytes) +
+ t(" · 接收：") + units(q.packet_rx_bytes) + t(" · 业务重放：") + units(q.application_replay_bytes) + t(" · 网络流重传：") + units(q.retransmitted_stream_bytes||0) + t(" · 阻塞帧：") + ((q.connection_blocked_frames||0)+(q.stream_blocked_frames||0));
+}
 async function poll(run) {
   if (run !== epoch || !state.authenticated) return;
   try {
@@ -1121,6 +1129,7 @@ async function poll(run) {
     }
     localText($("tx-rate"), () => rates ? units(rates.tx, true) : t("采样中"));
     localText($("rx-rate"), () => rates ? units(rates.rx, true) : t("采样中"));
+    if($("quic-summary")) localText($("quic-summary"), () => quicObservationText(data));
     localText($("noise-observation"), () => noiseObservationText(data, rates));
     localText($("noise-activity"), () => noiseActivityText(data.noise_activity));
     localText($("tx-total"), () => t("累计发送 ") + units(data.tx_bytes));
@@ -1130,6 +1139,8 @@ async function poll(run) {
       t(" · 接收 ") +
       units(data.noise_rx_bytes || 0) +
       t("（收发两端独立配置）")));
+    if($("memory-summary")) localText($("memory-summary"),()=>data.memory ? t("受管缓存预留：")+units(data.memory.reserved_bytes)+" / "+(data.memory.limit_bytes ? units(data.memory.limit_bytes) : t("不限"))+t(" · 预算拒绝：")+(data.memory.rejected_reservations||0) : "");
+    if($("quic-health")) localText($("quic-health"),()=>data.health?.quic?.enabled ? "QUIC " + (data.health.quic.healthy ? t("正常") : t("恢复中")) + " · " + (data.health.quic.address||"") + (data.health.quic.healthy ? "" : " · "+(data.health.quic.last_error||"")) : "");
     localText($("connections"), () => data.connections);
     localText($("uptime"), () => uptime(data.uptime_seconds));
     localText($("live-status"), () => t("● 实时监测"));

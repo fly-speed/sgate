@@ -132,7 +132,16 @@ func (c *controller) status() any {
 			websocketListeners = append(websocketListeners, c.worker.listener.Addr().String())
 		}
 	}
+	quic := quicHealth{State: "disabled", Healthy: true}
+	if c.worker != nil {
+		quic = c.worker.quic.snapshot()
+	}
+	healthy := running && quic.Healthy
+	if !quic.Healthy && quic.Enabled {
+		last = quic.LastError
+	}
 	return map[string]any{
+		"healthy": healthy, "quic": quic,
 		"websocket_listeners":       websocketListeners,
 		"pending_listeners":         pending,
 		"noise":                     c.current.noiseStatus(),

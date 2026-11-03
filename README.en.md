@@ -12,7 +12,14 @@ Open the UDP port in the firewall. QUIC requires TLS 1.3 and certificate verific
 
 Multi-port mappings may mix `quic://`, `ws://` and `wss://` servers. Backend selection, authentication, reverse proxy consent, noise, heartbeat and session resumption retain their existing behavior. The application-facing listeners and targets remain TCP; this does not add UDP application forwarding or automatic TCP fallback.
 
-This implementation carries the existing HTTP Upgrade, WebSocket framing and session multiplexing over one reliable QUIC stream. QUIC provides UDP transport, retransmission and congestion control, but the single ordered stream still permits cross-stream waiting. Higher throughput is not guaranteed; compare throughput, latency and CPU on the deployment network. QUIC traffic totals count stream bytes, including HTTP/WS, application encryption and noise, but exclude QUIC/TLS, UDP/IP overhead and QUIC retransmissions. They are not directly comparable wire-bandwidth measurements.
+The default client setting is `quic-mode = "native"` (`sgate-quic-v2`): an authenticated control stream plus an independent bidirectional QUIC stream for each business connection. Sequence numbers, application ACKs, delivery queues and replay state are maintained per flow, with bounded session-wide memory and flow counts. Application AES-GCM encryption, forward/reverse proxying and half-closes remain supported.
+
+Use `quic-mode = "legacy"` with an older server to retain `sgate-quic-v1` (WebSocket framing over one QUIC stream). New servers accept both ALPNs on the same UDP port. There is no automatic downgrade; changing mode requires restarting the proxy, and retained sessions cannot switch sequence semantics. This client-wide option applies to all QUIC mappings; WS/WSS mappings are unaffected.
+
+The statistics API adds a `quic` object with packet bytes/counts, packets declared lost, active connection RTT/window/in-flight estimates, native flow count and application replay bytes. Existing totals count stream bytes; QUIC packet counters include encryption, headers, ACKs and retransmissions but exclude UDP/IP headers. Network RTT, application latency, application replay and network retransmission are distinct measurements. See [performance and validation](docs/quic-performance.md) for methodology and reproducible commands. Streams still share congestion control and connection resources; higher throughput is not guaranteed.
+
+
+Independent QUIC windows and queue budgets, shared process buffer admission, listener recovery, authenticated health checks and transport metrics are available. See [delivery status](docs/quic-optimization-status.md) and [performance documentation](docs/quic-performance.md) for defaults, restart requirements and evidence. `memory-budget-bytes` defaults to 0 (unlimited) and bounds managed reservations, not RSS. The Linux TCP/UDP netem script is delivered but has not been run on Linux.
 
 ## acl_master integration
 

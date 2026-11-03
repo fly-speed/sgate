@@ -259,6 +259,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // tunnelRequest 是通过请求头完整性和密码校验后才能使用的握手信息。
 type tunnelRequest struct {
+	nativeWindow                             int
+	native                                   bool
 	id, nonce, timestamp, resume, credential string
 	target                                   string
 	username                                 string
@@ -389,11 +391,17 @@ func (s *Server) acquireSession(w http.ResponseWriter, r *http.Request, request 
 		}
 		opts := s.cfg.Options
 		opts.reportStreamErrors = request.reportStreamErrors
+		opts.nativeQUIC = request.native
 		logf, target, username := opts.Logf, request.target, request.username
 		opts.Logf = func(format string, args ...any) {
 			logf("session=%s account=%q target=%q "+format, append([]any{id, username, target}, args...)...)
 		}
 		e = &serverEntry{username: request.username, reverse: request.reverse, reverseTLS: request.reverseTLS, session: newSession(s.ctx, request.target, opts), idle: time.Now()}
+		if e.session.initErr != nil {
+			s.mu.Unlock()
+			s.rejectHandshake(w, r, request, "memory budget exhausted", http.StatusServiceUnavailable)
+			return nil, time.Time{}, false
+		}
 		s.sessions[id] = e
 	}
 	if e.username != request.username {
@@ -407,7 +415,7 @@ func (s *Server) acquireSession(w http.ResponseWriter, r *http.Request, request 
 		s.rejectHandshake(w, r, request, "session target mismatch", http.StatusConflict)
 		return nil, time.Time{}, false
 	}
-	if e.reverse != request.reverse || e.reverseTLS != request.reverseTLS || e.session.opts.reportStreamErrors != request.reportStreamErrors {
+	if e.session.opts.nativeQUIC != request.native || e.reverse != request.reverse || e.reverseTLS != request.reverseTLS || e.session.opts.reportStreamErrors != request.reportStreamErrors {
 		s.mu.Unlock()
 		s.rejectHandshake(w, r, request, "session diagnostic capability mismatch", http.StatusConflict)
 		return nil, time.Time{}, false

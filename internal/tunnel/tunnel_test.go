@@ -68,7 +68,7 @@ func newFixtureWithOptions(t *testing.T, ttl time.Duration, handle func(net.Conn
 	return newFixtureWithTransport(t, ttl, handle, clientOpts, serverOpts, false)
 }
 
-func newFixtureWithTransport(t *testing.T, ttl time.Duration, handle func(net.Conn), clientOpts, serverOpts Options, udp bool) *fixture {
+func newFixtureWithTransport(t *testing.T, ttl time.Duration, handle func(net.Conn), clientOpts, serverOpts Options, udp bool, native ...bool) *fixture {
 	t.Helper()
 	f := &fixture{}
 	var err error
@@ -137,7 +137,7 @@ func newFixtureWithTransport(t *testing.T, ttl time.Duration, handle func(net.Co
 		roots := x509.NewCertPool()
 		roots.AddCert(certificate.Certificate())
 		trust = &tls.Config{RootCAs: roots}
-		listener, e := ListenQUIC("127.0.0.1:0", certificate.TLS, serverOpts)
+		listener, e := ListenQUIC("127.0.0.1:0", certificate.TLS, serverOpts, fixtureQUICHandler{f: f, Handler: f.http.Config.Handler})
 		certificate.Close()
 		if e != nil {
 			t.Fatal(e)
@@ -151,11 +151,16 @@ func newFixtureWithTransport(t *testing.T, ttl time.Duration, handle func(net.Co
 	if err != nil {
 		t.Fatal(err)
 	}
+	mode := "legacy"
+	if len(native) > 0 && native[0] {
+		mode = "native"
+	}
 	client, err := NewClient(ClientConfig{
 		Password:     testPassword,
 		Key:          key,
 		URL:          endpoint,
 		TLSConfig:    trust,
+		QUICMode:     mode,
 		ReconnectMin: 10 * time.Millisecond,
 		ReconnectMax: 30 * time.Millisecond,
 		Options:      clientOpts,
@@ -188,6 +193,19 @@ func newFixtureWithTransport(t *testing.T, ttl time.Duration, handle func(net.Co
 	waitFor(t, "tunnel", func() bool { return f.isAttached() })
 	return f
 }
+
+type fixtureQUICHandler struct {
+	f *fixture
+	http.Handler
+}
+
+func (h fixtureQUICHandler) NativeQUICServer() *Server {
+	if h.f.blocked.Load() {
+		return nil
+	}
+	return h.f.server
+}
+
 func (f *fixture) isAttached() bool {
 	f.server.mu.Lock()
 	defer f.server.mu.Unlock()
@@ -206,6 +224,9 @@ func (f *fixture) disconnect() {
 		e.session.mu.Lock()
 		if e.session.active != nil {
 			e.session.active.Close()
+		}
+		if e.session.native != nil && e.session.native.active != nil {
+			e.session.native.active.conn.CloseWithError(0, "test interruption")
 		}
 		e.session.mu.Unlock()
 	}

@@ -74,6 +74,15 @@ func (c *Client) Probe(ctx context.Context) (result ProbeResult) {
 	query.Set(probeQuery, "1")
 	u.RawQuery = query.Encode()
 	probing.cfg.URL, probing.cfg.Options.Stats = u.String(), nil
+	if probing.nativeQUIC() {
+		_, reply, _, err := probing.dialNative(ctx, id, true)
+		if err != nil {
+			result.fail(ctx, err)
+			return result
+		}
+		reply.ElapsedMS = time.Since(started).Milliseconds()
+		return *reply
+	}
 	// Legacy servers reject this unknown resumed ID without retaining a session.
 	ws, crypt, status, err := probing.dial(ctx, id, true)
 	if err != nil {
@@ -207,6 +216,11 @@ func probeResponseError(key []byte, response *http.Response, request tunnelReque
 func (s *Server) handshakeHeaders(request tunnelRequest, serverNonce string) http.Header {
 	headers := http.Header{}
 	headers.Set("X-Sgate-Nonce", serverNonce)
+	if request.native {
+		value := strconv.Itoa(s.cfg.Options.NativeStreamBuffer)
+		headers.Set("X-Sgate-Flow-Window", value)
+		headers.Set("X-Sgate-Flow-Window-Auth", mac(s.cfg.Key, nativeProtocol, "flow-window", request.id, request.nonce, serverNonce, value))
+	}
 	if request.reportStreamErrors {
 		headers.Set(streamErrorsHeader, "1")
 		headers.Set(streamErrorsAuthHeader, streamErrorsMAC(s.cfg.Key, request.id, request.nonce, serverNonce))
@@ -214,6 +228,9 @@ func (s *Server) handshakeHeaders(request tunnelRequest, serverNonce string) htt
 	window := ""
 	if request.peerWindow > 0 {
 		window = strconv.Itoa(s.cfg.Options.BufferBytes)
+		if request.native {
+			window = strconv.Itoa(s.cfg.Options.ReceiveBytes)
+		}
 		headers.Set(receiveWindowHeader, window)
 	}
 	headers.Set("X-Sgate-Auth", windowMAC(s.cfg.Key, window, protocol, "server", request.id,

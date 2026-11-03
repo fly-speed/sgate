@@ -39,6 +39,7 @@ type clientOptions struct {
 }
 
 func parseClientOptions() (clientOptions, error) {
+	cli.ResourceFlags(flag.CommandLine)
 	var options clientOptions
 	flag.BoolVar(
 		&options.adminEnabled,
@@ -53,6 +54,7 @@ func parseClientOptions() (clientOptions, error) {
 		"separate Web management configuration (disabled when empty)",
 	)
 	flag.StringVar(&options.listen, "listen", "127.0.0.1:9000", "local TCP listen address")
+	flag.String("quic-mode", "native", "QUIC protocol: native or legacy")
 	flag.StringVar(&options.server, "server", "", "server ws://, wss:// or quic:// URL (required unless proxies is set)")
 	flag.StringVar(&options.proxiesFile, "proxies-file", "", "external JSON mapping file; relative to the application config; created on startup if missing; overrides inline proxies")
 	flag.StringVar(&options.proxies, "proxies", "", "JSON array of listen/server/addr mappings; empty uses single-proxy settings")

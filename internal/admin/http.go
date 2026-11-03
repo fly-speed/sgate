@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"sgate/internal/proxyconfig"
+	"sgate/internal/tunnel"
 )
 
 const secretMarker = "__SGATE_KEEP_EXISTING_PASSWORD__"
@@ -131,7 +132,17 @@ func (h *Handler) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/api/tunnel-accounts" && (r.Method == "GET" || r.Method == "PUT"):
 		h.tunnelAccounts(w, r)
 	case r.URL.Path == "/api/stats" && r.Method == "GET":
-		reply(w, 200, h.view.Stats.Snapshot())
+		reply(w, 200, struct {
+			tunnel.TrafficSnapshot
+			Health map[string]any `json:"health"`
+		}{h.view.Stats.Snapshot(), h.runtimeHealth()})
+	case r.URL.Path == "/api/health" && r.Method == "GET":
+		health := h.runtimeHealth()
+		status := http.StatusOK
+		if health["healthy"] != true {
+			status = http.StatusServiceUnavailable
+		}
+		reply(w, status, health)
 	case r.URL.Path == "/api/config" && r.Method == "GET":
 		h.getConfig(w)
 	case r.URL.Path == "/api/config" && r.Method == "PUT":
@@ -149,6 +160,24 @@ func (h *Handler) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		problem(w, 405, "请求方法或接口不存在")
 	}
+}
+
+// Return only health fields; configuration and credentials are never exposed.
+func (h *Handler) runtimeHealth() map[string]any {
+	result := map[string]any{"healthy": false, "running": false}
+	if h.view.Runtime == nil {
+		return result
+	}
+	if value, ok := h.view.Runtime().(map[string]any); ok {
+		result["running"] = value["running"]
+		if healthy, ok := value["healthy"].(bool); ok {
+			result["healthy"] = healthy
+		} else {
+			result["healthy"] = value["running"] == true
+		}
+		result["quic"] = value["quic"]
+	}
+	return result
 }
 
 func setSecurityHeaders(w http.ResponseWriter) {

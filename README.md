@@ -1,6 +1,6 @@
 # sgate
 
-Go 编写的通用 TCP 加密通道，支持 TCP 上的 WS/WSS 和 UDP 上的 QUIC 传输。客户端和服务端使用标准 HTTP Upgrade 建立一条持久 WebSocket 连接，在其中加密、复用多个双向 TCP 流。应用只需要连接本地 TCP 端口，无需修改协议。
+Go 编写的通用 TCP 加密通道，支持 TCP 上的 WS/WSS 和 UDP 上的 QUIC 传输。WS/WSS 模式下，客户端和服务端使用标准 HTTP Upgrade 建立一条持久 WebSocket 连接，在其中加密、复用多个双向 TCP 流。应用只需要连接本地 TCP 端口，无需修改协议。
 
 ```text
 应用客户端 -- TCP --> sgate-client == 加密 WebSocket ==> sgate-server -- TCP --> 应用服务器
@@ -35,7 +35,15 @@ tls-ca = "/path/to/ca.crt"
 
 部署时放行对应 **UDP** 端口。QUIC 强制 TLS 1.3 并验证证书，证书必须覆盖 URL 的主机名或 IP；没有跳过校验的开关。`quic://` 必须显式指定 1～65535 的端口，不能经过普通 TCP HTTP 代理或仅支持 HTTP/WebSocket 的反向代理。它是 sgate 私有 QUIC 协议，并非 HTTP/3；管理后台继续通过原 TCP HTTP/HTTPS 入口访问。`quic-listen` 默认为空，关闭 UDP；修改其监听地址时重启整个进程。托管模式由单个 sgate worker 绑定 UDP 套接字，不向 acl_master 声明为 TCP 监听项。
 
-当前实现把既有 HTTP Upgrade、WebSocket 帧和会话复用协议承载在一条 QUIC 双向流上，底层传输使用 UDP，由 QUIC 负责丢包重传、拥塞控制和有序交付；代理两端的业务接口仍为 TCP，不提供 UDP 业务端口转发，也不会自动降级为 TCP。单条有序流仍可能产生跨业务流等待，不能保证在所有网络上更快；需要按目标网络对吞吐、延迟及 CPU 使用量进行对照测试。统计中的 QUIC 总收发字节为流层计数，包含 HTTP/WS、应用加密和噪音，不包含 QUIC/TLS、UDP/IP 包头以及 QUIC 重传开销；不能据此直接比较两种传输的线上带宽。
+`quic-mode = "native"` 为客户端默认值，使用 `sgate-quic-v2` 原生协议：一条认证控制流，每个业务连接一条独立 QUIC 双向流。业务流拥有各自的序号、ACK、交付队列和重放状态；慢后端不会要求其他业务流按同一全局顺序交付。会话仍有总缓存及流数上限，保留半关闭、正反向代理和应用层 AES-GCM 加密。
+
+连接旧版 QUIC 服务端时，在客户端设置 `quic-mode = "legacy"`，使用 `sgate-quic-v1` 的 WebSocket 单流封装。新服务端在同一 UDP 端口兼容两种 ALPN；不会自动降级。模式切换需重启代理，不允许在同一恢复会话中混用两套序号语义。该选项对客户端的所有 QUIC 映射生效，WS/WSS 映射不受影响。业务入口和目标仍为 TCP，不提供 UDP 业务端口转发。
+
+管理后台的统计 API 增加 `quic` 对象，包含 QUIC 包收发字节/数量、丢包判定数量、活跃连接的最大平滑 RTT、拥塞窗口、在途字节、累计原生业务通道数（恢复后重新计数）和应用层恢复重放字节。页面展示主要 QUIC 指标。原有总收发计数仍按 QUIC 流字节计数；新增 `packet_tx_bytes` / `packet_rx_bytes` 包含 QUIC 包头、加密、ACK 和重传，不含 UDP/IP 包头。RTT 是传输估计值，不是应用请求的 P99；应用重放字节也不同于 QUIC 网络重传。
+
+性能基线、测量口径、弱网限制及复现命令见 [QUIC 性能与验证](docs/quic-performance.md)。多流仍共享连接拥塞控制和总资源预算，具体吞吐和延迟应以目标网络测量为准。
+
+QUIC 独立资源配置、监听自动恢复、健康检查与新指标已提供；参数默认值、重启规则和验证边界见 [优化交付记录](docs/quic-optimization-status.md) 与 [性能文档](docs/quic-performance.md)。进程缓冲预算 `memory-budget-bytes` 默认 0（不限制），需显式配置；它不是 RSS 上限。Linux 同条件 TCP/UDP 弱网脚本已交付，尚未实测。
 
 ## 功能
 

@@ -18,7 +18,8 @@ import (
 )
 
 type ClientConfig struct {
-	AllowReverse bool // Explicit opt-in; zero value denies reverse OPEN commands.
+	QUICMode     string // native (default) or legacy (WebSocket over a single QUIC stream).
+	AllowReverse bool   // Explicit opt-in; zero value denies reverse OPEN commands.
 	Key          []byte
 	Password     string
 	Username     string
@@ -35,6 +36,12 @@ type ClientConfig struct {
 type Client struct{ cfg ClientConfig }
 
 func NewClient(cfg ClientConfig) (*Client, error) {
+	if cfg.QUICMode == "" {
+		cfg.QUICMode = "native"
+	}
+	if cfg.QUICMode != "native" && cfg.QUICMode != "legacy" {
+		return nil, errors.New("quic-mode must be native or legacy")
+	}
 	if len(cfg.Key) != 32 {
 		return nil, errors.New("client key must contain 32 bytes")
 	}
@@ -206,6 +213,7 @@ type clientSessions struct {
 
 func (c *Client) run(ctx context.Context, listener net.Listener, state *clientSessions) error {
 	running := *c
+	running.cfg.Options.nativeQUIC = c.nativeQUIC()
 	running.cfg.Options.Logf = mappingLogger(c.cfg.Options.Logf, listener.Addr().String(), c.cfg.URL)
 	c = &running
 	parent := ctx
@@ -327,9 +335,34 @@ func (c *Client) reconnect(ctx context.Context, state *clientSessions) {
 				c.cfg.Options.Logf("offline timeout; existing TCP connections and replay buffer released")
 			}
 		}
+		if state.current.initErr != nil {
+			timer := time.NewTimer(c.cfg.ReconnectMin)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+			case <-timer.C:
+			}
+			continue
+		}
 		// A stalled HTTP/TLS handshake must not extend offline retention.
 		dialCtx, cancelDial := context.WithDeadline(ctx, offlineSince.Add(c.cfg.OfflineTimeout))
-		ws, crypt, status, err := c.dial(dialCtx, id, resume)
+		var run func(*session) error
+		var status int
+		var err error
+		if c.nativeQUIC() {
+			var nt *nativeTransport
+			nt, _, status, err = c.dialNative(dialCtx, id, resume)
+			if err == nil {
+				run = func(s *session) error { return s.runNative(nt, time.Time{}, nil) }
+			}
+		} else {
+			var ws *websocket.Conn
+			var crypt *codec
+			ws, crypt, status, err = c.dial(dialCtx, id, resume)
+			if err == nil {
+				run = func(s *session) error { return s.transport(ws, crypt) }
+			}
+		}
 		cancelDial()
 		if status == http.StatusGone && resume {
 			// A server restart/expired session cannot preserve the backend TCP sockets.
@@ -350,7 +383,7 @@ func (c *Client) reconnect(ctx context.Context, state *clientSessions) {
 			minimum, _, _ = c.reconnectSettings()
 			backoff = minimum
 			c.cfg.Options.Logf("tunnel connected: session=%s", id)
-			err = state.current.transport(ws, crypt)
+			err = run(state.current)
 			offlineSince = time.Now()
 		}
 		if ctx.Err() != nil {

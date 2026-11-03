@@ -103,7 +103,13 @@ func build(role string, fs *flag.FlagSet, stats *tunnel.Stats) (definition, erro
 }
 
 func (v configValues) options(stats *tunnel.Stats) tunnel.Options {
+	var budget *tunnel.MemoryBudget
+	if stats != nil {
+		budget = stats.MemoryBudget()
+	}
+	size := func(name string) int { n, _ := cli.ParseByteSize(v.optionalText(name)); return n }
 	return tunnel.Options{
+		QUICInitialPacketSize: size("quic-initial-packet-bytes"), Budget: budget, QUICStreamWindow: size("quic-stream-window"), QUICConnectionWindow: size("quic-connection-window"), NativeStreamBuffer: size("quic-stream-buffer"), ReplayBytes: size("quic-replay-bytes"), ReceiveBytes: size("quic-receive-bytes"), MemoryBudgetBytes: size("memory-budget-bytes"),
 		Stats:                stats,
 		BufferBytes:          v.integer("buffer-bytes"),
 		MaxStreams:           v.integer("max-streams"),
@@ -136,6 +142,7 @@ func (v configValues) clientConfig(secret []byte, options tunnel.Options) (*tunn
 
 func (v configValues) clientSettings(secret []byte, options tunnel.Options) tunnel.ClientConfig {
 	return tunnel.ClientConfig{
+		QUICMode:       v.optionalText("quic-mode"),
 		Key:            secret,
 		AllowReverse:   v.optionalText("allow-reverse") == "true",
 		Password:       v.text("password"),

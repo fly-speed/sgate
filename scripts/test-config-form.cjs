@@ -1747,3 +1747,24 @@ test("reverse TLS defaults off, supports tunnel or independent certificates, and
   assert.throws(() => vm.runInContext("configURL(quicTestURL)", context));
  }
  });
+
+test("QUIC transport metrics distinguish packet traffic, RTT and application replay", async () => {
+  const { context } = await page();
+  context.drawChart = () => {};
+  assert.equal(vm.runInContext("quicObservationText({})", context), "");
+  context.quicSample = {quic: {connections_total: 3, active_connections: 2, max_smoothed_rtt_ms: 12.345, lost_packets: 7, packet_tx_bytes: 4096, packet_rx_bytes: 2048, application_replay_bytes: 1024}};
+  const zh = vm.runInContext("quicObservationText(quicSample)", context);
+  assert.match(zh, /12\.35 ms/);
+  assert.match(zh, /丢包判定累计：7/);
+  vm.runInContext('sgateI18n.setLanguage("en")', context);
+  const en = vm.runInContext("quicObservationText(quicSample)", context);
+  assert.match(en, /Packets declared lost: 7/);
+  assert.match(en, /Application replay:/);
+});
+
+test("degraded transport health remains distinct from a running TCP service", async () => {
+  const {context,elements}=await page();
+  context.runtimeSample={running:true,healthy:false,generation:1,listen:"127.0.0.1:8081",quic:{enabled:true,healthy:false}};
+  vm.runInContext("renderRuntime(runtimeSample)",context);
+  assert.match(elements.get("runtime-state").textContent,/降级/);
+});

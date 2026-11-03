@@ -4,8 +4,10 @@ import (
 	"context"
 	mastergin "github.com/acl-dev/gin-service"
 	"github.com/gin-gonic/gin"
+	"io"
 	"net"
 	"testing"
+	"time"
 
 	"sgate/internal/tunnel"
 )
@@ -127,4 +129,122 @@ func TestQUICFrameworkSharedProxyReplacement(t *testing.T) {
 		t.Fatal("UDP listen change accepted without full restart")
 	}
 	check(replacement)
+}
+
+func TestQUICListenerFailureHealthAndRecovery(t *testing.T) {
+	cert, key := managedCertificate(t)
+	backend, _ := probeBackend(t)
+	c := newController(t, "server", "target = "+backend+"\nquic-listen = 127.0.0.1:0\ntls-cert = "+cert+"\ntls-key = "+key+"\n")
+	q := c.worker.quic
+	q.mu.Lock()
+	listener := q.listener
+	address := q.health.Address
+	q.mu.Unlock()
+	listener.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		h := q.snapshot()
+		if h.Recoveries > 0 && h.Healthy {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if h := q.snapshot(); !h.Healthy || h.Recoveries == 0 || h.Failures == 0 || h.Address != address {
+		t.Fatalf("QUIC was not recovered: %+v", h)
+	}
+	trust, err := clientTLSConfig(cert)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := tunnel.NewClient(tunnel.ClientConfig{Key: c.current.server.Key, Password: "app-test-password", URL: "quic://" + address + "/tunnel", TLSConfig: trust})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := client.Probe(context.Background()); !result.OK {
+		t.Fatal(result)
+	}
+	if !c.status().(map[string]any)["healthy"].(bool) {
+		t.Fatal("healthy listener reported degraded")
+	}
+	// Keep the failed port occupied to exercise degraded health and cancellable retries.
+	q.mu.Lock()
+	listener = q.listener
+	q.mu.Unlock()
+	listener.Close()
+	blocker, err := net.ListenPacket("udp", address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Close()
+	deadline = time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if !q.snapshot().Healthy {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if c.status().(map[string]any)["healthy"].(bool) {
+		t.Fatal("UDP failure was hidden by live TCP listener")
+	}
+	if err := c.worker.stop(); err != nil {
+		t.Fatal(err)
+	}
+	c.worker = nil
+	blocker.Close()
+	time.Sleep(150 * time.Millisecond)
+	if q.snapshot().State != "stopped" {
+		t.Fatal("stopped worker attempted to restart")
+	}
+	rebound, err := net.ListenPacket("udp", address)
+	if err != nil {
+		t.Fatal("stopped recovery loop leaked UDP port", err)
+	}
+	rebound.Close()
+}
+
+func TestQUICListenerRecoveryPreservesBusinessSocket(t *testing.T) {
+	cert, key := managedCertificate(t)
+	backend := onlineBackend(t, "")
+	c := newController(t, "server", "target = "+backend+"\nquic-listen = 127.0.0.1:0\ntls-cert = "+cert+"\ntls-key = "+key+"\n")
+	address := c.worker.quic.snapshot().Address
+	trust, err := clientTLSConfig(cert)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := tunnel.NewClient(tunnel.ClientConfig{Key: c.current.server.Key, Password: "app-test-password", URL: "quic://" + address + "/tunnel", TLSConfig: trust, ReconnectMin: 10 * time.Millisecond, ReconnectMax: 20 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	local, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- client.Run(ctx, local) }()
+	defer func() { cancel(); <-done }()
+	conn, err := net.Dial("tcp", local.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	check := func(text string) {
+		if _, err := io.WriteString(conn, text); err != nil {
+			t.Fatal(err)
+		}
+		p := make([]byte, len(text))
+		if _, err := io.ReadFull(conn, p); err != nil || string(p) != text {
+			t.Fatalf("echo=%q error=%v", p, err)
+		}
+	}
+	check("before listener failure")
+	c.worker.quic.mu.Lock()
+	listener := c.worker.quic.listener
+	c.worker.quic.mu.Unlock()
+	listener.Close()
+	check("same business socket after UDP recovery")
+	if c.worker.quic.snapshot().Recoveries == 0 {
+		t.Fatal("test did not exercise listener recovery")
+	}
 }
