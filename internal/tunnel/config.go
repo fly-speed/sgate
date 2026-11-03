@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// 单次噪音总量上限；传输仍使用有界的小帧，避免大包阻塞控制帧。
+// WS 每批噪音 / QUIC 每秒噪音负载上限；传输使用有界小帧。
 const maxNoiseBytes = 10 * 1024 * 1024
 
 type Options struct {
@@ -32,9 +32,10 @@ type Options struct {
 	NoiseInterval        time.Duration
 	NoiseIntervalMin     time.Duration
 	NoiseIntervalMax     time.Duration
-	NoiseMinBytes        int
-	NoiseMaxBytes        int
-	Logf                 func(string, ...any)
+	// WS/WSS: payload bytes per burst; QUIC: target payload bytes per second.
+	NoiseMinBytes int
+	NoiseMaxBytes int
+	Logf          func(string, ...any)
 
 	reverseTLSConfig   *tls.Config // Client-side trust for TLS targets; never carries tunnel ServerName.
 	closeSessionOnStop bool        // Named clients end their own server session on intentional shutdown.

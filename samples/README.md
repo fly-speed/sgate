@@ -13,7 +13,7 @@
 
 `make install` 把本目录安装到 `${PREFIX}/samples/`，正式配置仅放在 `${PREFIX}/conf/sgate-client.cf`、`${PREFIX}/conf/sgate-server.cf`；默认 `${PREFIX}` 为 `/opt/soft/sgate`。重复安装保留已存在的示例配置，更新模板另存为 `.cf.dist`。
 
-`test-tls/` 包含安装测试用的自签名证书及公开测试私钥，两端安装均包含；仅适用于 localhost/127.0.0.1/::1，不会自动启用，不用于生产。配置方法见 [测试证书说明](test-tls/README.md)。重复安装保留已有证书对。
+`test-tls/` 包含安装测试用的自签名证书及公开测试私钥，两端安装均包含，证书和私钥安装到 `${PREFIX}/conf/`；仅适用于 localhost/127.0.0.1/::1，不会自动启用，不用于生产。配置方法见 [测试证书说明](test-tls/README.md)。重复安装保留已有证书对。
 
 旧版本已安装在 `conf/` 的 SSH、VPN、Web 配置及旧启停脚本会保留，不会由安装程序自动删除。迁移前请先停止对应的旧服务，把需要的监听和后端映射合并到正式配置，再启用统一服务；确认后自行归档旧部署文件。
 

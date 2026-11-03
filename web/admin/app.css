@@ -1010,3 +1010,16 @@ html[lang="en"] nav button span {
 .reverse-mapping .reverse-tls-checkbox input { width:auto; margin:0; flex:none; }
 .reverse-tls-certificates > div { display:flex; flex-direction:column; gap:10px; }
 .reverse-tls-certificates[hidden], .reverse-tls-certificates > div[hidden] { display:none; }
+
+/* Transport series share send/receive labels but use separate colors. */
+.quic-tx-dot, .quic-rx-dot {
+  display: inline-block;
+  height: 7px;
+  width: 7px;
+  border-radius: 50%;
+  background: #d07818;
+}
+.quic-rx-dot { background: #9455c8; margin-left: 14px; }
+#traffic-quic-legend { align-items: center; gap: 8px; }
+#traffic-quic-legend:not([hidden]) { display: inline-flex; }
+.legend { flex-wrap: wrap; }

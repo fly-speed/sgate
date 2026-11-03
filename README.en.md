@@ -21,7 +21,9 @@ The statistics API adds a `quic` object with packet bytes/counts, packets declar
 
 Independent QUIC windows and queue budgets, shared process buffer admission, listener recovery, authenticated health checks and transport metrics are available. See [delivery status](docs/quic-optimization-status.md) and [performance documentation](docs/quic-performance.md) for defaults, restart requirements and evidence. `memory-budget-bytes` defaults to 0 (unlimited) and bounds managed reservations, not RSS. The Linux TCP/UDP netem script is delivered but has not been run on Linux.
 
-Installations include a self-signed localhost certificate and a public test private key under `samples/test-tls/`. They are not enabled automatically and are for installation tests only; see [test TLS instructions](samples/test-tls/README.md).
+Installations include a self-signed localhost certificate and a public test private key installed as `${PREFIX}/conf/tls-cert.pem` and `${PREFIX}/conf/tls-key.pem`. They are not enabled automatically and are for installation tests only; see [test TLS instructions](samples/test-tls/README.md).
+
+The live bandwidth chart shows separate TCP sent/received and QUIC sent/received series on both endpoints, with individual transport and IP views. Statistics expose cumulative `transports.tcp` and `transports.quic` byte counters globally and per IP. TCP includes WS/WSS and shared-port server management; QUIC uses stream bytes, excluding packet overhead and network retransmissions. Noise/business payload views remain aggregated across transports.
 
 ## acl_master integration
 
@@ -610,3 +612,5 @@ Managed client/server services send START_OK over FD 5 when Run begins after suc
 
 
 Each reverse mapping now supports independent `listen_tls` and `target_tls` booleans, both false by default. The server UI offers SSL/TLS toggles next to both addresses. An SSL listener reuses the loaded tunnel certificate unless both `listen_tls_cert` and `listen_tls_key` specify separate server-side PEM files. Relative paths use the server working directory; absolute paths are recommended. Missing or invalid certificates reject the save, including managed restart staging. Target TLS uses the authenticated `REVERSE_OPEN_TLS` opcode (7), only for clients advertising `sgate-reverse-tls=1`; unsupported peers are never downgraded to plaintext. Clients verify the target hostname/IP and certificate chain, using system roots plus their `tls-ca` when configured. TLS requires 1.2 or later. Upgrade both programs. Entry TLS and target TLS terminate separately, while the existing AEAD WebSocket tunnel continues carrying application bytes. See the [architecture document](docs/architecture.md#81-反向映射两端的-ssltls).
+
+QUIC noise now interprets `noise-min-bytes` / `noise-max-bytes` as per-tunnel payload bytes per second, paced in small frames without catching up after pauses or congestion. Interval settings control target-rate reselection (minimum 1s); all-zero intervals disable noise. WS/WSS retains bytes-per-burst semantics. Update and restart both endpoints to apply the change; protocol overhead is additional to the payload rate.

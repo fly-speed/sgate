@@ -39,6 +39,11 @@ func configurationRules() map[string]configRule {
 	add("admin_session_timeout", configRule{Type: "duration", Min: "1000000000", Max: strconv.FormatInt(int64(365*24*time.Hour), 10), Hint: "时间单位 s/m/h 等，例如 12h；范围 1s～8760h。"})
 	add("noise-min-bytes noise-max-bytes", configRule{Type: "bytes", Min: "0", Max: "10485760", Hint: "单位为字节，支持 K/KB/KiB、M/MB/MiB；1K=1024，1M=1048576；上限 10M，0 使用默认值。"})
 	add("quic-stream-window quic-connection-window quic-stream-buffer quic-replay-bytes quic-receive-bytes memory-budget-bytes", configRule{Type: "bytes", Min: "0", Max: "1099511627776", Hint: "受管缓存或 QUIC 窗口，支持 K/M；0 使用默认值，进程预算 0 表示不限制。"})
+	for _, key := range []string{"noise-min-bytes", "noise-max-bytes"} {
+		rule := rules[key]
+		rule.Hint += " WS/WSS 表示每批字节；QUIC 表示每秒噪音负载字节，按小帧平滑发送，每条隧道独立计速。"
+		rules[key] = rule
+	}
 	add("buffer-bytes", configRule{Type: "integer", Min: "0", Max: strconv.Itoa(int(^uint(0) >> 1)), Hint: "单位为字节，只填整数，不支持 K/M 后缀；0 使用默认 4194304，否则至少 16409。"})
 	add("max-streams max-sessions", configRule{Type: "integer", Min: "0", Max: strconv.Itoa(int(^uint(0) >> 1)), Hint: "单位为个，填写非负整数；0 使用默认 128。"})
 	add("admin_max_sessions", configRule{Type: "integer", Min: "1", Max: "10000", Hint: "单位为个，范围 1～10000。"})
@@ -95,6 +100,11 @@ func configurationRules() map[string]configRule {
 	} {
 		rule := rules[key]
 		rule.Hint = hint
+		rules[key] = rule
+	}
+	for _, key := range []string{"noise-interval", "noise-interval-min", "noise-interval-max"} {
+		rule := rules[key]
+		rule.Hint += " QUIC 中控制随机目标速率的重选周期（至少 1s），不再表示整批发送后的停顿；全部为 0 时关闭噪音。"
 		rules[key] = rule
 	}
 	for key, rule := range rules {

@@ -12,20 +12,22 @@ const trafficPeerRetention = time.Minute
 const otherTrafficPeers = "__other__"
 
 type peerTraffic struct {
+	transports                                       transportTraffic
 	tx, rx, noiseTX, noiseRX, businessTX, businessRX atomic.Uint64
 	active                                           int64 // guarded by Stats.peersMu
 	idle                                             time.Time
 }
 
 type PeerTrafficSnapshot struct {
-	IP          string `json:"ip"`
-	TX          uint64 `json:"tx_bytes"`
-	RX          uint64 `json:"rx_bytes"`
-	NoiseTX     uint64 `json:"noise_tx_bytes"`
-	NoiseRX     uint64 `json:"noise_rx_bytes"`
-	BusinessTX  uint64 `json:"business_tx_bytes"`
-	BusinessRX  uint64 `json:"business_rx_bytes"`
-	Connections int64  `json:"connections"`
+	Transports  TransportTrafficSnapshot `json:"transports"`
+	IP          string                   `json:"ip"`
+	TX          uint64                   `json:"tx_bytes"`
+	RX          uint64                   `json:"rx_bytes"`
+	NoiseTX     uint64                   `json:"noise_tx_bytes"`
+	NoiseRX     uint64                   `json:"noise_rx_bytes"`
+	BusinessTX  uint64                   `json:"business_tx_bytes"`
+	BusinessRX  uint64                   `json:"business_rx_bytes"`
+	Connections int64                    `json:"connections"`
 }
 
 func trafficPeerIP(addr net.Addr) string {
@@ -82,7 +84,8 @@ func (s *Stats) peerSnapshots() []PeerTrafficSnapshot {
 	for ip, p := range s.peers {
 		peers = append(peers, PeerTrafficSnapshot{
 			IP: ip, Connections: p.active,
-			TX: p.tx.Load(), RX: p.rx.Load(),
+			Transports: p.transports.snapshot(),
+			TX:         p.tx.Load(), RX: p.rx.Load(),
 			NoiseTX: p.noiseTX.Load(), NoiseRX: p.noiseRX.Load(),
 			BusinessTX: p.businessTX.Load(), BusinessRX: p.businessRX.Load(),
 		})

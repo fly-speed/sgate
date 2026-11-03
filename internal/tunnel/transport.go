@@ -155,6 +155,8 @@ func (s *session) writeTransport(ws *websocket.Conn, crypt *codec, done <-chan s
 	noiseTimer.Stop()
 	var noiseTicks <-chan time.Time
 	options, changed := s.opts.liveSnapshot()
+	quicNoise := isQUICStream(ws.NetConn())
+	pacer := quicNoisePacer{}
 	resetNoise := func() error {
 		noiseTimer.Stop()
 		select {
@@ -162,7 +164,13 @@ func (s *session) writeTransport(ws *websocket.Conn, crypt *codec, done <-chan s
 		default:
 		}
 		noiseTicks = nil
-		delay, err := options.noiseDelay()
+		var delay time.Duration
+		var err error
+		if quicNoise {
+			_, delay, err = pacer.poll(time.Now(), options, s.noiseAllowed(options, time.Now()))
+		} else {
+			delay, err = options.noiseDelay()
+		}
 		if err != nil {
 			return err
 		}
@@ -212,7 +220,26 @@ func (s *session) writeTransport(ws *websocket.Conn, crypt *codec, done <-chan s
 		if err != nil {
 			return err
 		}
-		noiseDue = noiseDue || due
+		if quicNoise {
+			var wait time.Duration
+			noiseRemaining, wait, err = pacer.poll(time.Now(), options, s.noiseAllowed(options, time.Now()))
+			if err != nil {
+				return err
+			}
+			noiseDue = noiseRemaining > 0
+			noiseTimer.Stop()
+			select {
+			case <-noiseTimer.C:
+			default:
+			}
+			noiseTicks = nil
+			if wait > 0 {
+				noiseTimer.Reset(wait)
+				noiseTicks = noiseTimer.C
+			}
+		} else {
+			noiseDue = noiseDue || due
+		}
 		ack, next, found, ch, closed := s.nextOutgoing(sent)
 		if closed {
 			return errSessionClosed
@@ -264,12 +291,19 @@ func (s *session) writeTransport(ws *websocket.Conn, crypt *codec, done <-chan s
 					continue
 				}
 				noiseDue = false
-				// Start a fresh wait after sending; never accumulate overdue padding.
-				delay, err := options.noiseDelay()
-				if err != nil {
-					return err
+				if quicNoise {
+					pacer.sent(time.Now())
+					if err := resetNoise(); err != nil {
+						return err
+					}
+				} else {
+					// Start a fresh wait after sending; never accumulate overdue padding.
+					delay, err := options.noiseDelay()
+					if err != nil {
+						return err
+					}
+					noiseTimer.Reset(delay)
 				}
-				noiseTimer.Reset(delay)
 			}
 			// Check cancellation even when a producer keeps the queue busy.
 			select {

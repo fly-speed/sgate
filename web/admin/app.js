@@ -72,7 +72,7 @@ function renderConfigFields(fields, runtime, role) {
     localText(description, () => ((t(field.description) || t("配置项：") + field.key) +
       (field.validation?.hint ? " · " + t(field.validation.hint) : "") +
       (["noise-min-bytes", "noise-max-bytes"].includes(field.key)
-        ? t(" · 这是每次发送的负载总量，不是 B/s 速率；一秒发送多次时，图表会累计这些流量。")
+        ? t(" · WS/WSS 为每批负载字节；QUIC 为每秒噪音负载字节，小帧平滑发送，每条隧道独立计速。")
         : "")));
     label.append(name, description);
     const overridden = overrides.has(field.key === "admin_enabled" ? "admin-enabled" : field.key);
@@ -1091,7 +1091,7 @@ function noiseDescription(noise) {
     (noise.mode === "off"
       ? t("关闭")
       : wait +
-        t("，每次 ") +
+        t("，WS 每批 / QUIC 每秒 ") +
         units(noise.min_bytes) +
         "～" +
         units(noise.max_bytes) +
@@ -1213,7 +1213,19 @@ function trafficRates(data, last) {
     typeof data[key] === "number" && typeof last[key] === "number" && data[key] >= last[key]
       ? (data[key] - last[key]) / seconds
       : null;
+  const transports = {};
+  if (data.transports && last.transports) {
+    for (const protocol of ["tcp", "quic"]) {
+      for (const [direction, suffix] of [["tx", "TX"], ["rx", "RX"]]) {
+        const key = direction + "_bytes";
+        const next = data.transports[protocol]?.[key], before = last.transports[protocol]?.[key];
+        transports[protocol + suffix] = Number.isFinite(next) && Number.isFinite(before) && next >= before
+          ? (next - before) / seconds : null;
+      }
+    }
+  }
   return {
+    ...transports,
     time_ms: data.time_ms,
     tx: rate("tx_bytes"),
     rx: rate("rx_bytes"),
@@ -1285,18 +1297,47 @@ function noiseActivityText(activity) {
     buffered +
     (reasons.length
       ? t("暂停原因：") + reasons.join(t("、")) + t("。")
-      : t("按配置间隔发送，采样间隙可能为零。")) +
+      : t("WS/WSS 按批发送，QUIC 按每秒速率平滑发送；暂停期间不积攒额度。")) +
     (activity.suppressed_traffic ? t("少量后台业务数据也会刷新空闲阈值。") : "")
   );
 }
 function chartMetric() {
   switch ($("traffic-metric").value) {
+    case "tcp":
+      return { keys: ["tcpTX", "tcpRX"], labels: ["TCP 发送", "TCP 接收"], title: t("TCP 网络带宽") };
+    case "quic":
+      return { keys: ["quicTX", "quicRX"], labels: ["QUIC 发送", "QUIC 接收"], title: t("QUIC 流带宽") };
     case "noise":
       return { keys: ["noiseTX", "noiseRX"], title: t("白噪音负载带宽") };
     case "business":
       return { keys: ["businessTX", "businessRX"], title: t("业务负载带宽") };
     default:
+      if (chartSamples().some((point) => Object.hasOwn(point, "tcpTX")))
+        return { keys: ["tcpTX", "tcpRX", "quicTX", "quicRX"],
+          labels: ["TCP 发送", "TCP 接收", "QUIC 发送", "QUIC 接收"], title: t("实时网络带宽") };
       return { keys: ["tx", "rx"], title: t("实时网络带宽") };
+  }
+}
+const chartSeriesColors = ["#087e68", "#5a83d7", "#d07818", "#9455c8"];
+function chartSeriesColor(metric, index) {
+  return chartSeriesColors[metric.keys[index].startsWith("quic") ? 2 + index % 2 : index % 2];
+}
+function renderChartSeries(metric) {
+  const labels = metric.labels || ["发送", "接收"];
+  labels.forEach((label, i) => {
+    for (const prefix of ["traffic-legend-label-", "traffic-tooltip-label-"]) {
+      const element = $(prefix + i);
+      if (element) localText(element, () => t(label));
+    }
+  });
+  for (const i of [0, 1]) {
+    for (const prefix of ["traffic-legend-dot-", "traffic-tooltip-dot-"]) {
+      const dot = $(prefix + i);
+      if (dot) dot.className = (metric.keys[i].startsWith("quic") ? "quic-" : "") + (i ? "rx-dot" : "tx-dot");
+    }
+  }
+  for (const id of ["traffic-quic-legend", "traffic-tooltip-quic-tx-row", "traffic-tooltip-quic-rx-row"]) {
+    if ($(id)) $(id).hidden = metric.keys.length < 4;
   }
 }
 // 绘制与命中使用同一套 CSS 像素坐标，不受高分屏 canvas 缩放影响。
@@ -1383,10 +1424,8 @@ function drawChartHover(c, geometry, metric, max) {
   c.lineTo(x, geometry.bottom);
   c.stroke();
   c.setLineDash([]);
-  for (const [key, color] of [
-    [metric.keys[0], "#087e68"],
-    [metric.keys[1], "#5a83d7"],
-  ]) {
+  for (const [i, key] of metric.keys.entries()) {
+    const color = chartSeriesColor(metric, i);
     if (!Number.isFinite(point[key])) continue;
     c.beginPath();
     c.arc(x, y(point[key]), 4, 0, Math.PI * 2);
@@ -1399,6 +1438,9 @@ function drawChartHover(c, geometry, metric, max) {
   localText($("traffic-tooltip-time"), () => t("采样时间 ") + time);
   localText($("traffic-tooltip-tx"), () => chartHoverRate(point[metric.keys[0]]));
   localText($("traffic-tooltip-rx"), () => chartHoverRate(point[metric.keys[1]]));
+  for (const [i, id] of [[2, "traffic-tooltip-quic-tx"], [3, "traffic-tooltip-quic-rx"]]) {
+    if ($(id)) localText($(id), () => chartHoverRate(point[metric.keys[i]]));
+  }
   tooltip.hidden = false;
   // 靠近边缘时将提示框收进图内，避免遮挡或溢出页面。
   const width = tooltip.offsetWidth,
@@ -1442,6 +1484,7 @@ $("traffic-chart").addEventListener("pointercancel", clearChartHover);
 window.addEventListener("blur", clearChartHover);
 function drawChart() {
   const metric = chartMetric();
+  renderChartSeries(metric);
   localText($("traffic-chart-title"), () => t(metric.title));
   const canvas = $("traffic-chart");
   if (canvas.clientWidth === 0) return;
@@ -1474,10 +1517,8 @@ function drawChart() {
   }
   c.setLineDash([]);
   drawChartTimeAxis(c, geometry);
-  for (const [key, color] of [
-    [metric.keys[1], "#5a83d7"],
-    [metric.keys[0], "#087e68"],
-  ]) {
+  for (const i of [...metric.keys.keys()].reverse()) {
+    const key = metric.keys[i], color = chartSeriesColor(metric, i);
     const segments = [[]];
     chartSamples().forEach((v) => {
       if (!Number.isFinite(v[key]) || v.time_ms < chartTimeRange().start) {

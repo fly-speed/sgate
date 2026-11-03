@@ -25,12 +25,16 @@ func (t *nativeTraffic) tx(n int) {
 	if t != nil && t.stats != nil {
 		t.stats.tx.Add(uint64(n))
 		t.peer.tx.Add(uint64(n))
+		t.stats.transports.add(true, true, n)
+		t.peer.transports.add(true, true, n)
 	}
 }
 func (t *nativeTraffic) rx(n int) {
 	if t != nil && t.stats != nil {
 		t.stats.rx.Add(uint64(n))
 		t.peer.rx.Add(uint64(n))
+		t.stats.transports.add(true, false, n)
+		t.peer.transports.add(true, false, n)
 	}
 }
 func (t *nativeTraffic) close() {

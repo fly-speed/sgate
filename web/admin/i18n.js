@@ -3,6 +3,18 @@
 // UI translations only: editable values and protocol/configuration keys are never translated.
 const sgateI18n = (() => {
   const messages = {
+  "WS/WSS 表示每批字节；QUIC 表示每秒噪音负载字节，按小帧平滑发送，每条隧道独立计速。": "WS/WSS uses bytes per burst; QUIC uses smoothly paced noise payload bytes per second, independently per tunnel.",
+  "QUIC 中控制随机目标速率的重选周期（至少 1s），不再表示整批发送后的停顿；全部为 0 时关闭噪音。": "For QUIC, these control target-rate reselection (at least 1s), not gaps after bursts. All zero disables noise.",
+  " · WS/WSS 为每批负载字节；QUIC 为每秒噪音负载字节，小帧平滑发送，每条隧道独立计速。": " · WS/WSS uses payload bytes per burst; QUIC uses smoothly paced payload bytes per second, independently per tunnel.",
+  "，WS 每批 / QUIC 每秒 ": ", WS per burst / QUIC per second ",
+  "WS/WSS 按批发送，QUIC 按每秒速率平滑发送；暂停期间不积攒额度。": "WS/WSS sends bursts; QUIC smoothly paces bytes per second without banking credit during pauses.",
+  "WS/WSS 白噪音大小表示每批负载；QUIC 表示每秒负载速率，并按小帧平滑发送。每条隧道独立计速；协议开销不包含在配置速率中，暂停或拥塞后不补发积压额度。": "WS/WSS noise size is payload per burst; QUIC uses smoothly paced payload bytes per second. Rates apply independently per tunnel, exclude protocol overhead, and never catch up accumulated credit after pauses or congestion.",
+  "TCP 发送": "TCP sent",
+  "TCP 接收": "TCP received",
+  "QUIC 发送": "QUIC sent",
+  "QUIC 接收": "QUIC received",
+  "TCP 网络带宽": "TCP network bandwidth",
+  "QUIC 流带宽": "QUIC stream bandwidth",
   "服务端监听启用 SSL/TLS": "Enable SSL/TLS on the server listener",
   "客户端目标启用 SSL/TLS": "Use SSL/TLS for the client target",
   "复用隧道监听证书": "Reuse the tunnel listener certificate",

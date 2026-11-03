@@ -248,3 +248,79 @@ func TestQUICListenerRecoveryPreservesBusinessSocket(t *testing.T) {
 		t.Fatal("test did not exercise listener recovery")
 	}
 }
+
+func TestTransportBandwidthAttribution(t *testing.T) {
+	cert, key := managedCertificate(t)
+	backend := onlineBackend(t, "")
+	c := newController(t, "server", "target = "+backend+"\nquic-listen = 127.0.0.1:0\ntls-cert = "+cert+"\ntls-key = "+key+"\n")
+	trust, err := clientTLSConfig(cert)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"native", "legacy", "wss"} {
+		t.Run(mode, func(t *testing.T) {
+			stats := tunnel.NewStats()
+			endpoint := "quic://" + c.worker.quicListener.Addr().String() + "/tunnel"
+			if mode == "wss" {
+				endpoint = "wss://" + c.worker.listener.Addr().String() + "/tunnel"
+			}
+			clientMode := mode
+			if mode == "wss" {
+				clientMode = "native"
+			}
+			client, err := tunnel.NewClient(tunnel.ClientConfig{Key: c.current.server.Key, Password: "app-test-password", URL: endpoint, TLSConfig: trust, QUICMode: clientMode, Options: tunnel.Options{Stats: stats}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			local, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan error, 1)
+			go func() { done <- client.Run(ctx, local) }()
+			defer func() {
+				cancel()
+				if err := <-done; err != nil {
+					t.Error(err)
+				}
+			}()
+			app, err := net.Dial("tcp", local.Addr().String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer app.Close()
+			app.SetDeadline(time.Now().Add(5 * time.Second))
+			payload := "transport accounting echo"
+			if _, err = io.WriteString(app, payload); err != nil {
+				t.Fatal(err)
+			}
+			response := make([]byte, len(payload))
+			if _, err = io.ReadFull(app, response); err != nil || string(response) != payload {
+				t.Fatal("echo failed", err)
+			}
+			snapshot := stats.Snapshot()
+			selected, other := snapshot.Transports.QUIC, snapshot.Transports.TCP
+			if mode == "wss" {
+				selected, other = other, selected
+			}
+			if selected.TX == 0 || selected.RX == 0 || other != (tunnel.TransportBytesSnapshot{}) {
+				t.Fatalf("incorrect client classification: %+v", snapshot.Transports)
+			}
+			if len(snapshot.ByIP) != 1 {
+				t.Fatal("missing peer counters", snapshot.ByIP)
+			}
+			selected, other = snapshot.ByIP[0].Transports.QUIC, snapshot.ByIP[0].Transports.TCP
+			if mode == "wss" {
+				selected, other = other, selected
+			}
+			if selected.TX == 0 || selected.RX == 0 || other != (tunnel.TransportBytesSnapshot{}) {
+				t.Fatalf("incorrect peer classification: %+v", snapshot.ByIP)
+			}
+		})
+	}
+	snapshot := c.stats.Snapshot()
+	if snapshot.Transports.TCP.TX == 0 || snapshot.Transports.TCP.RX == 0 || snapshot.Transports.QUIC.TX == 0 || snapshot.Transports.QUIC.RX == 0 {
+		t.Fatalf("server did not separate traffic: %+v", snapshot.Transports)
+	}
+}

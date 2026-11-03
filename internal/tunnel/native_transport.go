@@ -335,31 +335,19 @@ func (nt *nativeTransport) writeControls() error {
 	noise.Stop()
 	options, changed := s.opts.liveSnapshot()
 	var noiseTicks <-chan time.Time
-	resetNoise := func() error {
-		noise.Stop()
-		select {
-		case <-noise.C:
-		default:
-		}
-		noiseTicks = nil
-		delay, err := options.noiseDelay()
-		if err != nil {
-			return err
-		}
-		if delay > 0 {
-			noise.Reset(delay)
-			noiseTicks = noise.C
-		}
-		return nil
-	}
-	if err := resetNoise(); err != nil {
-		return err
-	}
-	noiseRemaining := 0
+	pacer := quicNoisePacer{}
+	refreshNoise := func() error { options, changed = s.opts.liveSnapshot(); return nil }
 	if s.opts.Stats != nil {
 		defer s.opts.Stats.registerNoiseTransport(s)()
 	}
 	for {
+		select {
+		case <-changed:
+			if err := refreshNoise(); err != nil {
+				return err
+			}
+		default:
+		}
 		select {
 		case <-nt.pongs:
 			if err := nt.send(nativeControl{Kind: "pong"}); err != nil {
@@ -423,35 +411,29 @@ func (nt *nativeTransport) writeControls() error {
 				delete(acks, id)
 			}
 		}
-		if noiseRemaining > 0 {
-			if !s.noiseAllowed(options, time.Now()) {
-				noiseRemaining = 0
-			} else {
-				data := make([]byte, min(chunkSize, noiseRemaining))
-				if _, err := rand.Read(data); err != nil {
-					return err
-				}
-				if err := nt.send(nativeControl{Kind: "noise", Data: data}); err != nil {
-					return err
-				}
-				noiseRemaining -= len(data)
-				if s.opts.Stats != nil {
-					s.opts.Stats.noiseTX.Add(uint64(len(data)))
-					if nt.traffic.peer != nil {
-						nt.traffic.peer.noiseTX.Add(uint64(len(data)))
-					}
-				}
-				s.mu.Lock()
-				s.noiseSent++
-				s.mu.Unlock()
+		size, wait, err := pacer.poll(time.Now(), options, s.noiseAllowed(options, time.Now()))
+		if err != nil {
+			return err
+		}
+		if size > 0 {
+			data := make([]byte, size)
+			if _, err := rand.Read(data); err != nil {
+				return err
 			}
-			if noiseRemaining == 0 {
-				if err := resetNoise(); err != nil {
-					return err
+			if err := nt.send(nativeControl{Kind: "noise", Data: data}); err != nil {
+				return err
+			}
+			pacer.sent(time.Now())
+			if s.opts.Stats != nil {
+				s.opts.Stats.noiseTX.Add(uint64(size))
+				if nt.traffic.peer != nil {
+					nt.traffic.peer.noiseTX.Add(uint64(size))
 				}
 			}
-			// ACKs and business streams run independently, but check cancellation and
-			// heartbeat even when a producer keeps the noise burst busy.
+			s.mu.Lock()
+			s.noiseSent++
+			s.mu.Unlock()
+			// Always return through control/heartbeat handling before the next frame.
 			select {
 			case <-nt.ctx.Done():
 				return nt.ctx.Err()
@@ -462,6 +444,16 @@ func (nt *nativeTransport) writeControls() error {
 			default:
 			}
 			continue
+		}
+		noise.Stop()
+		select {
+		case <-noise.C:
+		default:
+		}
+		noiseTicks = nil
+		if wait > 0 {
+			noise.Reset(wait)
+			noiseTicks = noise.C
 		}
 		select {
 		case <-nt.pongs:
@@ -482,23 +474,11 @@ func (nt *nativeTransport) writeControls() error {
 				return err
 			}
 		case <-changed:
-			options, changed = s.opts.liveSnapshot()
-			noiseRemaining = 0
-			if err := resetNoise(); err != nil {
+			if err := refreshNoise(); err != nil {
 				return err
 			}
 		case <-noiseTicks:
-			if s.noiseAllowed(options, time.Now()) {
-				var err error
-				noiseRemaining, err = options.noiseSize()
-				if err != nil {
-					return err
-				}
-			} else {
-				if err := resetNoise(); err != nil {
-					return err
-				}
-			}
+			// Re-evaluate pacing, policy and live settings on the next iteration.
 		}
 	}
 }

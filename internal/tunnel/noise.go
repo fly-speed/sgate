@@ -8,8 +8,9 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// Each call independently chooses the next wait, including the initial wait
-// after connecting. Equal bounds also support a fixed interval.
+// WS chooses a fresh wait for each burst, including its initial wait. QUIC
+// uses this duration as a target-rate hold period, clamped to at least 1s.
+// Equal bounds also support a fixed interval.
 func (o Options) noiseDelay() (time.Duration, error) {
 	if o.NoiseSuppressTraffic && o.NoiseSuppressIdle && o.NoiseSuppressEmpty {
 		return 0, nil
@@ -29,7 +30,8 @@ func (o Options) noiseDelay() (time.Duration, error) {
 }
 
 // Noise uses the transport's encryption counter, but no reliable sequence or
-// replay buffer. A lost padding frame is never retained or retransmitted.
+// replay buffer. Padding is never retained or replayed by the application;
+// the underlying reliable TCP or QUIC stream can still retransmit lost bytes.
 func (o Options) noiseSize() (int, error) {
 	n, err := rand.Int(rand.Reader, big.NewInt(int64(o.NoiseMaxBytes-o.NoiseMinBytes+1)))
 	if err != nil {

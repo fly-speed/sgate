@@ -54,10 +54,12 @@ class InstallTests(unittest.TestCase):
             self.assertEqual((self.target / "web/admin" / name).read_bytes(),
                              (self.root / "web/admin" / name).read_bytes())
         self.assertTrue((self.target / "conf/sgate.key").is_file())
-        for name in ["tls-cert.pem", "tls-key.pem", "README.md"]:
-            self.assertTrue((self.target / "samples/test-tls" / name).is_file())
-        self.assertEqual((self.target / "samples/test-tls/tls-key.pem").stat().st_mode & 0o777, 0o600)
-        self.assertEqual((self.target / "samples/test-tls").stat().st_mode & 0o777, 0o700)
+        for name in ["tls-cert.pem", "tls-key.pem"]:
+            self.assertTrue((self.target / "conf" / name).is_file())
+            self.assertFalse((self.target / "samples/test-tls" / name).exists())
+        self.assertTrue((self.target / "samples/test-tls/README.md").is_file())
+        self.assertEqual((self.target / "conf/tls-key.pem").stat().st_mode & 0o777, 0o600)
+        self.assertEqual((self.target / "conf").stat().st_mode & 0o777, 0o700)
         if role == "server":
             self.assertTrue((self.target / "samples/sgate-accounts.json").is_file())
             self.assertTrue((self.target / "samples/sgate-reverse-accounts.json").is_file())
@@ -94,7 +96,7 @@ class InstallTests(unittest.TestCase):
     def test_repeat_and_cross_role_install_preserve_user_state_and_other_program(self):
         self.install("install")
         keep = ["conf/sgate-client.cf", "conf/sgate-server.cf", "conf/sgate.key",
-                "samples/test-tls/tls-cert.pem", "samples/test-tls/tls-key.pem",
+                "conf/tls-cert.pem", "conf/tls-key.pem",
                 "conf/tunnel-accounts.json", "conf/sgate-proxies.json", "samples/sgate-accounts.json", "samples/sgate-reverse-accounts.json", "samples/sgate-proxies.json", "conf/admin-client-users.json", "conf/admin-server-sessions/session.json",
                 "sbin/sgate-client", "bin/sgate-client-start.sh", "samples/ssh-client.cf"]
         for name in keep:
@@ -117,7 +119,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse(self.dest.exists())
 
     def test_partial_existing_tls_pair_is_not_mixed_with_bundled_files(self):
-        directory = self.target / "samples/test-tls"
+        directory = self.target / "conf"
         directory.mkdir(parents=True)
         cert = directory / "tls-cert.pem"
         cert.write_text("custom certificate awaiting its own key")

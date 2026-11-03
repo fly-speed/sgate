@@ -1768,3 +1768,73 @@ test("degraded transport health remains distinct from a running TCP service", as
   vm.runInContext("renderRuntime(runtimeSample)",context);
   assert.match(elements.get("runtime-state").textContent,/降级/);
 });
+
+test("TCP and QUIC curves use independent counters, IP filtering and protocol selection", async () => {
+  const { context, elements } = await page();
+  context.before = {time_ms:1000,tx_bytes:100,rx_bytes:100,
+    transports:{tcp:{tx_bytes:60,rx_bytes:80},quic:{tx_bytes:40,rx_bytes:20}}};
+  context.after = {time_ms:3000,tx_bytes:300,rx_bytes:500,
+    transports:{tcp:{tx_bytes:100,rx_bytes:200},quic:{tx_bytes:200,rx_bytes:300}}};
+  const rates = JSON.parse(vm.runInContext("JSON.stringify(trafficRates(after,before))",context));
+  assert.equal(rates.tcpTX,20);
+  assert.equal(rates.tcpRX,60);
+  assert.equal(rates.quicTX,80);
+  assert.equal(rates.quicRX,140);
+  assert.equal(rates.tcpTX+rates.quicTX,rates.tx);
+  assert.equal(rates.tcpRX+rates.quicRX,rates.rx);
+  vm.runInContext("points=[trafficRates(after,before)]",context);
+  assert.deepEqual(JSON.parse(vm.runInContext("JSON.stringify(chartMetric().keys)",context)),["tcpTX","tcpRX","quicTX","quicRX"]);
+  vm.runInContext("renderChartSeries(chartMetric())",context);
+  assert.equal(elements.get("traffic-quic-legend").hidden,false);
+  assert.equal(elements.get("traffic-legend-label-0").textContent,"TCP 发送");
+  assert.equal(elements.get("traffic-legend-label-2").textContent,"QUIC 发送");
+  elements.get("traffic-metric").value="quic";
+  assert.deepEqual(JSON.parse(vm.runInContext("JSON.stringify(chartMetric().keys)",context)),["quicTX","quicRX"]);
+  vm.runInContext("renderChartSeries(chartMetric())",context);
+  assert.equal(elements.get("traffic-quic-legend").hidden,true);
+  elements.get("traffic-metric").value="tcp";
+  assert.deepEqual(JSON.parse(vm.runInContext("JSON.stringify(chartMetric().keys)",context)),["tcpTX","tcpRX"]);
+  elements.get("traffic-ip").value="127.0.0.1";
+  vm.runInContext('points[0].byIP={"127.0.0.1":{...points[0],tcpTX:7,quicTX:9}}',context);
+  assert.equal(vm.runInContext("chartSamples()[0].tcpTX",context),7);
+  assert.equal(vm.runInContext("chartSamples()[0].quicTX",context),9);
+  assert.equal(vm.runInContext("trafficRates({...after,transports:{tcp:{tx_bytes:1}}},before).tcpTX",context),null);
+  assert.equal(vm.runInContext("trafficRates({...after,transports:undefined},before).quicTX",context),undefined);
+});
+
+test("combined transport chart draws four colors and shows all four hover rates", async () => {
+  const {context,elements}=await page();
+  const canvas=context.document.getElementById("traffic-chart"),colors=[];
+  const drawing={scale(){},setLineDash(){},beginPath(){},moveTo(){},lineTo(){},stroke(){colors.push(this.strokeStyle)},closePath(){},fill(){},fillText(){},arc(){},createLinearGradient(){return {addColorStop(){}}}};
+  canvas.clientWidth=900;canvas.clientHeight=250;canvas.getContext=()=>drawing;
+  const tooltip=context.document.getElementById("traffic-tooltip");
+  tooltip.style={};tooltip.offsetWidth=230;tooltip.offsetHeight=150;
+  vm.runInContext('points=[{time_ms:60000,tcpTX:10,tcpRX:20,quicTX:30,quicRX:40}];chartPointer={x:868,y:100};drawChart()',context);
+  for(const color of ["#087e68","#5a83d7","#d07818","#9455c8"])assert.ok(colors.includes(color),color);
+  assert.equal(tooltip.hidden,false);
+  assert.equal(elements.get("traffic-tooltip-tx").textContent,"10 B/s");
+  assert.equal(elements.get("traffic-tooltip-rx").textContent,"20 B/s");
+  assert.equal(elements.get("traffic-tooltip-quic-tx").textContent,"30 B/s");
+  assert.equal(elements.get("traffic-tooltip-quic-rx").textContent,"40 B/s");
+  elements.get("traffic-metric").value="quic";
+  colors.length=0;
+  vm.runInContext("drawChart()",context);
+  assert.equal(elements.get("traffic-tooltip-quic-tx-row").hidden,true);
+  assert.equal(elements.get("traffic-tooltip-tx").textContent,"30 B/s");
+  assert.equal(elements.get("traffic-legend-dot-0").className,"quic-tx-dot");
+  assert.ok(colors.includes("#d07818"));
+  assert.ok(!colors.includes("#087e68"));
+});
+
+
+test("noise form explains QUIC per-second units independently of WS bursts", async () => {
+  const { context, elements } = await page();
+  context.rateField = {key:"noise-max-bytes",value:"1M",group:"代理与通道",validation:{type:"bytes",min:"0",max:"10485760",hint:""}};
+  vm.runInContext('renderConfigFields([rateField],{},"server")', context);
+  const row=elements.get("config-fields").children[0].children[1];
+  assert.match(row.children[0].children[1].textContent,/QUIC 为每秒/);
+  assert.match(row.children[0].children[1].textContent,/WS\/WSS 为每批/);
+  context.statusNoise={mode:"fixed",interval:"1s",min_bytes:1048576,max_bytes:1048576,traffic:true,idle:true,empty:true};
+  vm.runInContext('renderRuntime({running:true,noise:statusNoise})', context);
+  assert.match(elements.get("runtime-state").textContent,/WS 每批 \/ QUIC 每秒/);
+});

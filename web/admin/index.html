@@ -110,10 +110,12 @@
               ><select id="traffic-ip" aria-label="连接 IP" data-i18n-aria-label="连接 IP"><option value="" data-i18n="全部连接 IP">全部连接 IP</option></select
               ><select id="traffic-metric" aria-label="图表流量类型" data-i18n-aria-label="图表流量类型">
                 <option value="total" data-i18n="总流量">总流量</option
+                ><option value="tcp">TCP</option
+                ><option value="quic">QUIC</option
                 ><option value="noise" data-i18n="白噪音负载">白噪音负载</option
                 ><option value="business" data-i18n="业务负载">业务负载</option> </select
               ><div class="legend"
-                ><span class="tx-dot"></span><span data-i18n="发送">发送</span><span class="rx-dot"></span><span data-i18n="接收">接收</span></div
+                ><span id="traffic-legend-dot-0" class="tx-dot"></span><span id="traffic-legend-label-0" data-i18n="发送">发送</span><span id="traffic-legend-dot-1" class="rx-dot"></span><span id="traffic-legend-label-1" data-i18n="接收">接收</span><span id="traffic-quic-legend" hidden><i class="quic-tx-dot"></i><span id="traffic-legend-label-2">QUIC 发送</span><i class="quic-rx-dot"></i><span id="traffic-legend-label-3">QUIC 接收</span></span></div
               ></div
             ><div class="traffic-plot">
               <canvas
@@ -124,8 +126,10 @@
               ></canvas>
               <div id="traffic-tooltip" class="traffic-tooltip" role="tooltip" hidden>
                 <strong id="traffic-tooltip-time"></strong>
-                <span><i class="tx-dot"></i><span data-i18n="发送">发送 </span><b id="traffic-tooltip-tx"></b></span>
-                <span><i class="rx-dot"></i><span data-i18n="接收">接收 </span><b id="traffic-tooltip-rx"></b></span>
+                <span><i id="traffic-tooltip-dot-0" class="tx-dot"></i><span id="traffic-tooltip-label-0" data-i18n="发送">发送 </span><b id="traffic-tooltip-tx"></b></span>
+                <span><i id="traffic-tooltip-dot-1" class="rx-dot"></i><span id="traffic-tooltip-label-1" data-i18n="接收">接收 </span><b id="traffic-tooltip-rx"></b></span>
+                <span id="traffic-tooltip-quic-tx-row" hidden><i class="quic-tx-dot"></i><span id="traffic-tooltip-label-2">QUIC 发送</span><b id="traffic-tooltip-quic-tx"></b></span>
+                <span id="traffic-tooltip-quic-rx-row" hidden><i class="quic-rx-dot"></i><span id="traffic-tooltip-label-3">QUIC 接收</span><b id="traffic-tooltip-quic-rx"></b></span>
                 <small><span data-i18n="采样区间平均速率">采样区间平均速率</span></small>
               </div>
             </div>
@@ -146,8 +150,7 @@
                 包头及业务端口。服务端包含同端口管理流量，客户端不含独立管理端口流量。</span></p
               ><p><span data-i18n="QUIC 隧道按流字节计数，不含 QUIC/TLS、UDP/IP 开销及 QUIC 重传；不能直接作为线上带宽对比。">QUIC 隧道按流字节计数，不含 QUIC/TLS、UDP/IP 开销及 QUIC 重传；不能直接作为线上带宽对比。</span></p
               ><p
-                ><span data-i18n="白噪音大小是每次发送的负载总量，图表 B/s 是每秒累计。例如每次 10 KiB、间隔 100ms，约为 100 KiB/s；间隔越短或在线隧道越多，每秒累计越大。">白噪音大小是每次发送的负载总量，图表 B/s 是每秒累计。例如每次 10 KiB、间隔
-                100ms，约为 100 KiB/s；间隔越短或在线隧道越多，每秒累计越大。</span></p
+                ><span data-i18n="WS/WSS 白噪音大小表示每批负载；QUIC 表示每秒负载速率，并按小帧平滑发送。每条隧道独立计速；协议开销不包含在配置速率中，暂停或拥塞后不补发积压额度。">WS/WSS 白噪音大小表示每批负载；QUIC 表示每秒负载速率，并按小帧平滑发送。每条隧道独立计速；协议开销不包含在配置速率中，暂停或拥塞后不补发积压额度。</span></p
               ></article
             ><article class="info-card"
               ><h3><span data-i18n="管理与代理独立运行">管理与代理独立运行</span></h3

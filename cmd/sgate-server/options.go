@@ -28,11 +28,11 @@ func parseOptions(args []string) (string, error) {
 	flag.Int("buffer-bytes", 4*1024*1024, "unacknowledged bytes per session and direction")
 	flag.Duration("heartbeat", 20*time.Second, "WebSocket heartbeat interval")
 	flag.Duration("heartbeat-timeout", 0, "receive idle timeout (0 uses three heartbeat intervals)")
-	flag.Duration("noise-interval", 0, "random padding interval (0 disables sending)")
-	flag.Duration("noise-interval-min", 0, "minimum random padding wait (requires noise-interval-max)")
-	flag.Duration("noise-interval-max", 0, "maximum random padding wait (requires noise-interval-min)")
-	cli.ByteSizeVar(flag.CommandLine, new(int), "noise-min-bytes", 1024, "minimum random padding bytes (supports K/M)")
-	cli.ByteSizeVar(flag.CommandLine, new(int), "noise-max-bytes", 10*1024, "maximum random padding bytes per burst (up to 10M; supports K/M)")
+	flag.Duration("noise-interval", 0, "WS burst interval / QUIC target-rate refresh period (QUIC minimum 1s; 0 with zero random bounds disables)")
+	flag.Duration("noise-interval-min", 0, "minimum WS burst wait / QUIC target-rate refresh period (requires noise-interval-max)")
+	flag.Duration("noise-interval-max", 0, "maximum WS burst wait / QUIC target-rate refresh period (requires noise-interval-min)")
+	cli.ByteSizeVar(flag.CommandLine, new(int), "noise-min-bytes", 1024, "minimum padding: bytes/burst for WS, payload bytes/second for QUIC (supports K/M)")
+	cli.ByteSizeVar(flag.CommandLine, new(int), "noise-max-bytes", 10*1024, "maximum padding: bytes/burst for WS, payload bytes/second for QUIC (up to 10M; supports K/M)")
 	cli.NoisePolicyFlags(flag.CommandLine)
 	if err := cli.Parse(flag.CommandLine, args); err != nil {
 		return "", err

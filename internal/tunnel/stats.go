@@ -14,6 +14,8 @@ import (
 // With shared server management, bytes and connections on that HTTP/TLS
 // listener also include management traffic.
 type Stats struct {
+	transports transportTraffic
+
 	quicRetransmitted, quicRetransmitPackets, quicTrackingEvictions, quicConnectionBlocked, quicStreamBlocked, quicStreamCountBlocked, quicApplicationBlocked, quicBlockedNanos, quicPTO atomic.Uint64
 	quicCloseReasons                                                                                                                                                                     map[string]uint64
 	budget                                                                                                                                                                               *MemoryBudget
@@ -38,6 +40,8 @@ type Stats struct {
 // BusinessTX/RX 是实际加密帧中的业务负载，包含重放，不代表应用重复交付。
 // NoiseActivity 是采样时刻的状态；Permitted 表示策略允许，不保证该秒有噪音帧。
 type TrafficSnapshot struct {
+	Transports TransportTrafficSnapshot `json:"transports"`
+
 	Memory        MemorySnapshot        `json:"memory"`
 	QUIC          QUICSnapshot          `json:"quic"`
 	ByIP          []PeerTrafficSnapshot `json:"by_ip"`
@@ -56,6 +60,7 @@ type TrafficSnapshot struct {
 func NewStats() *Stats { return &Stats{started: time.Now(), budget: NewMemoryBudget(0)} }
 func (s *Stats) Snapshot() TrafficSnapshot {
 	return TrafficSnapshot{
+		Transports: s.transports.snapshot(),
 		Memory:     s.MemoryBudget().Snapshot(),
 		QUIC:       s.quicSnapshot(),
 		ByIP:       s.peerSnapshots(),
@@ -70,11 +75,13 @@ func (s *Stats) Snapshot() TrafficSnapshot {
 }
 func (s *Stats) Conn(c net.Conn) net.Conn {
 	s.active.Add(1)
-	return &trafficConn{Conn: c, stats: s, peer: s.openPeer(c.RemoteAddr())}
+	_, quic := c.(*quicStreamConn)
+	return &trafficConn{Conn: c, stats: s, peer: s.openPeer(c.RemoteAddr()), quic: quic}
 }
 func (s *Stats) Listener(l net.Listener) net.Listener { return &trafficListener{Listener: l, stats: s} }
 
 type trafficConn struct {
+	quic bool
 	net.Conn
 	stats *Stats
 	peer  *peerTraffic
@@ -85,12 +92,16 @@ func (c *trafficConn) Read(p []byte) (int, error) {
 	n, e := c.Conn.Read(p)
 	c.stats.rx.Add(uint64(n))
 	c.peer.rx.Add(uint64(n))
+	c.stats.transports.add(c.quic, false, n)
+	c.peer.transports.add(c.quic, false, n)
 	return n, e
 }
 func (c *trafficConn) Write(p []byte) (int, error) {
 	n, e := c.Conn.Write(p)
 	c.stats.tx.Add(uint64(n))
 	c.peer.tx.Add(uint64(n))
+	c.stats.transports.add(c.quic, true, n)
+	c.peer.transports.add(c.quic, true, n)
 	return n, e
 }
 func (c *trafficConn) Close() error {

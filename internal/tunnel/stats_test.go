@@ -30,12 +30,24 @@ func TestTrafficStatsCountBytesAndCloseOnce(t *testing.T) {
 		t.Fatal(e)
 	}
 	v := stats.Snapshot()
-	if v.TX != 8 || v.RX != 8 || v.Connections != 1 {
+	if v.TX != 8 || v.RX != 8 || v.Connections != 1 || v.Transports.TCP.TX != 8 || v.Transports.TCP.RX != 8 || v.Transports.QUIC != (TransportBytesSnapshot{}) {
 		t.Fatal(v)
 	}
 	c.Close()
 	c.Close()
 	b.Close()
+	native := newNativeTraffic(stats, a.RemoteAddr())
+	native.tx(7)
+	native.rx(11)
+	native.close()
+	native.close()
+	mixed := stats.Snapshot()
+	if mixed.TX != 15 || mixed.RX != 19 || mixed.Transports.TCP != v.Transports.TCP || mixed.Transports.QUIC != (TransportBytesSnapshot{TX: 7, RX: 11}) {
+		t.Fatal("mixed transport accounting lost or duplicated bytes", mixed)
+	}
+	if len(mixed.ByIP) != 1 || mixed.ByIP[0].Transports != mixed.Transports {
+		t.Fatal("mixed protocols on the same peer IP were not separated", mixed.ByIP)
+	}
 	if stats.Snapshot().Connections != 0 {
 		t.Fatal("connection count leaked")
 	}

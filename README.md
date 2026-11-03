@@ -29,7 +29,7 @@ server = "quic://gateway.example.com:8443/tunnel"
 tls-ca = "/path/to/ca.crt"
 ```
 
-也可使用 `sgate-server -quic-listen :8443 -tls-cert ... -tls-key ...` 和 `sgate-client -server quic://gateway.example.com:8443/tunnel`；其他必需参数照常提供。多端口映射中的 `server` 同样支持 `quic://`，可与 WS/WSS 映射混用；反向代理仍需配置账号映射，并由客户端显式开启 `allow-reverse`。路径和 `addr` 选择规则、账号权限、加密、心跳、白噪音、离线缓存及会话恢复沿用原逻辑。
+也可使用 `sgate-server -quic-listen :8443 -tls-cert ... -tls-key ...` 和 `sgate-client -server quic://gateway.example.com:8443/tunnel`；其他必需参数照常提供。多端口映射中的 `server` 同样支持 `quic://`，可与 WS/WSS 映射混用；反向代理仍需配置账号映射，并由客户端显式开启 `allow-reverse`。路径和 `addr` 选择规则、账号权限、加密、心跳、离线缓存及会话恢复沿用原逻辑。QUIC 白噪音改为每秒速率平滑发送：`noise-min-bytes` / `noise-max-bytes` 为每条隧道的负载字节/秒范围；间隔参数控制目标速率重选（至少 1s）。WS/WSS 保持每批语义。
 
 这些 `tls-cert` / `tls-key` 同时用于既有 TCP 入口；从无证书的 WS 配置新增证书时，该入口会启用 HTTPS/WSS，原有 TCP 客户端应相应改用 `wss://`。
 
@@ -41,11 +41,13 @@ tls-ca = "/path/to/ca.crt"
 
 管理后台的统计 API 增加 `quic` 对象，包含 QUIC 包收发字节/数量、丢包判定数量、活跃连接的最大平滑 RTT、拥塞窗口、在途字节、累计原生业务通道数（恢复后重新计数）和应用层恢复重放字节。页面展示主要 QUIC 指标。原有总收发计数仍按 QUIC 流字节计数；新增 `packet_tx_bytes` / `packet_rx_bytes` 包含 QUIC 包头、加密、ACK 和重传，不含 UDP/IP 包头。RTT 是传输估计值，不是应用请求的 P99；应用重放字节也不同于 QUIC 网络重传。
 
+客户端与服务端的实时带宽图默认同时显示 TCP 发送/接收与 QUIC 发送/接收四条曲线，可切换 TCP 或 QUIC 单独查看，并支持按 IP 筛选。统计 API 在总量及 `by_ip` 中增加 `transports.tcp`、`transports.quic` 的 `tx_bytes/rx_bytes` 累计值。TCP 含 WS/WSS，服务端还含共享端口管理流量；QUIC 保持流字节口径，不含 UDP/IP、QUIC/TLS 开销及网络重传。白噪音/业务负载视图仍按两种传输合计显示。
+
 性能基线、测量口径、弱网限制及复现命令见 [QUIC 性能与验证](docs/quic-performance.md)。多流仍共享连接拥塞控制和总资源预算，具体吞吐和延迟应以目标网络测量为准。
 
 QUIC 独立资源配置、监听自动恢复、健康检查与新指标已提供；参数默认值、重启规则和验证边界见 [优化交付记录](docs/quic-optimization-status.md) 与 [性能文档](docs/quic-performance.md)。进程缓冲预算 `memory-budget-bytes` 默认 0（不限制），需显式配置；它不是 RSS 上限。Linux 同条件 TCP/UDP 弱网脚本已交付，尚未实测。
 
-安装包同时包含 `samples/test-tls/` 测试证书和公开测试私钥，适用于本机 QUIC/WSS 安装验证，不会自动启用；路径及配置见 [测试证书说明](samples/test-tls/README.md)。
+安装包同时包含测试证书和公开测试私钥，安装到 `${PREFIX}/conf/tls-cert.pem` 和 `${PREFIX}/conf/tls-key.pem`，适用于本机 QUIC/WSS 安装验证，不会自动启用；路径及配置见 [测试证书说明](samples/test-tls/README.md)。
 
 ## 功能
 

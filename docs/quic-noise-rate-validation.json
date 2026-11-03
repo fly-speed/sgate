@@ -1,0 +1,44 @@
+{
+  "date": "2026-11-03",
+  "change": "QUIC noise payload bytes per second with small-frame pacing; WS/WSS retains burst semantics",
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "source_sha256": {
+    "internal/tunnel/quic_noise_pacer.go": "81d223aebfb11556ff141a33c455e28da9187c8c59d67ec99e22e2ea0b77e6d1",
+    "internal/tunnel/native_transport.go": "9190fc667d70ce63cd64bcd3d30a866e72dae1c27fbf9048329b932c029f7985",
+    "internal/tunnel/transport.go": "072529aa3874cdf6e313b0b65c3e7b4a36e33d25e1c394152e45aa62d3dd1b09"
+  },
+  "rate_sample": {
+    "target_payload_bytes_per_second": 65536,
+    "legacy": {
+      "client_bytes_per_second": 61660,
+      "server_bytes_per_second": 61660,
+      "duration_seconds": 1.211
+    },
+    "native": {
+      "client_bytes_per_second": 60384,
+      "server_bytes_per_second": 61463,
+      "duration_seconds": 1.215
+    },
+    "scope": "One short local race-instrumented correctness sample per mode; not a production throughput guarantee. Both directions additionally checked against 100ms window caps."
+  },
+  "checks": {
+    "pacer_budget_pause_congestion_live_changes_repeat_2": "passed",
+    "quic_and_ws_noise_regression_race_repeat_2": "passed, 105.479s",
+    "application_full_race": "passed, 78.479s",
+    "admin_full_race": "passed, 84.357s",
+    "frontend_with_emitted_config_rules": {
+      "passed": 81,
+      "failed": 0,
+      "skipped": 0
+    },
+    "go_vet": "passed",
+    "client_server_build": "passed"
+  },
+  "semantics": {
+    "size_options": "noise-min-bytes/noise-max-bytes: QUIC payload bytes per second per tunnel and direction; WS bytes per burst",
+    "interval_options": "QUIC target-rate refresh hold period, minimum 1 second; all zero disables noise",
+    "pause_or_congestion": "no accumulated credit or catch-up",
+    "scope": "payload rate; additional protocol, encryption and network retransmission overhead; independent tunnels add together"
+  },
+  "deployment": "Source change only. Rebuild, install and restart both endpoints; existing production settings were not modified."
+}

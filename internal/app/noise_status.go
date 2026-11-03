@@ -39,5 +39,6 @@ func (d definition) noiseStatus() map[string]any {
 		"mode": mode, "interval": options.NoiseInterval.String(),
 		"interval_min": options.NoiseIntervalMin.String(), "interval_max": options.NoiseIntervalMax.String(),
 		"min_bytes": minSize, "max_bytes": maxSize,
+		"quic_unit": "bytes_per_second", "quic_rate_hold_min": "1s",
 	}
 }

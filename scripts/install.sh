@@ -97,11 +97,11 @@ for name in $sample_scripts; do replace_file "$source_dir/samples/$name" "$desti
 replace_file "$source_dir/samples/README.md" "$destination/samples/README.md" 0644
 replace_file "$source_dir/samples/test-tls/README.md" "$destination/samples/test-tls/README.md" 0644
 # Keep a customized pair intact, including when only one path is present.
-if [ -e "$destination/samples/test-tls/tls-cert.pem" ] || [ -L "$destination/samples/test-tls/tls-cert.pem" ] || [ -e "$destination/samples/test-tls/tls-key.pem" ] || [ -L "$destination/samples/test-tls/tls-key.pem" ]; then
-    printf '%s\n' '保留现有 samples/test-tls 证书和私钥；未自动启用测试 TLS。'
+if [ -e "$destination/conf/tls-cert.pem" ] || [ -L "$destination/conf/tls-cert.pem" ] || [ -e "$destination/conf/tls-key.pem" ] || [ -L "$destination/conf/tls-key.pem" ]; then
+    printf '%s\n' '保留现有 conf/ 证书和私钥；未自动启用测试 TLS。'
 else
-    replace_file "$source_dir/samples/test-tls/tls-key.pem" "$destination/samples/test-tls/tls-key.pem" 0600
-    replace_file "$source_dir/samples/test-tls/tls-cert.pem" "$destination/samples/test-tls/tls-cert.pem" 0644
+    replace_file "$source_dir/samples/test-tls/tls-key.pem" "$destination/conf/tls-key.pem" 0600
+    replace_file "$source_dir/samples/test-tls/tls-cert.pem" "$destination/conf/tls-cert.pem" 0644
 fi
 for name in $assets; do replace_file "$source_dir/web/admin/$name" "$destination/web/admin/$name" 0644; done
 replace_file "$source_dir/LICENSE" "$destination/LICENSE" 0644
