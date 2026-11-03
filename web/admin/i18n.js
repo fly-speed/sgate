@@ -3,6 +3,15 @@
 // UI translations only: editable values and protocol/configuration keys are never translated.
 const sgateI18n = (() => {
   const messages = {
+ "QUIC RTT 最近采样：": "Latest QUIC RTT sample: ",
+ "拥塞窗口/在途：": "Congestion window/in flight: ",
+ "VPN 发送队列峰值：": "VPN peak send queue: ",
+ "最长排队：": "Maximum queue wait: ",
+ "过期/满队列丢弃：": "Expired/overflow drops: ",
+ "QUIC 提交最长耗时：": "Maximum QUIC submission time: ",
+ "QUIC 准入等待累计：": "Total QUIC admission wait: ",
+ "TUN 交付最长耗时：": "Maximum TUN delivery time: ",
+ "指标自 VPN 启动累计，包含各在线客户端。": "Metrics accumulate since VPN startup, across clients.",
   "启动 VPN": "Start VPN",
   "停止 VPN": "Stop VPN",
   "客户端启动后需手动启动 VPN；停止时恢复路由和 DNS。": "Start VPN manually after the client starts. Stopping restores routes and DNS.",

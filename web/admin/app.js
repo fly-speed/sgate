@@ -1217,6 +1217,7 @@ async function poll(run) {
     localText($("tx-rate"), () => rates ? units(rates.tx, true) : t("采样中"));
     localText($("rx-rate"), () => rates ? units(rates.rx, true) : t("采样中"));
     renderVPNControls(data.health?.vpn);
+    localText($("vpn-queue-summary"),()=>vpnQueueObservationText(data.health?.vpn));
     if($("vpn-summary")) localText($("vpn-summary"), () => vpnObservationText(data.health?.vpn));
     if($("quic-summary")) localText($("quic-summary"), () => quicObservationText(data));
     localText($("noise-observation"), () => noiseObservationText(data, rates));
@@ -2279,3 +2280,16 @@ async function controlVPN(start) {
 
 $("vpn-start").addEventListener("click", () => controlVPN(true));
 $("vpn-stop").addEventListener("click", () => controlVPN(false));
+
+function vpnQueueObservationText(v) {
+ const q=v?.stats;
+ if(!v?.enabled || !Number.isFinite(q?.send_queue_max_wait_ms))return "";
+ return t("QUIC RTT 最近采样：")+Number(q.last_smoothed_rtt_ms||0).toFixed(1)+" ms · "+
+ t("拥塞窗口/在途：")+units(q.last_congestion_window_bytes||0)+" / "+units(q.last_bytes_in_flight||0)+" · "+
+ t("VPN 发送队列峰值：")+(q.send_queue_peak_packets||0)+" / 64 · "+
+ t("最长排队：")+Number(q.send_queue_max_wait_ms||0).toFixed(1)+" ms · "+
+ t("过期/满队列丢弃：")+(q.send_queue_expired_packets||0)+" / "+(q.send_queue_overflow_packets||0)+" · "+
+ t("QUIC 提交最长耗时：")+Number(q.send_datagram_max_wait_ms||0).toFixed(1)+" ms · "+
+ t("QUIC 准入等待累计：")+Number(q.send_admission_wait_ms||0).toFixed(1)+" ms · "+
+ t("TUN 交付最长耗时：")+Number(q.tun_delivery_max_wait_ms||0).toFixed(1)+" ms · "+t("指标自 VPN 启动累计，包含各在线客户端。");
+}

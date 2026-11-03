@@ -126,6 +126,7 @@ func quicConfig(stats ...*Stats) *quic.Config {
 						for _, frame := range frames {
 							if _, ok := frame.(*logging.DatagramFrame); ok {
 								flow.sent.Add(1)
+								flow.signal()
 							}
 						}
 					}
@@ -135,6 +136,8 @@ func quicConfig(stats ...*Stats) *quic.Config {
 						flow.cwnd.Store(int64(cwnd))
 						flow.inflight.Store(int64(inflight))
 					}
+					s.cwnd.Store(int64(cwnd))
+					s.inflight.Store(int64(inflight))
 					s.rtt.Store(int64(rtt.SmoothedRTT()))
 				},
 				LostPacket: func(logging.EncryptionLevel, logging.PacketNumber, logging.PacketLossReason) { s.lost.Add(1) },
@@ -150,14 +153,29 @@ func quicConfig(stats ...*Stats) *quic.Config {
 }
 
 type Stats struct {
-	rtt                              atomic.Int64
-	lost, pto                        atomic.Uint64
-	tx, rx, drops, auth, connections atomic.Uint64
-	active                           atomic.Int64
-	noiseTX, noiseRX, noiseSkipped   atomic.Uint64
-	noiseUnsupported                 atomic.Int64
+	cwnd, inflight                                            atomic.Int64
+	queuePeak, queueWaitMax, queueExpired, queueOverflow      atomic.Uint64
+	tunWriteMax, admissionBlocked, sendWaitMax, admissionWait atomic.Uint64
+	rtt                                                       atomic.Int64
+	lost, pto                                                 atomic.Uint64
+	tx, rx, drops, auth, connections                          atomic.Uint64
+	active                                                    atomic.Int64
+	noiseTX, noiseRX, noiseSkipped                            atomic.Uint64
+	noiseUnsupported                                          atomic.Int64
 }
 type Snapshot struct {
+	CongestionWindow int64   `json:"last_congestion_window_bytes"`
+	Inflight         int64   `json:"last_bytes_in_flight"`
+	TunWriteMaxMS    float64 `json:"tun_delivery_max_wait_ms"`
+	AdmissionBlocked uint64  `json:"send_admission_blocked_events"`
+
+	QueuePeak       uint64  `json:"send_queue_peak_packets"`
+	QueueWaitMaxMS  float64 `json:"send_queue_max_wait_ms"`
+	QueueExpired    uint64  `json:"send_queue_expired_packets"`
+	QueueOverflow   uint64  `json:"send_queue_overflow_packets"`
+	SendWaitMaxMS   float64 `json:"send_datagram_max_wait_ms"`
+	AdmissionWaitMS float64 `json:"send_admission_wait_ms"`
+
 	NoiseTX          uint64  `json:"noise_tx_bytes"`
 	NoiseRX          uint64  `json:"noise_rx_bytes"`
 	NoiseSkipped     uint64  `json:"noise_skipped_ticks"`
@@ -174,7 +192,7 @@ type Snapshot struct {
 }
 
 func (s *Stats) Snapshot() Snapshot {
-	return Snapshot{NoiseTX: s.noiseTX.Load(), NoiseRX: s.noiseRX.Load(), NoiseSkipped: s.noiseSkipped.Load(), NoiseUnsupported: s.noiseUnsupported.Load(), RTT: float64(s.rtt.Load()) / 1e6, Lost: s.lost.Load(), PTO: s.pto.Load(), TX: s.tx.Load(), RX: s.rx.Load(), Drops: s.drops.Load(), AuthRejected: s.auth.Load(), Connections: s.connections.Load(), Active: s.active.Load()}
+	return Snapshot{CongestionWindow: s.cwnd.Load(), Inflight: s.inflight.Load(), TunWriteMaxMS: float64(s.tunWriteMax.Load()) / 1e6, AdmissionBlocked: s.admissionBlocked.Load(), QueuePeak: s.queuePeak.Load(), QueueWaitMaxMS: float64(s.queueWaitMax.Load()) / 1e6, QueueExpired: s.queueExpired.Load(), QueueOverflow: s.queueOverflow.Load(), SendWaitMaxMS: float64(s.sendWaitMax.Load()) / 1e6, AdmissionWaitMS: float64(s.admissionWait.Load()) / 1e6, NoiseTX: s.noiseTX.Load(), NoiseRX: s.noiseRX.Load(), NoiseSkipped: s.noiseSkipped.Load(), NoiseUnsupported: s.noiseUnsupported.Load(), RTT: float64(s.rtt.Load()) / 1e6, Lost: s.lost.Load(), PTO: s.pto.Load(), TX: s.tx.Load(), RX: s.rx.Load(), Drops: s.drops.Load(), AuthRejected: s.auth.Load(), Connections: s.connections.Load(), Active: s.active.Load()}
 }
 
 // ValidateConfig permits command entrypoints to reject unsafe input before TUN setup.

@@ -2000,3 +2000,10 @@ test("VPN manual controls reflect client status and serialize requests without s
   assert.equal(elements.get("vpn-start").disabled,true);
   assert.equal(elements.get("vpn-stop").disabled,true);
 });
+
+test("VPN queue observation exposes cumulative metrics and tolerates older servers", async () => {
+ const {context}=await page();
+ assert.equal(vm.runInContext('vpnQueueObservationText({enabled:true,stats:{}})',context),"");
+ const result=vm.runInContext('vpnQueueObservationText({enabled:true,stats:{send_queue_peak_packets:64,send_queue_max_wait_ms:123.45,send_queue_expired_packets:7,send_queue_overflow_packets:8,send_datagram_max_wait_ms:1.2,send_admission_wait_ms:456.7,tun_delivery_max_wait_ms:2.3}})',context);
+ for(const text of ["64 / 64","123.5 ms","7 / 8","1.2 ms","456.7 ms","2.3 ms"]) assert.ok(result.includes(text),result);
+});

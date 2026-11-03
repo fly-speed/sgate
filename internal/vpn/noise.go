@@ -1,6 +1,7 @@
 package vpn
 
 import (
+	"context"
 	"crypto/rand"
 	"sync/atomic"
 	"time"
@@ -20,6 +21,16 @@ type flowContextKey struct{}
 type datagramFlow struct {
 	queued, sent   atomic.Int64
 	cwnd, inflight atomic.Int64
+	ready          chan struct{}
+}
+
+func newDatagramFlow() *datagramFlow   { return &datagramFlow{ready: make(chan struct{}, 1)} }
+func (f *datagramFlow) pending() int64 { return f.queued.Load() - f.sent.Load() }
+func (f *datagramFlow) signal() {
+	select {
+	case f.ready <- struct{}{}:
+	default:
+	}
 }
 
 func (f *datagramFlow) allowNoise() bool {
@@ -76,14 +87,14 @@ func (n *noisePacer) budget(now time.Time, rate int, allowed bool) int {
 	return budget
 }
 func (p *peer) sendNoise(now time.Time, c Config, pacer *noisePacer) error {
-	allowed := p.noiseAllowed(now, c.Noise) && len(p.queue) == 0 && p.flow.allowNoise()
+	allowed := p.noiseAllowed(now, c.Noise) && p.queue.len() == 0 && p.flow.allowNoise()
 	budget := pacer.budget(now, c.Noise.Rate, allowed)
 	if !allowed {
 		c.Stats.noiseSkipped.Add(1)
 		return nil
 	}
 	for budget > 0 {
-		if len(p.queue) > 0 || !p.flow.allowNoise() {
+		if p.queue.len() > 0 || !p.flow.allowNoise() {
 			c.Stats.noiseSkipped.Add(1)
 			break
 		}
@@ -101,4 +112,23 @@ func (p *peer) sendNoise(now time.Time, c Config, pacer *noisePacer) error {
 		budget -= size
 	}
 	return nil
+}
+
+// Sending at most one IP packet beyond this threshold bounds the QUIC FIFO
+// to five DATAGRAMs with the current two-fragment wire format.
+func (p *peer) waitForAdmission(ctx context.Context, stats *Stats) error {
+	if p.flow == nil {
+		return nil
+	}
+	for p.flow.pending() >= 4 {
+		began := time.Now()
+		stats.admissionBlocked.Add(1)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-p.flow.ready:
+		}
+		stats.admissionWait.Add(uint64(time.Since(began)))
+	}
+	return ctx.Err()
 }

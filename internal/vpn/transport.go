@@ -25,7 +25,7 @@ type peer struct {
 	control      *quic.Stream
 	id           string
 	ip           netip.Addr
-	queue        chan []byte
+	queue        *packetQueue
 	padding      bool
 	flow         *datagramFlow
 	started      time.Time
@@ -33,11 +33,7 @@ type peer struct {
 }
 
 func (p *peer) enqueue(packet []byte, stats *Stats) {
-	select {
-	case p.queue <- append([]byte(nil), packet...):
-	default:
-		stats.drops.Add(1)
-	}
+	p.queue.push(packet, time.Now(), stats)
 }
 func (p *peer) run(ctx context.Context, c Config, receive func([]byte) error) error {
 	ctx, cancel := context.WithCancel(ctx)
@@ -72,32 +68,35 @@ func (p *peer) run(ctx context.Context, c Config, receive func([]byte) error) er
 			p.businessActivity()
 			return nil
 		}
+
 		for {
-			// Process queued IP packets before considering optional padding.
-			select {
-			case <-ctx.Done():
+			if ctx.Err() != nil {
 				done <- ctx.Err()
 				return
-			default:
 			}
-			select {
-			case packet := <-p.queue:
-				if err := send(packet); err != nil {
+			// Leave packets in the scheduler while QUIC is congested, so a
+			// bulk flow cannot fill the library FIFO ahead of new short flows.
+			if p.queue.len() > 0 {
+				if err := p.waitForAdmission(ctx, c.Stats); err != nil {
+					done <- err
+					return
+				}
+			}
+			if packet := p.queue.pop(time.Now(), c.Stats); packet != nil {
+				began := time.Now()
+				err := send(packet)
+				storeMax(&c.Stats.sendWaitMax, uint64(time.Since(began)))
+				if err != nil {
 					done <- err
 					return
 				}
 				continue
-			default:
 			}
 			select {
 			case <-ctx.Done():
 				done <- ctx.Err()
 				return
-			case packet := <-p.queue:
-				if err := send(packet); err != nil {
-					done <- err
-					return
-				}
+			case <-p.queue.ready:
 			case <-tick:
 				if err := p.sendNoise(time.Now(), c, &pacer); err != nil {
 					done <- err
@@ -131,7 +130,10 @@ func (p *peer) run(ctx context.Context, c Config, receive func([]byte) error) er
 				continue
 			}
 			p.businessActivity()
-			if err = receive(packet); err != nil {
+			began := time.Now()
+			err = receive(packet)
+			storeMax(&c.Stats.tunWriteMax, uint64(time.Since(began)))
+			if err != nil {
 				done <- err
 				return
 			}
@@ -197,7 +199,7 @@ func ListenServer(config Config, dev Device) (*Server, error) {
 			return nil, errors.New("VPN connection limit")
 		}
 		context.AfterFunc(ctx, func() { admitted.Add(-1) })
-		return context.WithValue(ctx, flowContextKey{}, &datagramFlow{}), nil
+		return context.WithValue(ctx, flowContextKey{}, newDatagramFlow()), nil
 	}}
 	listener, err := tr.Listen(c.TLS, quicConfig(c.Stats))
 	if err != nil {
@@ -344,7 +346,7 @@ func (s *Server) accept(ctx context.Context, conn *quic.Conn) {
 		return
 	}
 	flow, _ := conn.Context().Value(flowContextKey{}).(*datagramFlow)
-	p := &peer{conn: conn, control: control, id: h.ID, ip: ip, queue: make(chan []byte, queueSize), padding: h.Padding, flow: flow}
+	p := &peer{conn: conn, control: control, id: h.ID, ip: ip, queue: newPacketQueue(), padding: h.Padding, flow: flow}
 	s.mu.Lock()
 	old := s.peers[ip]
 	if (old != nil && old.id != h.ID) || (old == nil && len(s.peers) >= s.cfg.MaxClients) {
@@ -477,7 +479,7 @@ func RunClient(parent context.Context, config Config, dev Device) error {
 	}
 }
 func clientConnection(ctx context.Context, c Config, id string, active *atomic.Pointer[peer], dev Device, cleanup *func()) error {
-	flow := &datagramFlow{}
+	flow := newDatagramFlow()
 	conn, err := quic.DialAddr(context.WithValue(ctx, flowContextKey{}, flow), c.Address, c.TLS, quicConfig(c.Stats))
 	if err != nil {
 		return err
@@ -520,7 +522,7 @@ func clientConnection(ctx context.Context, c Config, id string, active *atomic.P
 		return errors.New("invalid VPN server assignment")
 	}
 	control.SetDeadline(time.Time{})
-	p := &peer{conn: conn, control: control, id: id, ip: c.ClientIP, queue: make(chan []byte, queueSize), padding: h.Padding && reply.Padding, flow: flow}
+	p := &peer{conn: conn, control: control, id: id, ip: c.ClientIP, queue: newPacketQueue(), padding: h.Padding && reply.Padding, flow: flow}
 	if c.Connected != nil && *cleanup == nil {
 		undo, err := c.Connected()
 		if err != nil {
