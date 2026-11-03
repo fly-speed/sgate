@@ -1875,3 +1875,36 @@ test("VPN-only form can save without a proxy upstream or backend", async () => {
   assert.equal(vm.runInContext('validateConfigForm(null,false)',context),true);
   assert.equal(vm.runInContext('configRelationErrors({"vpn-mode":"both","vpn-server":""}).has("vpn-server")',context),true);
 });
+
+test("VPN mode explains unsupported platforms inline and keeps the chosen draft", async () => {
+  const {context,elements}=await page();
+  vm.runInContext(`renderConfigFields([{key:"vpn-mode",value:"disabled",group:"独立 VPN",validation:{type:"enum",choices:["disabled","both","only"]}}],{vpn_support:{supported:false,os:"darwin",reason:"独立 VPN 服务端仅支持 Linux，当前系统无法启用。"}},"server"); configInputs[0].input.value="both";configInputs[0].input.listeners.input()`,context);
+  let calls=0;context.api=async()=>{calls++;throw new Error("unexpected request")};
+  await vm.runInContext('saveConfigField(configInputs[0])',context);
+  assert.equal(calls,0);
+  assert.match(vm.runInContext('configInputs[0].error.textContent',context),/Linux/);
+  assert.match(elements.get("notice").textContent,/Linux/);
+  assert.equal(vm.runInContext('configInputs[0].input.value',context),"both");
+  assert.equal(vm.runInContext('configInputs[0].dirty',context),true);
+});
+
+test("VPN save failures show field-specific server reasons without discarding drafts", async () => {
+  const {context,elements}=await page();
+  vm.runInContext(`renderConfigFields([{key:"vpn-mode",value:"disabled",group:"独立 VPN",validation:{type:"enum",choices:["disabled","both","only"]}}],{},"server");configInputs[0].input.value="both";configInputs[0].input.listeners.input();revision="r1"`,context);
+  context.api=async()=>{const error=new Error("Cannot enable VPN: client-only options");error.fieldErrors={"vpn-mode":"Remove vpn-server from server configuration"};throw error};
+  await vm.runInContext('saveConfigField(configInputs[0])',context);
+  assert.match(vm.runInContext('configInputs[0].error.textContent',context),/vpn-server/);
+  assert.equal(vm.runInContext('configInputs[0].error.hidden',context),false);
+  assert.equal(vm.runInContext('revision',context),"r1");
+  assert.equal(vm.runInContext('configInputs[0].input.value',context),"both");
+  assert.equal(vm.runInContext('configInputs[0].input.disabled',context),false);
+  assert.match(elements.get("notice").textContent,/Cannot enable/);
+  await vm.runInContext('saveConfig(true)',context);
+  assert.match(vm.runInContext('configInputs[0].error.textContent',context),/vpn-server/);
+});
+
+test("API retains structured configuration field errors", async () => {
+  const {context}=await page();
+  context.fetch=async()=>({ok:false,status:400,json:async()=>({error:"Cannot enable VPN",field_errors:{"vpn-mode":"Linux required"}})});
+  await assert.rejects(vm.runInContext('api("config",{method:"PUT",body:"{}"})',context), error=>error.status===400&&error.fieldErrors["vpn-mode"]==="Linux required");
+});

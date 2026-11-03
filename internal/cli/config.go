@@ -42,13 +42,14 @@ func Parse(fs *flag.FlagSet, args []string) (result error) {
 		return err
 	}
 	if merged {
-		return applyService(fs, values, "", explicit)
+		return annotateServiceOptionError(applyService(fs, values, "", explicit), *path)
 	}
 	f, err := os.Open(*path)
 	if err != nil {
 		return fmt.Errorf("read configuration: %w", err)
 	}
 	defer f.Close()
+	ignoreVPN := plainVPNDisabled(fs, *path, explicit)
 	seen := make(map[string]bool)
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 4096), 1024*1024)
@@ -71,7 +72,8 @@ func Parse(fs *flag.FlagSet, args []string) (result error) {
 			return fmt.Errorf("configuration line %d: expected key = value", line)
 		}
 		name, value = strings.TrimSpace(name), strings.TrimSpace(value)
-		if name == "config" || fs.Lookup(name) == nil {
+		ignoredVPN := ignoreVPN && inactiveVPNOption(name)
+		if (name == "config" || fs.Lookup(name) == nil) && !ignoredVPN {
 			return fmt.Errorf("configuration line %d: unknown or unsupported option", line)
 		}
 		if seen[name] {
@@ -82,7 +84,7 @@ func Parse(fs *flag.FlagSet, args []string) (result error) {
 		if err != nil {
 			return fmt.Errorf("configuration line %d: invalid quoted value for %q", line, name)
 		}
-		if !explicit[name] {
+		if !ignoredVPN && !explicit[name] {
 			if err := fs.Set(name, value); err != nil {
 				// Flag conversion errors include the value; never echo secrets.
 				return fmt.Errorf("configuration line %d: invalid value for %q", line, name)
@@ -118,10 +120,14 @@ func ParseSection(fs *flag.FlagSet, path, prefix string) error {
 	if !merged {
 		return Parse(fs, []string{"-config", path})
 	}
-	return applyService(fs, values, prefix, nil)
+	return annotateServiceOptionError(applyService(fs, values, prefix, nil), path)
 }
 func applyService(fs *flag.FlagSet, values map[string]string, prefix string, explicit map[string]bool) error {
+	ignoreVPN := prefix == "" && vpnDisabled(fs, values["vpn-mode"], explicit)
 	for key, value := range values {
+		if ignoreVPN && inactiveVPNOption(key) {
+			continue
+		}
 		name := key
 		if prefix != "" {
 			if !strings.HasPrefix(key, prefix) || key == "admin_enabled" {
@@ -137,7 +143,7 @@ func applyService(fs *flag.FlagSet, values map[string]string, prefix string, exp
 			}
 		}
 		if name == "config" || fs.Lookup(name) == nil {
-			return fmt.Errorf("unknown or unsupported service option")
+			return &unsupportedServiceOption{key: key}
 		}
 		if !explicit[name] {
 			if err := fs.Set(name, value); err != nil {
@@ -146,4 +152,75 @@ func applyService(fs *flag.FlagSet, values map[string]string, prefix string, exp
 		}
 	}
 	return nil
+}
+
+// Keep unknown option names and values private, but identify their source line.
+// A malformed key may itself contain a pasted credential.
+type unsupportedServiceOption struct{ key string }
+
+func (e *unsupportedServiceOption) OptionName() string { return e.key }
+
+func (*unsupportedServiceOption) Error() string { return "unknown or unsupported service option" }
+func annotateServiceOptionError(err error, path string) error {
+	option, ok := err.(*unsupportedServiceOption)
+	if !ok {
+		return err
+	}
+	data, readErr := os.ReadFile(path)
+	if readErr != nil {
+		return err
+	}
+	for i, line := range strings.Split(string(data), "\n") {
+		text := strings.TrimSpace(strings.TrimPrefix(line, "\uFEFF"))
+		if strings.HasPrefix(text, "#") || strings.HasPrefix(text, ";") {
+			continue
+		}
+		key, _, found := strings.Cut(text, "=")
+		if found && strings.TrimSpace(key) == option.key {
+			return fmt.Errorf("configuration line %d: %w", i+1, err)
+		}
+	}
+	return err
+}
+
+// Disabled optional VPN configuration must not prevent the proxy from starting.
+// Apply this only to applications that actually register VPN mode; unrelated
+// configuration consumers retain their strict unknown-option behavior.
+func vpnDisabled(fs *flag.FlagSet, fileMode string, explicit map[string]bool) bool {
+	mode := fs.Lookup("vpn-mode")
+	if mode == nil {
+		return false
+	}
+	if explicit["vpn-mode"] {
+		fileMode = mode.Value.String()
+	} else if fileMode == "" {
+		fileMode = mode.DefValue
+	}
+	return fileMode == "disabled"
+}
+func inactiveVPNOption(name string) bool {
+	return strings.HasPrefix(name, "vpn-") && name != "vpn-mode"
+}
+func plainVPNDisabled(fs *flag.FlagSet, path string, explicit map[string]bool) bool {
+	if fs.Lookup("vpn-mode") == nil {
+		return false
+	}
+	if explicit["vpn-mode"] {
+		return vpnDisabled(fs, "", explicit)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		key, raw, ok := strings.Cut(strings.TrimPrefix(line, "\uFEFF"), "=")
+		if ok && strings.TrimSpace(key) == "vpn-mode" {
+			mode, err := configValue(strings.TrimSpace(raw))
+			if err != nil {
+				return false
+			}
+			return vpnDisabled(fs, mode, explicit)
+		}
+	}
+	return vpnDisabled(fs, "", explicit)
 }

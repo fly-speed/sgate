@@ -171,34 +171,34 @@ service ssh-client {
     # Framework control socket path; leave empty for the master_ctl default, or set an absolute path.
     admin_master_socket =
 
-# 独立 IPv4 VPN（TUN + QUIC DATAGRAM）：默认关闭，不依赖 OpenVPN。
-# 客户端支持 macOS/Linux，服务端要求 Linux；启用需要系统网络管理权限。
-# 启用前先停止其他全隧道 VPN；本节参数可通过 Web 管理页面修改。
-    # 独立 VPN：disabled 关闭，both 与代理共存，only 仅 VPN（保留框架及管理监听）。应用时会中断 VPN 并恢复/重建网络。
+# Independent IPv4 VPN (TUN + QUIC DATAGRAM): disabled by default; does not require OpenVPN.
+# Clients support macOS/Linux; the server requires Linux. Enabling VPN requires network administration privileges.
+# Stop other full-tunnel VPNs before enabling. These settings can also be edited through Web management.
+    # VPN mode: disabled turns VPN off; both runs proxy and VPN; only runs VPN while retaining framework and management listeners. Applying VPN changes interrupts VPN and restores/rebuilds its network configuration. Other VPN options are ignored while disabled and validated when enabled.
     vpn-mode = disabled
-    # 两端一致的 IPv4 VPN 子网，避免与现有网络重叠。
+    # IPv4 VPN subnet; must match on both ends and must not overlap existing networks.
     vpn-network = 10.77.0.0/24
-    # TUN MTU，576～1500 字节。
+    # TUN MTU in bytes, from 576 to 1500.
     vpn-mtu = 1280
-    # 新建设备名；Linux 默认 sgate0，macOS 自动分配 utunN。
+    # New TUN device name; empty uses sgate0 on Linux or automatically allocates utunN on macOS.
     vpn-tun-name = ''
-    # 自动配置路由、DNS 或服务端 NAT；需要管理员权限。
+    # Automatically configure routes, DNS or server NAT; requires administrator privileges.
     vpn-manage-network = true
-    # VPN 共享密钥文件；留空复用 key-file；不是代理或 Web 账号认证。
+    # VPN shared key file; empty reuses key-file. VPN authentication is separate from proxy and Web accounts.
     vpn-key-file = ''
-    # VPN 服务端 quic://证书域名:8444/vpn；独立于代理 server。
+    # VPN server URL, e.g. quic://vpn.example.com:8444/vpn; the hostname must match the certificate. Separate from the proxy server setting.
     vpn-server = ''
-    # 该客户端固定虚拟 IPv4 地址，不能与其他客户端重复。
+    # Fixed virtual IPv4 address for this client; must be unique among clients.
     vpn-client-ip = 10.77.0.2
-    # 附加信任 CA；留空复用 tls-ca。自签名证书需要显式信任。
+    # Additional trusted CA PEM; empty reuses tls-ca. Self-signed certificates require explicit trust.
     vpn-tls-ca = ''
-    # 逗号分隔 IPv4 路由；服务端外层地址保留物理出口。
+    # Comma-separated IPv4 routes; the outer server endpoint retains its physical egress route.
     vpn-routes = 0.0.0.0/1,128.0.0.0/1
-    # VPN IPv4 DNS，逗号分隔；留空不改 DNS。
+    # Comma-separated IPv4 DNS servers; empty leaves DNS unchanged.
     vpn-dns = 1.1.1.1
-    # macOS 网络服务名称；Linux 使用 resolvectl。
+    # macOS network service name; Linux uses resolvectl.
     vpn-dns-service = Wi-Fi
-    # 首版不转发 IPv6；将公网 IPv6 导入 TUN 后丢弃，避免绕过 VPN。
+    # IPv6 forwarding is not supported in this version; route public IPv6 into TUN and discard it to prevent VPN bypass.
     vpn-block-ipv6 = true
 
 }

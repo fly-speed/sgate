@@ -135,3 +135,27 @@ func TestConfigMissingFileAndPositionalArguments(t *testing.T) {
 		}
 	}
 }
+
+func TestUnknownServiceOptionReportsLineWithoutExposingKeyOrValue(t *testing.T) {
+	for _, section := range []bool{false, true} {
+		fs := flag.NewFlagSet("service", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		fs.String("listen", "", "")
+		body := "service example {\n # option follows\n pasted-private-key = private-value\n}\n"
+		prefix := ""
+		if section {
+			body = strings.ReplaceAll(body, "pasted-private-key", "admin_pasted-private-key")
+			prefix = "admin_"
+		}
+		path := configFile(t, body)
+		var err error
+		if section {
+			err = ParseSection(fs, path, prefix)
+		} else {
+			err = Parse(fs, []string{"-config", path})
+		}
+		if err == nil || !strings.Contains(err.Error(), "configuration line 3:") || strings.Contains(err.Error(), "pasted-private-key") || strings.Contains(err.Error(), "private-value") {
+			t.Fatalf("unsafe or unhelpful error: %v", err)
+		}
+	}
+}

@@ -1,7 +1,10 @@
 package admin
 
 import (
+	"flag"
+	"io"
 	"os"
+	"sgate/internal/cli"
 	"sgate/internal/vpn"
 	"strings"
 	"testing"
@@ -79,5 +82,43 @@ func TestVPNOnlyIgnoresUnusedMappingsAndHonorsCLIOverride(t *testing.T) {
 	h.view.Runtime = func() any { return map[string]any{"cli_overrides": []string{"vpn-mode"}, "vpn_mode": "only"} }
 	if !h.vpnOnly([]byte("vpn-mode = disabled\n")) {
 		t.Fatal("CLI-only mode ignored")
+	}
+}
+
+func TestVPNEnableFailureExplainsForeignOptionsAndPreservesConfig(t *testing.T) {
+	h, cfg := adminFixture(t)
+	h.view.Role = "server"
+	old := []byte("service server {\nlisten = 127.0.0.1:8081\nvpn-mode = disabled\nvpn-server = quic://127.0.0.1:8444/vpn\nvpn-client-ip = 10.77.0.2\n}\n")
+	if err := os.WriteFile(h.view.AppConfigPath, old, 0600); err != nil {
+		t.Fatal(err)
+	}
+	h.view.Validate = func(path string) error {
+		fs := flag.NewFlagSet("server", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		fs.String("listen", "", "")
+		vpn.RegisterFlags(fs, "server")
+		return cli.Parse(fs, []string{"-config", path})
+	}
+	cookie, csrf := setupAccount(t, h, cfg)
+	view := object(t, request(h, "GET", "/api/config", nil, cookie, "", ""))
+	w := request(h, "PUT", "/api/config", map[string]any{"revision": view["revision"], "fields": map[string]string{"vpn-mode": "both"}}, cookie, csrf, "")
+	if w.Code != 400 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	result := object(t, w)
+	reason := result["field_errors"].(map[string]any)["vpn-mode"].(string)
+	if !strings.Contains(reason, "vpn-server") || !strings.Contains(reason, "vpn-client-ip") || !strings.Contains(reason, "客户端") {
+		t.Fatal(reason)
+	}
+	actual, _ := os.ReadFile(h.view.AppConfigPath)
+	if string(actual) != string(old) {
+		t.Fatal("failed validation changed config")
+	}
+	h.view.Validate = func(string) error {
+		return &vpn.ValidationError{Fields: []string{"vpn-mode"}, Message: "独立 VPN 服务端仅支持 Linux，当前系统无法启用。"}
+	}
+	w = request(h, "PUT", "/api/config", map[string]any{"revision": view["revision"], "fields": map[string]string{"vpn-mode": "both"}}, cookie, csrf, "")
+	if w.Code != 400 || !strings.Contains(w.Body.String(), "Linux") {
+		t.Fatal(w.Code, w.Body.String())
 	}
 }

@@ -8,11 +8,13 @@
 
 执行 `make build` 后更新两端 `sgate-client`、`sgate-server` 和 `web/admin/`，首次升级需重启进程加载新参数。新版 `sgate-client.cf`、`sgate-server.cf` 以及各用途的客户端/服务端 `.cf` 示例均完整列出各端适用的 `vpn-*` 参数、默认值和说明，默认保持关闭，可直接编辑同一份配置文件，无需另外创建 VPN 配置。进入管理网页的“配置”页，展开“独立 VPN”分组；即使旧 `.cf` 没有 VPN 配置，也会显示默认字段，保存时仅补入实际提交的项，不产生重复键。
 
-`vpn-mode` 有三个值：`disabled` 默认关闭；`both` 同时运行原代理和独立 VPN；`only` 仅 VPN。`only` 不要求代理目标、上游地址或代理账号密码，忽略代理映射/账号文件，客户端界面不加载或编辑代理映射；保留框架的 TCP/HTTP 管理监听，客户端业务 TCP 立即关闭，服务端代理 HTTP 返回 404。服务端管理仍位于 `/admin/`。管理端口与 VPN 的 UDP 端口是不同入口。
+`vpn-mode` 有三个值：`disabled` 默认关闭，忽略配置文件中其余 `vpn-*` 参数（包括另一端的参数和未使用的无效值）；`both` 同时运行原代理和独立 VPN；`only` 仅 VPN。启用 VPN 时仍严格校验本端适用的配置项；非 VPN 参数、重复项和配置结构错误始终会报错。`only` 不要求代理目标、上游地址或代理账号密码，忽略代理映射/账号文件，客户端界面不加载或编辑代理映射；保留框架的 TCP/HTTP 管理监听，客户端业务 TCP 立即关闭，服务端代理 HTTP 返回 404。服务端管理仍位于 `/admin/`。管理端口与 VPN 的 UDP 端口是不同入口。
 
 在**服务端**填写 `vpn-listen = 0.0.0.0:8444`、`vpn-network = 10.77.0.0/24`、`vpn-mtu = 1280`，选择所需模式。`vpn-tls-cert` / `vpn-tls-key` 可分别指定 VPN 证书，留空复用 `tls-cert` / `tls-key`。**客户端**填写 `vpn-server = quic://你的证书域名:8444/vpn`、`vpn-client-ip = 10.77.0.2`，配置相同子网/MTU、`vpn-dns` 和正确的 `vpn-dns-service`。自签名证书用 `vpn-tls-ca`（留空复用 `tls-ca`）。两端 `vpn-key-file` 必须指向相同密钥，留空复用 `key-file`。
 
 VPN 参数统一以 `vpn-` 开头，不使用独立 CLI 示例中的 `role`、`server`、`listen` 等同名项来管理 VPN。`vpn-listen` 不能占用 `quic-listen` 的 UDP 端口。旧 `vpn-client.cf` / `vpn-server.cf` 仍是 OpenVPN 的 TCP 代理示例。
+
+切换 `vpn-mode` 失败时，界面会在参数旁及全局提示中显示原因，并保留未保存的修改；不支持的操作系统会即时说明，后端校验失败会指出不适用于本端的 VPN 参数、缺少的证书/私钥或地址等问题。macOS 可用作客户端，不能启用独立 VPN 服务端。
 
 点击现有“保存并应用”按钮后生效；单独保存会保留待应用状态。客户端应用配置会断开原代理/VPN连接，恢复旧网络后按新配置重建；服务端共享管理入口保持在线，VPN 参数未改变时保留现有 VPN，改变时停止旧 VPN 并启动新 VPN。`disabled` 停用并恢复网络。CLI 对同名参数的覆盖仍优先，界面会标注。
 

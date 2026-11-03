@@ -170,33 +170,33 @@ service vpn-server {
     # acl_master control socket path; leave empty for the master_ctl default, or set an explicit absolute path.
     admin_master_socket =
 
-# 独立 IPv4 VPN（TUN + QUIC DATAGRAM）：默认关闭，不依赖 OpenVPN。
-# 客户端支持 macOS/Linux，服务端要求 Linux；启用需要系统网络管理权限。
-# 启用前先停止其他全隧道 VPN；本节参数可通过 Web 管理页面修改。
-# 此示例原有部分用于代理 OpenVPN；切换为独立 VPN 时选择 only 并停用 OpenVPN。
-    # 独立 VPN：disabled 关闭，both 与代理共存，only 仅 VPN（保留框架及管理监听）。应用时会中断 VPN 并恢复/重建网络。
+# Independent IPv4 VPN (TUN + QUIC DATAGRAM): disabled by default; does not require OpenVPN.
+# Clients support macOS/Linux; the server requires Linux. Enabling VPN requires network administration privileges.
+# Stop other full-tunnel VPNs before enabling. These settings can also be edited through Web management.
+# The original section of this example proxies OpenVPN; select only and stop OpenVPN to use the independent VPN.
+    # VPN mode: disabled turns VPN off; both runs proxy and VPN; only runs VPN while retaining framework and management listeners. Applying VPN changes interrupts VPN and restores/rebuilds its network configuration. Other VPN options are ignored while disabled and validated when enabled.
     vpn-mode = disabled
-    # 两端一致的 IPv4 VPN 子网，避免与现有网络重叠。
+    # IPv4 VPN subnet; must match on both ends and must not overlap existing networks.
     vpn-network = 10.77.0.0/24
-    # TUN MTU，576～1500 字节。
+    # TUN MTU in bytes, from 576 to 1500.
     vpn-mtu = 1280
-    # 新建设备名；Linux 默认 sgate0，macOS 自动分配 utunN。
+    # New TUN device name; empty uses sgate0 on Linux or automatically allocates utunN on macOS.
     vpn-tun-name = ''
-    # 自动配置路由、DNS 或服务端 NAT；需要管理员权限。
+    # Automatically configure routes, DNS or server NAT; requires administrator privileges.
     vpn-manage-network = true
-    # VPN 共享密钥文件；留空复用 key-file；不是代理或 Web 账号认证。
+    # VPN shared key file; empty reuses key-file. VPN authentication is separate from proxy and Web accounts.
     vpn-key-file = ''
-    # 独立 QUIC UDP 监听，不能与 quic-listen 共用 UDP 端口。
+    # Separate QUIC UDP listener; cannot share a UDP port with quic-listen.
     vpn-listen = 0.0.0.0:8444
-    # VPN 服务器证书；留空复用 tls-cert。
+    # VPN server certificate PEM; empty reuses tls-cert.
     vpn-tls-cert = ''
-    # VPN 证书私钥；留空复用 tls-key。
+    # VPN certificate private key PEM; empty reuses tls-key.
     vpn-tls-key = ''
-    # 最多同时认证客户端数，1～254；各客户端须配置不同虚拟 IP。
+    # Maximum simultaneous authenticated clients, from 1 to 254; each client needs a unique virtual IP.
     vpn-max-clients = 64
-    # Linux 物理出口网卡；留空按当前路由识别。
+    # Linux physical egress interface; empty detects it from the current route.
     vpn-egress-interface = ''
-    # 允许访问服务器侧私网；始终禁止客户端互访。
+    # Allow access to private networks on the server side; inter-client traffic is always denied.
     vpn-allow-private = false
 
 }

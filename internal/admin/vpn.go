@@ -1,6 +1,9 @@
 package admin
 
 import (
+	"errors"
+	"fmt"
+	"net/http"
 	"sgate/internal/vpn"
 	"strconv"
 	"strings"
@@ -72,4 +75,50 @@ func (h *Handler) vpnOnly(content []byte) bool {
 		}
 	}
 	return configuredVPNOnly(content)
+}
+
+func (h *Handler) configValidationProblem(w http.ResponseWriter, err error, content string) {
+	message := "配置校验失败：" + err.Error()
+	fieldErrors := map[string]string{}
+	var invalid *vpn.ValidationError
+	if errors.As(err, &invalid) {
+		for _, key := range invalid.Fields {
+			fieldErrors[key] = invalid.Message
+		}
+		message = "配置校验失败：" + invalid.Message
+	}
+	var unsupported interface{ OptionName() string }
+	if errors.As(err, &unsupported) {
+		other := "client"
+		roleName, otherName := "服务端", "客户端"
+		if h.view.Role == "client" {
+			other = "server"
+			roleName, otherName = otherName, roleName
+		}
+		own, foreign := map[string]bool{}, map[string]bool{}
+		for _, s := range vpn.Settings(h.view.Role) {
+			own[s.Key] = true
+		}
+		for _, s := range vpn.Settings(other) {
+			if !own[s.Key] {
+				foreign[s.Key] = true
+			}
+		}
+		if foreign[unsupported.OptionName()] {
+			fields, _ := configFields(content)
+			keys := []string{}
+			for _, f := range fields {
+				if foreign[f.Key] {
+					keys = append(keys, f.Key)
+				}
+			}
+			reason := fmt.Sprintf("无法启用 VPN：%s配置包含仅适用于%s的参数：%s。请移除这些参数并使用本端 VPN 配置。", roleName, otherName, strings.Join(keys, ", "))
+			fieldErrors["vpn-mode"] = reason
+			for _, key := range keys {
+				fieldErrors[key] = reason
+			}
+			message = reason
+		}
+	}
+	reply(w, http.StatusBadRequest, map[string]any{"error": message, "field_errors": fieldErrors})
 }

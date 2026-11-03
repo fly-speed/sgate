@@ -17,6 +17,7 @@ import (
 
 	"sgate/internal/proxyconfig"
 	"sgate/internal/tunnel"
+	"sgate/internal/vpn"
 )
 
 const secretMarker = "__SGATE_KEEP_EXISTING_PASSWORD__"
@@ -604,6 +605,7 @@ func (h *Handler) getConfig(w http.ResponseWriter) {
 		"requires_restart":     h.restartDigest(b) != h.startupRevision || h.mappingRestartPending,
 		"path":                 h.view.AppConfigPath,
 		"role":                 h.view.Role,
+		"vpn_support":          vpn.PlatformSupport(h.view.Role),
 		"password_placeholder": secretMarker,
 	}
 	if h.view.Runtime != nil {
@@ -757,7 +759,7 @@ func (h *Handler) putConfig(w http.ResponseWriter, r *http.Request) {
 		e = h.view.Validate(name)
 	}
 	if e != nil {
-		problem(w, 400, "配置校验失败："+e.Error())
+		h.configValidationProblem(w, e, content)
 		return
 	}
 	// A validator may perform slow certificate/key reads. Detect external edits

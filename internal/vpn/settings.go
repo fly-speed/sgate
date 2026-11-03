@@ -13,7 +13,6 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
-	"runtime"
 	"strings"
 	"time"
 
@@ -91,8 +90,8 @@ func Prepare(role string, fs *flag.FlagSet) (*Prepared, error) {
 		return nil, errors.New("vpn-mode must be disabled, both or only")
 	}
 	p := &Prepared{Role: role, Mode: mode, TUN: get("vpn-tun-name"), Manage: get("vpn-manage-network") == "true"}
-	if role == "server" && runtime.GOOS != "linux" {
-		return nil, errors.New("VPN server requires Linux")
+	if support := PlatformSupport(role); !support.Supported {
+		return nil, invalidFields(support.Reason, "vpn-mode")
 	}
 	keyPath := get("vpn-key-file")
 	if keyPath == "" {
@@ -100,7 +99,7 @@ func Prepare(role string, fs *flag.FlagSet) (*Prepared, error) {
 	}
 	key, err := cli.LoadKey(keyPath)
 	if err != nil {
-		return nil, err
+		return nil, invalidFields("VPN 共享密钥无法加载："+err.Error(), "vpn-mode", "vpn-key-file")
 	}
 	network, err := netip.ParsePrefix(get("vpn-network"))
 	if err != nil {
@@ -121,9 +120,12 @@ func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Pref
 		if keyPath == "" {
 			keyPath = get("tls-key")
 		}
+		if certPath == "" || keyPath == "" {
+			return nil, invalidFields("启用 VPN 需要服务器证书和私钥：填写 vpn-tls-cert / vpn-tls-key，或配置可复用的 tls-cert / tls-key。", "vpn-mode", "vpn-tls-cert", "vpn-tls-key")
+		}
 		cert, err := tls.LoadX509KeyPair(certPath, keyPath)
 		if err != nil {
-			return nil, err
+			return nil, invalidFields("VPN 证书或私钥无法加载："+err.Error(), "vpn-mode", "vpn-tls-cert", "vpn-tls-key")
 		}
 		p.Config.TLS.Certificates = []tls.Certificate{cert}
 		p.Config.Address = get("vpn-listen")
@@ -133,17 +135,17 @@ func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Pref
 			_, a, e1 := net.SplitHostPort(q)
 			_, b, e2 := net.SplitHostPort(p.Config.Address)
 			if e1 == nil && e2 == nil && a == b {
-				return nil, errors.New("vpn-listen and quic-listen require different UDP ports")
+				return nil, invalidFields("vpn-listen 与 quic-listen 不能占用同一个 UDP 端口；请为独立 VPN 配置不同端口。", "vpn-mode", "vpn-listen")
 			}
 		}
 	} else {
 		u, err := url.Parse(get("vpn-server"))
 		if err != nil || u.Scheme != "quic" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/vpn") {
-			return nil, errors.New("vpn-server must be quic://hostname:port/vpn")
+			return nil, invalidFields("启用 VPN 需要有效的 vpn-server，例如 quic://vpn.example.com:8444/vpn；不能使用代理的 server 地址代替。", "vpn-mode", "vpn-server")
 		}
 		host, port, err := net.SplitHostPort(u.Host)
 		if err != nil || host == "" {
-			return nil, errors.New("vpn-server requires hostname and UDP port")
+			return nil, invalidFields("vpn-server 必须包含有效的服务器主机名和 UDP 端口，例如 quic://vpn.example.com:8444/vpn。", "vpn-mode", "vpn-server")
 		}
 		p.Host, p.Port = host, port
 		p.Config.Address = u.Host
@@ -159,10 +161,10 @@ func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Pref
 		if ca != "" {
 			b, e := os.ReadFile(ca)
 			if e != nil {
-				return nil, e
+				return nil, invalidFields("VPN CA 文件无法读取："+e.Error(), "vpn-mode", "vpn-tls-ca")
 			}
 			if !roots.AppendCertsFromPEM(b) {
-				return nil, errors.New("VPN CA contains no certificates")
+				return nil, invalidFields("VPN CA 文件中没有有效的 PEM 证书。", "vpn-mode", "vpn-tls-ca")
 			}
 		}
 		p.Config.TLS.RootCAs = roots

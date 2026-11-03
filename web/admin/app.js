@@ -15,6 +15,7 @@ let tunnelAccountsLoad = 0;
 let tunnelAccountsRevision = "", tunnelAccountRows = [], tunnelAccountsBusy = false, tunnelAccountsEnabled = false, tunnelAccountsCanCreate = false;
 let tunnelAccountCreateMappings = null;
 let configRole = "";
+let vpnConfigSupport = null;
 // Keep each role's expanded sections across saves and language changes.
 const configGroupOpen = new Map();
 let configInputs = [],
@@ -24,6 +25,7 @@ let configInputs = [],
 // 字段值由服务端解析；浏览器不解析或拼接 .cf，避免破坏引号、注释与密码。
 function renderConfigFields(fields, runtime, role) {
   configRole = role || state.role || "";
+  vpnConfigSupport = runtime.vpn_support || null;
   const vpnOnly = (runtime.cli_overrides || []).includes("vpn-mode") ? runtime.vpn_mode === "only" : fields.some((field) => field.key === "vpn-mode" && field.value === "only");
   if (role === "client" && !vpnOnly && !fields.some((field) => field.key === "proxies")) {
     fields = [...fields, { key: "proxies", kind: "proxies", mappings: [], group: t("代理与通道") }];
@@ -413,6 +415,8 @@ function configRelationErrors(values) {
       fail([cert, key], t("证书与私钥路径须同时填写或同时留空"));
   if (has("server") && values["vpn-mode"] !== "only" && !values.server && !values.proxies?.length)
     fail(["server"], t("单代理模式需要服务端 URL；或先配置至少一个映射"));
+  if (["both","only"].includes(values["vpn-mode"]) && vpnConfigSupport?.supported === false)
+    fail(["vpn-mode"], t(vpnConfigSupport.reason) + " (" + vpnConfigSupport.os + ")");
   if (has("vpn-server") && ["both","only"].includes(values["vpn-mode"]) && !values["vpn-server"])
     fail(["vpn-server"], t("VPN 模式需要独立的 VPN 服务端地址"));
   if (has("path") && (values.path === "/admin" || values.path.startsWith("/admin/")))
@@ -878,12 +882,24 @@ async function saveConfigField(entry) {
     if (result.service_restart_required) await restartSavedMappings(result);
     else notice(() => configSaveMessage(result, entry.key) + t("其他未保存修改已保留。"));
   } catch (error) {
-    notice(() => errorText(error), true);
+    showConfigSaveError(error,entry);
   } finally {
     configSaving = false;
     entry.saveButton.setAttribute("aria-busy", "false");
     setConfigBusy(serviceRestarting);
   }
+}
+function showConfigSaveError(error, selected = null) {
+  const errors = {...(error.fieldErrors || {})};
+  const mode = configInputs.find(row => row.key === "vpn-mode");
+  if (!Object.keys(errors).length && (selected?.key === "vpn-mode" || mode?.dirty)) errors["vpn-mode"] = errorText(error);
+  for (const row of configInputs) {
+    if (!row.input || !errors[row.key]) continue;
+    setConfigError(row.input,t(errors[row.key]),row.error);
+    const group = row.input.closest?.("details.config-group");
+    if (group) group.open = true;
+  }
+  notice(() => errorText(error),true);
 }
 async function api(path, options = {}) {
   const controller = new AbortController(),
@@ -906,6 +922,7 @@ async function api(path, options = {}) {
       }
       const error = new Error(t(data.error) || t("请求失败"));
       error.status = r.status;
+      error.fieldErrors = data.field_errors || {};
       throw error;
     }
     return data;
@@ -1060,7 +1077,7 @@ async function loadConfig() {
   if (!Array.isArray(data.fields))
     throw new Error(t("配置表单需要新版程序，请更新并重启 sgate 服务。"));
   revision = data.revision;
-  renderConfigFields(data.fields || [], data.runtime || {}, data.role);
+  renderConfigFields(data.fields || [], {...(data.runtime || {}), vpn_support:data.vpn_support}, data.role);
   localText($("config-path"), () => data.path);
   localText($("pending-label"), () => data.requires_restart ? t("已保存 · 待应用") : t("配置文件已同步"));
   renderRuntime(data.runtime || {});
@@ -1657,7 +1674,7 @@ async function saveConfig(apply) {
     await loadConfig();
     if (!result.service_restart_required) notice(() => configSaveMessage(result));
   } catch (e) {
-    notice(() => errorText(e), true);
+    showConfigSaveError(e);
   } finally {
     configSaving = false;
     setConfigBusy(serviceRestarting);

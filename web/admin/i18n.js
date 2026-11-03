@@ -197,6 +197,8 @@ const sgateI18n = (() => {
   "连通性测试响应验证失败": "invalid connectivity test response",
 
   "VPN 模式需要独立的 VPN 服务端地址": "VPN mode requires its own VPN server address",
+  "独立 VPN 服务端仅支持 Linux，当前系统无法启用。": "The independent VPN server requires Linux and cannot be enabled on this system.",
+  "独立 VPN 客户端仅支持 macOS 和 Linux，当前系统无法启用。": "The independent VPN client requires macOS or Linux and cannot be enabled on this system.",
   "独立 VPN": "Independent VPN",
   "已关闭": "Disabled",
   "启动中": "Starting",
