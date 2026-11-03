@@ -1136,6 +1136,7 @@ async function loadConfig() {
   renderRuntime(data.runtime || {});
 }
 function renderRuntime(rt) {
+  renderVPNControls(rt.vpn);
   if (Array.isArray(rt.websocket_listeners)) {
     serverTunnelListeners = rt.websocket_listeners;
     validateAllReverseMappings(false);
@@ -1193,7 +1194,11 @@ function vpnObservationText(v) {
  const q=v.stats||{};
  return t("独立 VPN")+" · "+t(names[v.state]||v.state)+" · "+(v.device||"—")+" · "+(v.address||"")+" · "+(v.client_ip||v.network||"")+
   " · "+t("活跃连接：")+(q.active_connections||0)+" · IP "+t("发送")+" "+units(q.tx_ip_bytes||0)+" / "+t("接收")+" "+units(q.rx_ip_bytes||0)+
-  " · "+t("丢弃：")+(q.dropped_packets||0)+(v.last_error?" · "+v.last_error:"");
+  " · "+t("丢弃：")+(q.dropped_packets||0)+" · "+t("VPN 白噪音目标：")+units(v.noise_rate||0,true)+
+  " · "+t("噪音累计发送/接收：")+units(q.noise_tx_bytes||0)+" / "+units(q.noise_rx_bytes||0)+
+  " · "+t("传输中/空闲：")+(v.noise_traffic?t("发送"):t("不发"))+" / "+(v.noise_idle?t("发送"):t("不发"))+
+  (q.noise_skipped_ticks?" · "+t("噪音暂停/让行采样：")+q.noise_skipped_ticks:"")+
+  (q.noise_unsupported_connections?" · "+t("对端不支持白噪音，请更新两端程序：")+q.noise_unsupported_connections:"")+(v.last_error?" · "+v.last_error:"");
 }
 async function poll(run) {
   if (run !== epoch || !state.authenticated) return;
@@ -1211,6 +1216,7 @@ async function poll(run) {
     }
     localText($("tx-rate"), () => rates ? units(rates.tx, true) : t("采样中"));
     localText($("rx-rate"), () => rates ? units(rates.rx, true) : t("采样中"));
+    renderVPNControls(data.health?.vpn);
     if($("vpn-summary")) localText($("vpn-summary"), () => vpnObservationText(data.health?.vpn));
     if($("quic-summary")) localText($("quic-summary"), () => quicObservationText(data));
     localText($("noise-observation"), () => noiseObservationText(data, rates));
@@ -1270,9 +1276,9 @@ function renderTrafficPeers(data) {
   renderTrafficScope(data);
 }
 function renderTrafficScope(data = previous) {
-  const isVPN = $("traffic-metric").value === "vpn";
+  const isVPN = ["vpn","vpn-noise"].includes($("traffic-metric").value);
   $("traffic-ip").disabled = isVPN;
-  if (isVPN) { localText($("traffic-ip-summary"), () => t("VPN IP 负载带宽（全部客户端）")); return; }
+  if (isVPN) { localText($("traffic-ip-summary"), () => chartMetric().title); return; }
   const ip = $("traffic-ip").value;
   const peer = data?.by_ip?.find((peer) => peer.ip === ip);
   localText($("traffic-ip-summary"), () => ip
@@ -1281,7 +1287,7 @@ function renderTrafficScope(data = previous) {
     : t("全部连接 IP"));
 }
 function chartSamples() {
-  if ($("traffic-metric").value === "vpn") return points;
+  if (["vpn","vpn-noise"].includes($("traffic-metric").value)) return points;
   const ip = $("traffic-ip").value;
   if (!ip) return points;
   return points.map((point) => point.byIP?.[ip] || { time_ms: point.time_ms });
@@ -1312,7 +1318,7 @@ function trafficRates(data, last) {
     }
   }
   const vpnRates = {};
-  for (const [key, field] of [["vpnTX", "tx_ip_bytes"], ["vpnRX", "rx_ip_bytes"]]) {
+  for (const [key, field] of [["vpnTX", "tx_ip_bytes"], ["vpnRX", "rx_ip_bytes"], ["vpnNoiseTX", "noise_tx_bytes"], ["vpnNoiseRX", "noise_rx_bytes"]]) {
     const next = data.health?.vpn?.stats?.[field], before = last.health?.vpn?.stats?.[field];
     vpnRates[key] = Number.isFinite(next) && Number.isFinite(before) && next >= before && data.health?.vpn?.generation === last.health?.vpn?.generation ? (next - before) / seconds : null;
   }
@@ -1400,6 +1406,8 @@ function chartMetric() {
       return { keys: ["tcpTX", "tcpRX"], labels: ["TCP 发送", "TCP 接收"], title: t("TCP 网络带宽") };
     case "quic":
       return { keys: ["quicTX", "quicRX"], labels: ["QUIC 发送", "QUIC 接收"], title: t("QUIC 流带宽") };
+    case "vpn-noise":
+      return { keys:["vpnNoiseTX","vpnNoiseRX"], labels:["VPN 噪音发送","VPN 噪音接收"],title:t("VPN 白噪音负载带宽（全部客户端）") };
     case "vpn":
       return { keys: ["vpnTX", "vpnRX"], labels: ["VPN IP 发送", "VPN IP 接收"], title: t("VPN IP 负载带宽（全部客户端）") };
     case "noise":
@@ -2246,3 +2254,28 @@ $("tunnel-account-create").addEventListener("submit", (event) => {
   }
   saveTunnelAccount({action:"create",username,password,reverse_mappings:tunnelAccountCreateMappings?.read() || []});
 });
+
+let vpnControlBusy = false;
+let vpnControlHealth = null;
+function renderVPNControls(v) {
+  vpnControlHealth = v;
+  const group = $("vpn-controls");
+  if (!group) return;
+  group.hidden = v?.role !== "client";
+  const running = v?.enabled && !["stopped", "failed", "disabled"].includes(v.state);
+  $("vpn-start").disabled = vpnControlBusy || !v?.enabled || running;
+  $("vpn-stop").disabled = vpnControlBusy || !running;
+}
+async function controlVPN(start) {
+  if (vpnControlBusy) return;
+  vpnControlBusy = true; renderVPNControls(vpnControlHealth);
+  try {
+    const result = await api(start ? "vpn-start" : "vpn-stop", {method:"POST",body:"{}"});
+    if (result.runtime) renderRuntime(result.runtime);
+    notice(() => t(start ? "VPN 正在启动，请查看连接状态。" : "VPN 已停止，已执行路由和 DNS 清理。"));
+  } catch (error) { notice(() => errorText(error), true); }
+  finally { vpnControlBusy = false; renderVPNControls(vpnControlHealth); }
+}
+
+$("vpn-start").addEventListener("click", () => controlVPN(true));
+$("vpn-stop").addEventListener("click", () => controlVPN(false));

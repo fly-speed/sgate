@@ -128,11 +128,49 @@ def main():
         echo = "import socket; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.bind(('198.51.100.2',18081))\nwhile True:\n p,a=s.recvfrom(65535); s.sendto(p,a)"
         start("udp", [sys.executable, "-c", echo], internet)
         if args.client_binary:
+            # Integrated clients require an authenticated manual start, including in tests.
+            client_config = out / "client.cf"
+            web_dir = Path(__file__).resolve().parents[1] / "web/admin"
+            client_config.write_text(f"""service vpn-test {{
+ admin_enabled = true
+ admin_listen = 127.0.0.1:19081
+ admin_web_dir = {web_dir}
+ admin_users_file = {out}/users.json
+ admin_session_dir = {out}/sessions
+ admin_setup_token_file = {out}/setup.token
+}}
+""")
+            admin_control = """
+import http.cookiejar, json, pathlib, sys, time, urllib.request
+opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+base='http://127.0.0.1:19081'
+csrf=''
+def call(path,data=None):
+ r=urllib.request.Request(base+'/api/'+path,data=None if data is None else json.dumps(data).encode())
+ r.add_header('Content-Type','application/json'); r.add_header('Origin',base)
+ if csrf: r.add_header('X-CSRF-Token',csrf)
+ with opener.open(r,timeout=10) as response: return json.load(response)
+for attempt in range(100):
+ try:
+  status=call('status'); break
+ except OSError:
+  if attempt==99: raise
+  time.sleep(.1)
+credentials={'username':'vpn-test','password':'vpn-netns-test-password'}
+if status.get('setup_required'):
+ credentials['setup_token']=pathlib.Path(sys.argv[2]).read_text().strip()
+ call('setup',credentials)
+else: call('login',credentials)
+csrf=call('status')['csrf']
+if sys.argv[1]=='vpn-start': assert call('stats')['health']['vpn']['state']=='stopped'
+call(sys.argv[1],{})
+if sys.argv[1]=='vpn-stop': assert call('stats')['health']['vpn']['state']=='stopped'
+"""
             server_command = [args.server_binary.resolve(), "-alone", "-vpn-mode", "only", "-listen", "127.0.0.1:0",
                               "-key-file", out / "key", "-vpn-listen", "192.0.2.1:8444",
                               "-vpn-tls-cert", out / "tls-cert.pem", "-vpn-tls-key", out / "tls-key.pem",
                               "-vpn-egress-interface", "wan0"]
-            client_command = [args.client_binary.resolve(), "-alone", "-vpn-mode", "only", "-listen", "127.0.0.1:0",
+            client_command = [args.client_binary.resolve(), "-alone", "-config", client_config, "-vpn-mode", "only", "-listen", "127.0.0.1:0",
                               "-key-file", out / "key", "-vpn-server", "quic://192.0.2.1:8444/vpn",
                               "-vpn-tls-ca", out / "tls-cert.pem", "-vpn-dns", ""]
         else:
@@ -142,6 +180,8 @@ def main():
                               "-key-file", out / "key", "-tls-ca", out / "tls-cert.pem", "-dns", ""]
         server_process = start("server", server_command, server)
         client_process = start("client", client_command, client)
+        if args.client_binary:
+            run([sys.executable, "-c", admin_control, "vpn-start", out / "setup.token"], client, timeout=30)
         deadline = time.monotonic() + 30
         while True:
             try:
@@ -165,6 +205,8 @@ def main():
         udp_test = "import socket; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.settimeout(5)\nfor n in [64,1000,1200]:\n p=bytes(i%251 for i in range(n)); s.sendto(p,('198.51.100.2',18081)); assert s.recv(65535)==p\nprint('UDP verified')"
         run([sys.executable, "-c", udp_test], client)
         run(["ping", "-c", "3", "-W", "5", "198.51.100.2"], client)
+        if args.client_binary:
+            run([sys.executable, "-c", admin_control, "vpn-stop", out / "setup.token"], client, timeout=30)
         stop(client_process)
         routes = run(["ip", "route", "show"], client).decode()
         if "sgate0" in routes or "0.0.0.0/1" in routes or "128.0.0.0/1" in routes:

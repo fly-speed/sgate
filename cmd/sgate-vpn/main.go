@@ -27,6 +27,7 @@ import (
 
 type options struct {
 	role, listen, server, keyFile, cert, key, ca, network, clientIP, tun, routes, dns, dnsService, egress string
+	noise                                                                                                 vpn.NoiseConfig
 	mtu, maxClients                                                                                       int
 	manage, private, block6                                                                               bool
 }
@@ -52,6 +53,10 @@ func parse(args []string) (options, error) {
 	fs.StringVar(&o.routes, "routes", "0.0.0.0/1,128.0.0.0/1", "client IPv4 prefixes to route into VPN; 0.0.0.0/0 is split into two routes")
 	fs.StringVar(&o.dns, "dns", "1.1.1.1", "client IPv4 DNS servers, comma separated; empty leaves DNS unchanged")
 	fs.StringVar(&o.dnsService, "dns-service", "Wi-Fi", "macOS network service whose DNS is temporarily changed")
+	cli.ByteSizeVar(fs, &o.noise.Rate, "noise-rate", 0, "VPN padding payload bytes per second per connection (K/M supported), 0 disables, maximum 10M")
+	fs.BoolVar(&o.noise.Traffic, "noise-traffic", true, "allow VPN padding during IP traffic; business packets have priority")
+	fs.BoolVar(&o.noise.Idle, "noise-idle", true, "allow VPN padding while no business IP data flows")
+	fs.DurationVar(&o.noise.IdleAfter, "noise-idle-after", time.Second, "VPN IP inactivity threshold, 0 uses 1s")
 	fs.StringVar(&o.egress, "egress-interface", "", "Linux server physical egress interface; empty detects current route")
 	if err := cli.Parse(fs, args); err != nil {
 		return o, err
@@ -88,7 +93,7 @@ func run(args []string) error {
 		return err
 	}
 	stats := &vpn.Stats{}
-	config := vpn.Config{Key: key, Network: network, ClientIP: clientIP, MTU: o.mtu, MaxClients: o.maxClients, AllowPrivate: o.private, Stats: stats, Logf: log.Printf}
+	config := vpn.Config{Noise: o.noise, Key: key, Network: network, ClientIP: clientIP, MTU: o.mtu, MaxClients: o.maxClients, AllowPrivate: o.private, Stats: stats, Logf: log.Printf}
 	netOptions := vpn.NetworkOptions{Server: o.role == "server", Network: network, ClientIP: clientIP, MTU: o.mtu, DNSService: o.dnsService, Egress: o.egress, BlockIPv6: o.block6, Logf: log.Printf}
 	if !network.Addr().Is4() || network != network.Masked() || network.Bits() < 16 || network.Bits() > 30 || o.mtu < 576 || o.mtu > 1500 {
 		return errors.New("invalid IPv4 VPN subnet or MTU")

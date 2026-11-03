@@ -50,3 +50,25 @@ func TestIntegratedVPNPrepareIsOfflineAndValidatesBeforeTUN(t *testing.T) {
 		}
 	}
 }
+
+func TestVPNNoiseSettingsAndLimits(t *testing.T) {
+	fs := integratedSettings(t)
+	fs.Set("vpn-mode", "both")
+	fs.Set("vpn-noise-rate", "32K")
+	p, e := Prepare("client", fs)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if p.Config.Noise.Rate != 32768 || !p.Config.Noise.Traffic || !p.Config.Noise.Idle {
+		t.Fatal(p.Config.Noise)
+	}
+	fs.Set("vpn-noise-rate", "11M")
+	if _, e = Prepare("client", fs); e == nil {
+		t.Fatal("unbounded noise rate")
+	}
+	fs.Set("vpn-noise-rate", "1K")
+	fs.Set("vpn-noise-idle-after", "-1s")
+	if _, e = Prepare("client", fs); e == nil {
+		t.Fatal("negative idle threshold accepted")
+	}
+}

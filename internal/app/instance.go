@@ -51,7 +51,7 @@ type instance struct {
 
 func (d definition) start(ctx context.Context, stats *tunnel.Stats) (*instance, error) {
 	i, err := d.startProxy(ctx, stats)
-	if err == nil {
+	if err == nil && d.vpn != nil && d.vpn.Role != "client" {
 		i.startVPN(ctx, d.vpn)
 	}
 	return i, err

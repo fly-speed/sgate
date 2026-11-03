@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/netip"
+	"strings"
 	"time"
 
 	"github.com/quic-go/quic-go"
@@ -45,10 +46,21 @@ func Probe(parent context.Context, config Config) (result ProbeResult) {
 	}
 	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
+	serverAdvertisedProbe := false
 	fail := func(err error) ProbeResult {
 		result.Error = err.Error()
-		if result.Stage == "auth" {
-			result.Detail = "VPN 认证未通过；请检查密钥、虚拟 IP、子网、MTU 及服务端是否已更新支持测试。"
+		if result.Stage == "auth" && result.Detail == "" {
+			var remote *quic.ApplicationError
+			switch {
+			case errors.As(err, &remote) && remote.ErrorCode == authKeyMismatchCode:
+				result.Detail = "服务端确认 VPN 共享密钥不匹配；请核对两端生效的 vpn-key-file，留空时核对 key-file 及命令行覆盖。"
+			case errors.As(err, &remote) && remote.ErrorCode == authInvalidHelloCode:
+				result.Detail = "服务端无法解析 VPN 认证请求；请核对两端程序版本。"
+			case !serverAdvertisedProbe:
+				result.Detail = "服务端未声明新版测试能力；请核对实际监听 VPN 端口的服务端版本，并检查两端生效的共享密钥。"
+			default:
+				result.Detail = "VPN 认证期间连接断开；请查看服务端对应时刻的认证拒绝日志。"
+			}
 		}
 		return result
 	}
@@ -77,6 +89,7 @@ func Probe(parent context.Context, config Config) (result ProbeResult) {
 	if err = readJSON(control, &challenge); err != nil {
 		return fail(err)
 	}
+	serverAdvertisedProbe = strings.HasPrefix(challenge, probeChallengePrefix)
 	h := hello{Probe: true, ID: result.TestID, IP: c.ClientIP.String(), Network: c.Network.String(), MTU: c.MTU}
 	h.Proof = proof(c.Key, challenge, h)
 	if err = writeJSON(control, h); err != nil {
@@ -87,9 +100,11 @@ func Probe(parent context.Context, config Config) (result ProbeResult) {
 		return fail(err)
 	}
 	if reply.Error != "" {
+		result.Detail = "服务端已通过密钥校验，但拒绝了 VPN 参数；请按错误中的期望值修正。"
 		return fail(errors.New(reply.Error))
 	}
 	if !reply.Probe || !hmac.Equal([]byte(reply.Proof), []byte(welcomeProof(c.Key, challenge, h, reply))) {
+		result.Detail = "服务端测试身份校验失败；请核对共享密钥及测试协议版本。"
 		return fail(errors.New("server did not authenticate a non-disruptive VPN test; update server or check shared key"))
 	}
 	if reply.IP != h.IP || reply.Network != h.Network || reply.MTU != h.MTU || reply.Gateway != c.Network.Addr().Next().String() {

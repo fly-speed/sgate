@@ -1960,3 +1960,43 @@ test("VPN connection tests suppress stale responses and recover after failures",
   vm.runInContext('renderConfigFields([{key:"vpn-mode",value:"both",group:"独立 VPN"}],{},"server")',context);
   assert.equal(vm.runInContext('vpnProbeState',context),null);
 });
+
+test("VPN padding counters are independent of IP traffic and expose old peer support", async () => {
+ const {context}=await page();
+ context.before={time_ms:1000,tx_bytes:0,rx_bytes:0,health:{vpn:{generation:"g1",stats:{tx_ip_bytes:0,rx_ip_bytes:0,noise_tx_bytes:1000,noise_rx_bytes:2000}}}};
+ context.after={time_ms:2000,tx_bytes:0,rx_bytes:0,health:{vpn:{generation:"g1",stats:{tx_ip_bytes:0,rx_ip_bytes:0,noise_tx_bytes:4000,noise_rx_bytes:6000}}}};
+ const rates=JSON.parse(vm.runInContext('JSON.stringify(trafficRates(after,before))',context));
+ assert.equal(rates.vpnTX,0);assert.equal(rates.vpnNoiseTX,3000);assert.equal(rates.vpnNoiseRX,4000);
+ assert.match(vm.runInContext('vpnObservationText({enabled:true,state:"connected",noise_rate:10240,noise_traffic:true,noise_idle:true,stats:{noise_unsupported_connections:1}})',context),/更新两端/);
+ vm.runInContext('$("traffic-metric").value="vpn-noise"',context);
+ assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(chartMetric().keys)',context)),["vpnNoiseTX","vpnNoiseRX"]);
+});
+
+test("VPN manual controls reflect client status and serialize requests without saving", async () => {
+  const {context,elements}=await page();
+  vm.runInContext('renderVPNControls({role:"server",enabled:true,state:"listening"})',context);
+  assert.equal(elements.get("vpn-controls").hidden,true);
+  vm.runInContext('renderVPNControls({role:"client",enabled:true,state:"stopped"})',context);
+  assert.equal(elements.get("vpn-controls").hidden,false);
+  assert.equal(elements.get("vpn-start").disabled,false);
+  assert.equal(elements.get("vpn-stop").disabled,true);
+  let finish; const calls=[];
+  context.api=async(path,options)=>{calls.push({path,body:options.body});return new Promise(resolve=>finish=resolve)};
+  const pending=vm.runInContext('controlVPN(true)',context);
+  assert.equal(elements.get("vpn-start").disabled,true);
+  await vm.runInContext('controlVPN(true)',context);
+  assert.equal(calls.length,1);
+  assert.equal(calls[0].path,"vpn-start");
+  assert.equal(calls[0].body,"{}");
+  finish({runtime:{vpn:{role:"client",enabled:true,state:"connecting"}}});
+  await pending;
+  assert.equal(elements.get("vpn-start").disabled,true);
+  assert.equal(elements.get("vpn-stop").disabled,false);
+  context.api=async(path)=>{calls.push({path});return {runtime:{vpn:{role:"client",enabled:true,state:"stopped"}}}};
+  await vm.runInContext('controlVPN(false)',context);
+  assert.equal(calls[1].path,"vpn-stop");
+  assert.equal(elements.get("vpn-start").disabled,false);
+  vm.runInContext('renderVPNControls({role:"client",enabled:false,state:"disabled"})',context);
+  assert.equal(elements.get("vpn-start").disabled,true);
+  assert.equal(elements.get("vpn-stop").disabled,true);
+});

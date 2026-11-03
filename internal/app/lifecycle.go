@@ -127,6 +127,7 @@ func (c *controller) managementView() admin.View {
 		MappingCandidate:     c.mappingCandidate,
 		TestProxy:            c.testProxy,
 		TestVPN:              c.testVPN,
+		ControlVPN:           c.controlVPN,
 		ManageTunnelAccounts: c.manageTunnelAccounts,
 		ApplyLive:            c.applyLive,
 		LiveFields:           c.liveFields(),

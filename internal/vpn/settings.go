@@ -31,6 +31,10 @@ func Settings(role string) []Setting {
 		{"vpn-tun-name", "", "新建设备名；Linux 默认 sgate0，macOS 自动分配 utunN。"},
 		{"vpn-manage-network", "true", "自动配置路由、DNS 或服务端 NAT；需要管理员权限。"},
 		{"vpn-key-file", "", "VPN 共享密钥文件；留空复用 key-file；不是代理或 Web 账号认证。"},
+		{"vpn-noise-rate", "0", "本端每条 VPN 连接的白噪音负载字节/秒，支持 K/M，0 关闭，上限 10M；与代理 noise-* 参数独立。"},
+		{"vpn-noise-traffic", "true", "业务 IP 数据传输期间允许白噪音；拥塞或有待发送业务时优先业务。"},
+		{"vpn-noise-idle", "true", "VPN 已连接但无业务 IP 数据时允许白噪音；不要求存在业务连接。"},
+		{"vpn-noise-idle-after", "1s", "连续多久没有双向业务 IP 数据视为空闲；0 使用 1s。"},
 	}
 	if role == "server" {
 		return append(s,
@@ -53,8 +57,12 @@ func Settings(role string) []Setting {
 func RegisterFlags(fs *flag.FlagSet, role string) {
 	for _, s := range Settings(role) {
 		switch s.Key {
-		case "vpn-manage-network", "vpn-allow-private", "vpn-block-ipv6":
+		case "vpn-manage-network", "vpn-allow-private", "vpn-block-ipv6", "vpn-noise-traffic", "vpn-noise-idle":
 			fs.Bool(s.Key, s.Default == "true", s.Description)
+		case "vpn-noise-rate":
+			cli.ByteSizeVar(fs, new(int), s.Key, 0, s.Description)
+		case "vpn-noise-idle-after":
+			fs.Duration(s.Key, time.Second, s.Description)
 		case "vpn-mtu":
 			fs.Int(s.Key, 1280, s.Description)
 		case "vpn-max-clients":
@@ -109,8 +117,17 @@ func Prepare(role string, fs *flag.FlagSet) (*Prepared, error) {
 }
 func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Prefix, get func(string) string) (*Prepared, error) {
 	mtu := fs.Lookup("vpn-mtu").Value.(flag.Getter).Get().(int)
+	noiseRate, noiseErr := cli.ParseByteSize(get("vpn-noise-rate"))
+	if noiseErr != nil {
+		return nil, noiseErr
+	}
+	idleAfter, noiseErr := time.ParseDuration(get("vpn-noise-idle-after"))
+	if noiseErr != nil {
+		return nil, noiseErr
+	}
 	p.Config = Config{Key: key, Network: network, MTU: mtu, ClientIP: netip.MustParseAddr("10.77.0.2"), Address: "127.0.0.1:8444", MaxClients: 64}
 	p.Network = NetworkOptions{Server: p.Role == "server", Network: network, MTU: mtu, Egress: get("vpn-egress-interface"), BlockIPv6: get("vpn-block-ipv6") == "true", DNSService: get("vpn-dns-service")}
+	p.Config.Noise = NoiseConfig{Rate: noiseRate, Traffic: get("vpn-noise-traffic") == "true", Idle: get("vpn-noise-idle") == "true", IdleAfter: idleAfter}
 	p.Config.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
 	if p.Role == "server" {
 		certPath, keyPath := get("vpn-tls-cert"), get("vpn-tls-key")

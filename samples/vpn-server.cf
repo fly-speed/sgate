@@ -186,6 +186,14 @@ service vpn-server {
     vpn-manage-network = true
     # VPN shared key file; empty reuses key-file. VPN authentication is separate from proxy and Web accounts.
     vpn-key-file = ''
+    # Per authenticated VPN connection, local padding payload bytes/second; K/M supported, 0 disables, maximum 10M.
+    vpn-noise-rate = 0
+    # Allow padding during business IP traffic; queued business data and congestion take priority.
+    vpn-noise-traffic = true
+    # Allow padding on connected but idle VPN tunnels; no business connection is required.
+    vpn-noise-idle = true
+    # IP inactivity threshold; padding does not reset it. Zero uses 1s.
+    vpn-noise-idle-after = 1s
     # Separate QUIC UDP listener; cannot share a UDP port with quic-listen.
     vpn-listen = 0.0.0.0:8444
     # VPN server certificate PEM; empty reuses tls-cert.

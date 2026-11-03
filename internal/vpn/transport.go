@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -20,11 +21,15 @@ type networkSetupError struct{ err error }
 func (e *networkSetupError) Error() string { return "configure VPN network: " + e.err.Error() }
 
 type peer struct {
-	conn    *quic.Conn
-	control *quic.Stream
-	id      string
-	ip      netip.Addr
-	queue   chan []byte
+	conn         *quic.Conn
+	control      *quic.Stream
+	id           string
+	ip           netip.Addr
+	queue        chan []byte
+	padding      bool
+	flow         *datagramFlow
+	started      time.Time
+	lastBusiness atomic.Int64
 }
 
 func (p *peer) enqueue(packet []byte, stats *Stats) {
@@ -37,27 +42,67 @@ func (p *peer) enqueue(packet []byte, stats *Stats) {
 func (p *peer) run(ctx context.Context, c Config, receive func([]byte) error) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	p.started = time.Now()
+	if c.Noise.Rate > 0 && !p.padding {
+		c.Stats.noiseUnsupported.Add(1)
+		defer c.Stats.noiseUnsupported.Add(-1)
+	}
 	done := make(chan error, 3)
 	go func() {
 		var id uint64
+		var tick <-chan time.Time
+		if p.padding && c.Noise.Rate > 0 {
+			ticker := time.NewTicker(noiseTick)
+			defer ticker.Stop()
+			tick = ticker.C
+		}
+		pacer := noisePacer{last: time.Now()}
+		send := func(packet []byte) error {
+			id++
+			err := fragments(packet, id, p.sendDatagram)
+			if err != nil {
+				var tooLarge *quic.DatagramTooLargeError
+				if errors.As(err, &tooLarge) {
+					c.Stats.drops.Add(1)
+					return nil
+				}
+				return err
+			}
+			c.Stats.tx.Add(uint64(len(packet)))
+			p.businessActivity()
+			return nil
+		}
 		for {
+			// Process queued IP packets before considering optional padding.
+			select {
+			case <-ctx.Done():
+				done <- ctx.Err()
+				return
+			default:
+			}
+			select {
+			case packet := <-p.queue:
+				if err := send(packet); err != nil {
+					done <- err
+					return
+				}
+				continue
+			default:
+			}
 			select {
 			case <-ctx.Done():
 				done <- ctx.Err()
 				return
 			case packet := <-p.queue:
-				id++
-				err := fragments(packet, id, p.conn.SendDatagram)
-				if err != nil {
-					var tooLarge *quic.DatagramTooLargeError
-					if errors.As(err, &tooLarge) {
-						c.Stats.drops.Add(1)
-						continue
-					}
+				if err := send(packet); err != nil {
 					done <- err
 					return
 				}
-				c.Stats.tx.Add(uint64(len(packet)))
+			case <-tick:
+				if err := p.sendNoise(time.Now(), c, &pacer); err != nil {
+					done <- err
+					return
+				}
 			}
 		}
 	}()
@@ -69,6 +114,14 @@ func (p *peer) run(ctx context.Context, c Config, receive func([]byte) error) er
 				done <- err
 				return
 			}
+			if len(data) >= 2 && data[0] == 1 && data[1] == 1 {
+				if p.padding && len(data) > 2 && len(data) <= fragmentPayload+2 {
+					c.Stats.noiseRX.Add(uint64(len(data) - 2))
+				} else {
+					c.Stats.drops.Add(1)
+				}
+				continue
+			}
 			packet, err := r.push(data, c.MTU, time.Now())
 			if err != nil {
 				c.Stats.drops.Add(1)
@@ -77,6 +130,7 @@ func (p *peer) run(ctx context.Context, c Config, receive func([]byte) error) er
 			if packet == nil {
 				continue
 			}
+			p.businessActivity()
 			if err = receive(packet); err != nil {
 				done <- err
 				return
@@ -143,7 +197,7 @@ func ListenServer(config Config, dev Device) (*Server, error) {
 			return nil, errors.New("VPN connection limit")
 		}
 		context.AfterFunc(ctx, func() { admitted.Add(-1) })
-		return ctx, nil
+		return context.WithValue(ctx, flowContextKey{}, &datagramFlow{}), nil
 	}}
 	listener, err := tr.Listen(c.TLS, quicConfig(c.Stats))
 	if err != nil {
@@ -242,25 +296,55 @@ func (s *Server) accept(ctx context.Context, conn *quic.Conn) {
 	if err != nil {
 		return
 	}
+	challenge = paddingChallengePrefix + challenge
 	if writeJSON(control, challenge) != nil {
 		return
 	}
 	var h hello
-	if readJSON(control, &h) != nil || !hmac.Equal([]byte(h.Proof), []byte(proof(s.cfg.Key, challenge, h))) {
+	if readJSON(control, &h) != nil {
 		s.cfg.Stats.auth.Add(1)
+		if s.cfg.Logf != nil {
+			s.cfg.Logf("VPN authentication rejected: peer=%s reason=invalid-hello", conn.RemoteAddr())
+		}
+		conn.CloseWithError(authInvalidHelloCode, "invalid VPN authentication message")
+		return
+	}
+	if !hmac.Equal([]byte(h.Proof), []byte(proof(s.cfg.Key, challenge, h))) {
+		s.cfg.Stats.auth.Add(1)
+		if s.cfg.Logf != nil {
+			s.cfg.Logf("VPN authentication rejected: peer=%s probe=%t reason=shared-key-mismatch", conn.RemoteAddr(), h.Probe)
+		}
+		conn.CloseWithError(authKeyMismatchCode, "VPN shared key mismatch")
 		return
 	}
 	ip, err := netip.ParseAddr(h.IP)
-	if err != nil || !validClientIP(s.cfg.Network, ip) || h.Network != s.cfg.Network.String() || h.MTU != s.cfg.MTU || len(h.ID) != 64 || !conn.ConnectionState().SupportsDatagrams {
+	reason := ""
+	switch {
+	case h.Network != s.cfg.Network.String():
+		reason = "VPN network mismatch; expected vpn-network=" + s.cfg.Network.String()
+	case h.MTU != s.cfg.MTU:
+		reason = fmt.Sprintf("VPN MTU mismatch; expected vpn-mtu=%d", s.cfg.MTU)
+	case err != nil || !validClientIP(s.cfg.Network, ip):
+		reason = "invalid vpn-client-ip; choose an unused client host in " + s.cfg.Network.String()
+	case len(h.ID) != 64:
+		reason = "invalid VPN client identity"
+	case !conn.ConnectionState().SupportsDatagrams:
+		reason = "QUIC DATAGRAM was not negotiated"
+	}
+	if reason != "" {
 		s.cfg.Stats.auth.Add(1)
-		reject(control, "invalid VPN address, network, MTU or datagram capability")
+		if s.cfg.Logf != nil {
+			s.cfg.Logf("VPN authentication rejected: peer=%s probe=%t reason=%s", conn.RemoteAddr(), h.Probe, reason)
+		}
+		reject(control, reason)
 		return
 	}
 	if h.Probe {
 		s.serveProbe(authCtx, conn, control, challenge, h, ip)
 		return
 	}
-	p := &peer{conn: conn, control: control, id: h.ID, ip: ip, queue: make(chan []byte, queueSize)}
+	flow, _ := conn.Context().Value(flowContextKey{}).(*datagramFlow)
+	p := &peer{conn: conn, control: control, id: h.ID, ip: ip, queue: make(chan []byte, queueSize), padding: h.Padding, flow: flow}
 	s.mu.Lock()
 	old := s.peers[ip]
 	if (old != nil && old.id != h.ID) || (old == nil && len(s.peers) >= s.cfg.MaxClients) {
@@ -280,7 +364,7 @@ func (s *Server) accept(ctx context.Context, conn *quic.Conn) {
 		}
 		s.mu.Unlock()
 	}()
-	reply := welcome{IP: ip.String(), Gateway: s.cfg.Network.Addr().Next().String(), Network: s.cfg.Network.String(), MTU: s.cfg.MTU}
+	reply := welcome{Padding: h.Padding, IP: ip.String(), Gateway: s.cfg.Network.Addr().Next().String(), Network: s.cfg.Network.String(), MTU: s.cfg.MTU}
 	reply.Proof = welcomeProof(s.cfg.Key, challenge, h, reply)
 	if writeJSON(control, reply) != nil {
 		return
@@ -393,7 +477,8 @@ func RunClient(parent context.Context, config Config, dev Device) error {
 	}
 }
 func clientConnection(ctx context.Context, c Config, id string, active *atomic.Pointer[peer], dev Device, cleanup *func()) error {
-	conn, err := quic.DialAddr(ctx, c.Address, c.TLS, quicConfig(c.Stats))
+	flow := &datagramFlow{}
+	conn, err := quic.DialAddr(context.WithValue(ctx, flowContextKey{}, flow), c.Address, c.TLS, quicConfig(c.Stats))
 	if err != nil {
 		return err
 	}
@@ -416,7 +501,7 @@ func clientConnection(ctx context.Context, c Config, id string, active *atomic.P
 	if err = readJSON(control, &challenge); err != nil {
 		return err
 	}
-	h := hello{ID: id, IP: c.ClientIP.String(), Network: c.Network.String(), MTU: c.MTU}
+	h := hello{Padding: strings.HasPrefix(challenge, paddingChallengePrefix), ID: id, IP: c.ClientIP.String(), Network: c.Network.String(), MTU: c.MTU}
 	h.Proof = proof(c.Key, challenge, h)
 	if err = writeJSON(control, h); err != nil {
 		return err
@@ -435,7 +520,7 @@ func clientConnection(ctx context.Context, c Config, id string, active *atomic.P
 		return errors.New("invalid VPN server assignment")
 	}
 	control.SetDeadline(time.Time{})
-	p := &peer{conn: conn, control: control, id: id, ip: c.ClientIP, queue: make(chan []byte, queueSize)}
+	p := &peer{conn: conn, control: control, id: id, ip: c.ClientIP, queue: make(chan []byte, queueSize), padding: h.Padding && reply.Padding, flow: flow}
 	if c.Connected != nil && *cleanup == nil {
 		undo, err := c.Connected()
 		if err != nil {

@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -54,6 +55,12 @@ func TestVPNProbeRejectsBadKeyCertificateAndNetworkWithoutTUN(t *testing.T) {
 			result := Probe(context.Background(), c)
 			if result.OK || result.Stage != wantStage || result.Error == "" {
 				t.Fatal(result)
+			}
+			if kind == "key" && !strings.Contains(result.Detail, "共享密钥不匹配") {
+				t.Fatal("key mismatch not diagnosed", result)
+			}
+			if kind == "network" && !strings.Contains(result.Error, "expected vpn-mtu=1280") {
+				t.Fatal("MTU mismatch not diagnosed", result)
 			}
 			if len(remote.in) != 0 {
 				t.Fatal("unauthenticated test reached TUN")

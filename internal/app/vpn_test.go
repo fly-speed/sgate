@@ -159,3 +159,71 @@ func TestVPNServerBuildSupportsMacOSAndLinux(t *testing.T) {
 		t.Fatal("server not enabled on supported platform")
 	}
 }
+
+func TestVPNClientStartsStoppedAndApplyDoesNotStartTUN(t *testing.T) {
+	c := newController(t, "client", "listen = 127.0.0.1:0\nvpn-mode = only\nvpn-server = quic://127.0.0.1:8444/vpn\n")
+	check := func() {
+		t.Helper()
+		h := c.workerVPNStatus()
+		if c.worker.vpn != nil || h.State != "stopped" || !h.Enabled || !h.Healthy || h.Role != "client" || h.Mode != "only" {
+			t.Fatal(h)
+		}
+	}
+	check()
+	if err := c.apply(); err != nil {
+		t.Fatal(err)
+	}
+	check()
+	if err := c.controlVPN(false); err != nil {
+		t.Fatal(err)
+	}
+	check()
+}
+
+func TestVPNManualStopWaitsForWorkerCleanup(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	workerCtx, stop := context.WithCancel(ctx)
+	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	go func() { <-workerCtx.Done(); close(entered); <-release; close(done) }()
+	c := &controller{ctx: ctx, role: "client", worker: &instance{vpn: &vpnWorker{stats: &vpn.Stats{}, cancel: stop, done: done}}}
+	result := make(chan error, 1)
+	go func() { result <- c.controlVPN(false) }()
+	<-entered
+	select {
+	case <-result:
+		t.Fatal("stop returned before cleanup completed")
+	default:
+	}
+	close(release)
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+	if c.worker.vpn != nil {
+		t.Fatal("worker retained after stop")
+	}
+	if err := c.controlVPN(false); err != nil {
+		t.Fatal("stop must be idempotent", err)
+	}
+	if err := c.controlVPN(true); err == nil {
+		t.Fatal("disabled VPN started")
+	}
+}
+
+func TestVPNManualStartIsIdempotentAndRejectedDuringShutdown(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	v := &vpnWorker{stats: &vpn.Stats{}, health: vpnHealth{State: "connected"}}
+	c := &controller{ctx: ctx, role: "client", current: definition{vpn: &vpn.Prepared{}}, worker: &instance{vpn: v}}
+	if err := c.controlVPN(true); err != nil || c.worker.vpn != v {
+		t.Fatal("duplicate start replaced live worker", err)
+	}
+	cancel()
+	if err := c.controlVPN(true); err == nil {
+		t.Fatal("start accepted during shutdown")
+	}
+	c.role = "server"
+	if err := c.controlVPN(true); err == nil {
+		t.Fatal("server exposed manual controls")
+	}
+}

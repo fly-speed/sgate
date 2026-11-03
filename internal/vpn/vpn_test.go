@@ -92,13 +92,16 @@ func receivePacket(t *testing.T, d *memoryDevice, want []byte) {
 	}
 }
 func fixture(t *testing.T, maxClients int) (*Server, Config, *memoryDevice) {
+	return fixtureNoise(t, maxClients, NoiseConfig{})
+}
+func fixtureNoise(t *testing.T, maxClients int, noise NoiseConfig) (*Server, Config, *memoryDevice) {
 	t.Helper()
 	seed := httptest.NewTLSServer(nil)
 	defer seed.Close()
 	roots := x509.NewCertPool()
 	roots.AddCert(seed.Certificate())
 	dev := newMemoryDevice()
-	cfg := Config{Address: "127.0.0.1:0", TLS: seed.TLS, Key: bytes.Repeat([]byte{23}, 32), Network: netip.MustParsePrefix("10.77.0.0/24"), MTU: 1280, MaxClients: maxClients, Stats: &Stats{}}
+	cfg := Config{Noise: noise, Address: "127.0.0.1:0", TLS: seed.TLS, Key: bytes.Repeat([]byte{23}, 32), Network: netip.MustParsePrefix("10.77.0.0/24"), MTU: 1280, MaxClients: maxClients, Stats: &Stats{}}
 	server, err := ListenServer(cfg, dev)
 	if err != nil {
 		t.Fatal(err)

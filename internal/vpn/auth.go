@@ -11,7 +11,12 @@ import (
 	"io"
 )
 
+const probeChallengePrefix = "sgate-vpn-probe-v1:"
+const authKeyMismatchCode = 0x101
+const authInvalidHelloCode = 0x100
+
 type hello struct {
+	Padding bool   `json:"padding,omitempty"`
 	Probe   bool   `json:"probe,omitempty"`
 	ID      string `json:"id"`
 	IP      string `json:"ip"`
@@ -20,6 +25,7 @@ type hello struct {
 	Proof   string `json:"proof"`
 }
 type welcome struct {
+	Padding            bool   `json:"padding,omitempty"`
 	Probe              bool   `json:"probe,omitempty"`
 	AddressInUse       bool   `json:"address_in_use,omitempty"`
 	ClientLimitReached bool   `json:"client_limit_reached,omitempty"`
@@ -44,6 +50,9 @@ func proof(key []byte, challenge string, h hello) string {
 	parts := []any{Protocol, challenge, h.ID, h.IP, h.Network, h.MTU}
 	if h.Probe {
 		parts = append(parts, "probe-v1")
+	}
+	if h.Padding && !h.Probe {
+		parts = append(parts, "padding-v1")
 	}
 	b, _ := json.Marshal(parts)
 	m.Write(b)
@@ -93,6 +102,9 @@ func welcomeProof(key []byte, challenge string, h hello, w welcome) string {
 	parts := []any{Protocol, "server", challenge, h.ID, w.IP, w.Gateway, w.Network, w.MTU}
 	if h.Probe {
 		parts = append(parts, "probe-v1", w.Probe, w.AddressInUse, w.ClientLimitReached)
+	}
+	if h.Padding && !h.Probe {
+		parts = append(parts, "padding-v1", w.Padding)
 	}
 	b, _ := json.Marshal(parts)
 	m.Write(b)

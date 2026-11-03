@@ -33,7 +33,7 @@ func prepareVPNConfigEdits(current []byte, edits map[string]string, role string)
 	entries := []string{}
 	for _, s := range vpn.Settings(role) {
 		if _, ok := edits[s.Key]; ok && !known[s.Key] {
-			entries = append(entries, "    # "+s.Description, "    "+s.Key+" = "+strconv.Quote(s.Default))
+			entries = append(entries, "    # VPN configuration managed through the Web interface; see docs/vpn.md.", "    "+s.Key+" = "+strconv.Quote(s.Default))
 		}
 	}
 	if len(entries) == 0 {

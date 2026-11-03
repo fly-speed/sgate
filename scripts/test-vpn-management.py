@@ -82,6 +82,8 @@ def main():
                 csrf = status["csrf"]
                 view = call("config")
                 assert any(field["key"] == "vpn-dns" for field in view["fields"])
+                assert call("stats")["health"]["vpn"]["state"] == "stopped"
+                call("vpn-start", {})
                 eventually(lambda: call("stats")["health"]["vpn"]["state"] == "failed")
                 assert not (root / "must-not-be-created.json").exists()
                 pid = call("config")["runtime"]["pid"]
@@ -103,9 +105,14 @@ def main():
                 view = call("config")
                 before = call("stats")["health"]["vpn"]["generation"]
                 call("config", {"revision": view["revision"], "fields": {"vpn-mode": "only", "vpn-mtu": "1280"}, "apply": True}, "PUT")
+                assert call("stats")["health"]["vpn"]["state"] == "stopped"
+                call("vpn-start", {})
                 eventually(lambda: call("stats")["health"]["vpn"]["state"] == "failed")
                 assert call("stats")["health"]["vpn"]["generation"] != before
                 assert call("config")["runtime"]["pid"] == pid
+                call("vpn-stop", {})
+                assert call("stats")["health"]["vpn"]["state"] == "stopped"
+                call("vpn-stop", {})  # Idempotent; no worker or routing changes.
                 view = call("config")
                 content = config.read_text().replace("vpn-mode = only", "vpn-mode = disabled")
                 content = content.replace(f"proxies-file = {root}/must-not-be-created.json", "proxies-file = ''")
@@ -113,7 +120,7 @@ def main():
                 call("config", {"revision": view["revision"], "content": content, "apply": True}, "PUT")
                 assert call("stats")["health"]["vpn"]["state"] == "disabled"
                 assert call("config")["runtime"]["pid"] == pid
-                print("PASS: real client, authenticated VPN fields, invalid input, pending save, apply/retry, disable, failure visibility; no TUN created")
+                print("PASS: real client, authenticated VPN fields, invalid input, pending save, manual start/stop, stopped startup and apply, retry, disable, failure visibility; no TUN created")
             finally:
                 process.terminate()
                 try:

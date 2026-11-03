@@ -34,6 +34,7 @@ type Config struct {
 	MTU                int
 	MaxClients         int
 	AllowPrivate       bool
+	Noise              NoiseConfig
 	RetryMin, RetryMax time.Duration
 	// Called after authentication, once per client process. Cleanup runs on exit.
 	Connected func() (func(), error)
@@ -86,6 +87,12 @@ func (c Config) normalized(server bool) (Config, error) {
 	if c.RetryMin <= 0 || c.RetryMax < c.RetryMin {
 		return c, errors.New("invalid VPN retry interval")
 	}
+	if c.Noise.Rate < 0 || c.Noise.Rate > maxNoiseRate || c.Noise.IdleAfter < 0 {
+		return c, errors.New("invalid VPN noise rate (0..10M bytes/s) or idle threshold")
+	}
+	if c.Noise.IdleAfter == 0 {
+		c.Noise.IdleAfter = time.Second
+	}
 	if c.Stats == nil {
 		c.Stats = &Stats{}
 	}
@@ -111,9 +118,23 @@ func quicConfig(stats ...*Stats) *quic.Config {
 	config := &quic.Config{EnableDatagrams: true, InitialPacketSize: 1200, HandshakeIdleTimeout: 10 * time.Second, MaxIdleTimeout: 60 * time.Second, KeepAlivePeriod: 10 * time.Second, MaxIncomingStreams: 1, MaxIncomingUniStreams: -1, InitialStreamReceiveWindow: 8192, MaxStreamReceiveWindow: 8192, InitialConnectionReceiveWindow: 8192, MaxConnectionReceiveWindow: 8192}
 	if len(stats) > 0 && stats[0] != nil {
 		s := stats[0]
-		config.Tracer = func(context.Context, logging.Perspective, quic.ConnectionID) *logging.ConnectionTracer {
+		config.Tracer = func(ctx context.Context, _ logging.Perspective, _ quic.ConnectionID) *logging.ConnectionTracer {
+			flow, _ := ctx.Value(flowContextKey{}).(*datagramFlow)
 			return &logging.ConnectionTracer{
-				UpdatedMetrics: func(rtt *logging.RTTStats, _ logging.ByteCount, _ logging.ByteCount, _ int) {
+				SentShortHeaderPacket: func(_ *logging.ShortHeader, _ logging.ByteCount, _ logging.ECN, _ *logging.AckFrame, frames []logging.Frame) {
+					if flow != nil {
+						for _, frame := range frames {
+							if _, ok := frame.(*logging.DatagramFrame); ok {
+								flow.sent.Add(1)
+							}
+						}
+					}
+				},
+				UpdatedMetrics: func(rtt *logging.RTTStats, cwnd logging.ByteCount, inflight logging.ByteCount, _ int) {
+					if flow != nil {
+						flow.cwnd.Store(int64(cwnd))
+						flow.inflight.Store(int64(inflight))
+					}
 					s.rtt.Store(int64(rtt.SmoothedRTT()))
 				},
 				LostPacket: func(logging.EncryptionLevel, logging.PacketNumber, logging.PacketLossReason) { s.lost.Add(1) },
@@ -133,21 +154,27 @@ type Stats struct {
 	lost, pto                        atomic.Uint64
 	tx, rx, drops, auth, connections atomic.Uint64
 	active                           atomic.Int64
+	noiseTX, noiseRX, noiseSkipped   atomic.Uint64
+	noiseUnsupported                 atomic.Int64
 }
 type Snapshot struct {
-	RTT          float64 `json:"last_smoothed_rtt_ms"`
-	Lost         uint64  `json:"quic_lost_packets"`
-	PTO          uint64  `json:"quic_pto_events"`
-	TX           uint64  `json:"tx_ip_bytes"`
-	RX           uint64  `json:"rx_ip_bytes"`
-	Drops        uint64  `json:"dropped_packets"`
-	AuthRejected uint64  `json:"auth_rejected"`
-	Connections  uint64  `json:"connections_total"`
-	Active       int64   `json:"active_connections"`
+	NoiseTX          uint64  `json:"noise_tx_bytes"`
+	NoiseRX          uint64  `json:"noise_rx_bytes"`
+	NoiseSkipped     uint64  `json:"noise_skipped_ticks"`
+	NoiseUnsupported int64   `json:"noise_unsupported_connections"`
+	RTT              float64 `json:"last_smoothed_rtt_ms"`
+	Lost             uint64  `json:"quic_lost_packets"`
+	PTO              uint64  `json:"quic_pto_events"`
+	TX               uint64  `json:"tx_ip_bytes"`
+	RX               uint64  `json:"rx_ip_bytes"`
+	Drops            uint64  `json:"dropped_packets"`
+	AuthRejected     uint64  `json:"auth_rejected"`
+	Connections      uint64  `json:"connections_total"`
+	Active           int64   `json:"active_connections"`
 }
 
 func (s *Stats) Snapshot() Snapshot {
-	return Snapshot{RTT: float64(s.rtt.Load()) / 1e6, Lost: s.lost.Load(), PTO: s.pto.Load(), TX: s.tx.Load(), RX: s.rx.Load(), Drops: s.drops.Load(), AuthRejected: s.auth.Load(), Connections: s.connections.Load(), Active: s.active.Load()}
+	return Snapshot{NoiseTX: s.noiseTX.Load(), NoiseRX: s.noiseRX.Load(), NoiseSkipped: s.noiseSkipped.Load(), NoiseUnsupported: s.noiseUnsupported.Load(), RTT: float64(s.rtt.Load()) / 1e6, Lost: s.lost.Load(), PTO: s.pto.Load(), TX: s.tx.Load(), RX: s.rx.Load(), Drops: s.drops.Load(), AuthRejected: s.auth.Load(), Connections: s.connections.Load(), Active: s.active.Load()}
 }
 
 // ValidateConfig permits command entrypoints to reject unsafe input before TUN setup.

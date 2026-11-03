@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -12,18 +13,21 @@ import (
 )
 
 type vpnHealth struct {
-	Generation string       `json:"generation,omitempty"`
-	Enabled    bool         `json:"enabled"`
-	Healthy    bool         `json:"healthy"`
-	State      string       `json:"state"`
-	Role       string       `json:"role,omitempty"`
-	Mode       string       `json:"mode,omitempty"`
-	Device     string       `json:"device,omitempty"`
-	Address    string       `json:"address,omitempty"`
-	Network    string       `json:"network,omitempty"`
-	ClientIP   string       `json:"client_ip,omitempty"`
-	LastError  string       `json:"last_error,omitempty"`
-	Stats      vpn.Snapshot `json:"stats"`
+	Generation   string       `json:"generation,omitempty"`
+	Enabled      bool         `json:"enabled"`
+	Healthy      bool         `json:"healthy"`
+	State        string       `json:"state"`
+	Role         string       `json:"role,omitempty"`
+	Mode         string       `json:"mode,omitempty"`
+	Device       string       `json:"device,omitempty"`
+	Address      string       `json:"address,omitempty"`
+	Network      string       `json:"network,omitempty"`
+	ClientIP     string       `json:"client_ip,omitempty"`
+	LastError    string       `json:"last_error,omitempty"`
+	NoiseRate    int          `json:"noise_rate"`
+	NoiseTraffic bool         `json:"noise_traffic"`
+	NoiseIdle    bool         `json:"noise_idle"`
+	Stats        vpn.Snapshot `json:"stats"`
 }
 type vpnDevice interface {
 	vpn.Device
@@ -76,7 +80,7 @@ func (i *instance) startVPNWithDevice(ctx context.Context, p *vpn.Prepared, open
 		return
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	v := &vpnWorker{stats: &vpn.Stats{}, cancel: cancel, done: make(chan struct{}), health: vpnHealth{Generation: strconv.FormatInt(time.Now().UnixNano(), 10), Enabled: true, State: "starting", Role: p.Role, Mode: p.Mode, Network: p.Config.Network.String()}}
+	v := &vpnWorker{stats: &vpn.Stats{}, cancel: cancel, done: make(chan struct{}), health: vpnHealth{Generation: strconv.FormatInt(time.Now().UnixNano(), 10), Enabled: true, NoiseRate: p.Config.Noise.Rate, NoiseTraffic: p.Config.Noise.Traffic, NoiseIdle: p.Config.Noise.Idle, State: "starting", Role: p.Role, Mode: p.Mode, Network: p.Config.Network.String()}}
 	i.vpn = v
 	go func() {
 		defer close(v.done)
@@ -171,5 +175,46 @@ func (c *controller) workerVPNStatus() vpnHealth {
 	if c.worker == nil {
 		return (*vpnWorker)(nil).snapshot()
 	}
-	return c.worker.vpn.snapshot()
+	if c.worker.vpn == nil && c.current.vpn != nil && c.role == "client" {
+		p := c.current.vpn
+		return vpnHealth{Enabled: true, Healthy: true, State: "stopped", Role: "client", Mode: p.Mode, Network: p.Config.Network.String(), NoiseRate: p.Config.Noise.Rate, NoiseTraffic: p.Config.Noise.Traffic, NoiseIdle: p.Config.Noise.Idle}
+	}
+	h := c.worker.vpn.snapshot()
+	if c.role == "client" {
+		h.Role = "client"
+	}
+	return h
+}
+
+// controlVPN serializes network ownership with apply and process shutdown.
+// Starting always uses the applied configuration, never unsaved form values.
+func (c *controller) controlVPN(start bool) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.role != "client" {
+		return errors.New("仅客户端支持手动控制 VPN")
+	}
+	if c.ctx.Err() != nil || c.restartPending {
+		return errors.New("客户端正在退出或重启，无法操作 VPN")
+	}
+	if c.worker == nil {
+		return errors.New("客户端未运行")
+	}
+	if !start {
+		c.worker.vpn.stop() // Joins RunClient, including network cleanup and TUN close.
+		c.worker.vpn = nil
+		return nil
+	}
+	if c.current.vpn == nil {
+		return errors.New("请先将 vpn-mode 设置为 both 或 only，并保存及应用配置")
+	}
+	if v := c.worker.vpn; v != nil {
+		h := v.snapshot()
+		if h.State != "failed" && h.State != "stopped" {
+			return nil
+		}
+		v.stop()
+	}
+	c.worker.startVPN(c.ctx, c.current.vpn)
+	return nil
 }
