@@ -1023,3 +1023,8 @@ html[lang="en"] nav button span {
 #traffic-quic-legend { align-items: center; gap: 8px; }
 #traffic-quic-legend:not([hidden]) { display: inline-flex; }
 .legend { flex-wrap: wrap; }
+
+.vpn-test-button { margin-top: 10px; }
+.config-row .vpn-test-result { display: block; margin-top: 8px; overflow-wrap: anywhere; }
+.config-row .vpn-test-result[hidden] { display: none; }
+.vpn-test-result.bad { color: var(--red, #c53030); }

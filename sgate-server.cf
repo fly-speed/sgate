@@ -155,7 +155,7 @@ service sgate-server {
     admin_master_socket =
 
 # Independent IPv4 VPN (TUN + QUIC DATAGRAM): disabled by default; does not require OpenVPN.
-# Clients support macOS/Linux; the server requires Linux. Enabling VPN requires network administration privileges.
+# Both clients and servers support macOS/Linux. Enabling VPN requires network administration privileges.
 # Stop other full-tunnel VPNs before enabling. These settings can also be edited through Web management.
     # VPN mode: disabled turns VPN off; both runs proxy and VPN; only runs VPN while retaining framework and management listeners. Applying VPN changes interrupts VPN and restores/rebuilds its network configuration. Other VPN options are ignored while disabled and validated when enabled.
     vpn-mode = disabled
@@ -177,7 +177,7 @@ service sgate-server {
     vpn-tls-key = ''
     # Maximum simultaneous authenticated clients, from 1 to 254; each client needs a unique virtual IP.
     vpn-max-clients = 64
-    # Linux physical egress interface; empty detects it from the current route.
+    # macOS/Linux physical egress interface; empty detects it from the current route.
     vpn-egress-interface = ''
     # Allow access to private networks on the server side; inter-client traffic is always denied.
     vpn-allow-private = false

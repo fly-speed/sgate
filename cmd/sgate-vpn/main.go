@@ -80,8 +80,8 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	if o.role == "server" && runtime.GOOS != "linux" {
-		return errors.New("VPN server currently requires Linux; macOS is supported as a client")
+	if o.role == "server" && runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		return errors.New("VPN server currently requires macOS or Linux")
 	}
 	key, err := cli.LoadKey(o.keyFile)
 	if err != nil {

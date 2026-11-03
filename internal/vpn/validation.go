@@ -21,9 +21,9 @@ type Support struct {
 
 func PlatformSupport(role string) Support {
 	s := Support{Supported: true, OS: runtime.GOOS}
-	if role == "server" && runtime.GOOS != "linux" {
+	if role == "server" && runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		s.Supported = false
-		s.Reason = "独立 VPN 服务端仅支持 Linux，当前系统无法启用。"
+		s.Reason = "独立 VPN 服务端仅支持 macOS 和 Linux，当前系统无法启用。"
 	}
 	if role == "client" && runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		s.Supported = false

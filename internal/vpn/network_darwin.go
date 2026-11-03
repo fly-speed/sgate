@@ -13,7 +13,7 @@ import (
 func ApplyNetwork(o NetworkOptions) (cleanup func(), err error) { return applyNetwork(o, runCommand) }
 func applyNetwork(o NetworkOptions, run commandRunner) (cleanup func(), err error) {
 	if o.Server {
-		return nil, errors.New("VPN server network forwarding currently requires Linux")
+		return applyMacServerNetwork(o, run)
 	}
 	t := &networkTransaction{run: run, logf: o.Logf}
 	defer func() {

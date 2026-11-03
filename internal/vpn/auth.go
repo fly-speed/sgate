@@ -12,6 +12,7 @@ import (
 )
 
 type hello struct {
+	Probe   bool   `json:"probe,omitempty"`
 	ID      string `json:"id"`
 	IP      string `json:"ip"`
 	Network string `json:"network"`
@@ -19,12 +20,15 @@ type hello struct {
 	Proof   string `json:"proof"`
 }
 type welcome struct {
-	Proof   string `json:"proof,omitempty"`
-	IP      string `json:"ip"`
-	Gateway string `json:"gateway"`
-	Network string `json:"network"`
-	MTU     int    `json:"mtu"`
-	Error   string `json:"error,omitempty"`
+	Probe              bool   `json:"probe,omitempty"`
+	AddressInUse       bool   `json:"address_in_use,omitempty"`
+	ClientLimitReached bool   `json:"client_limit_reached,omitempty"`
+	Proof              string `json:"proof,omitempty"`
+	IP                 string `json:"ip"`
+	Gateway            string `json:"gateway"`
+	Network            string `json:"network"`
+	MTU                int    `json:"mtu"`
+	Error              string `json:"error,omitempty"`
 }
 
 func randomNonce() (string, error) {
@@ -37,7 +41,11 @@ func randomNonce() (string, error) {
 func proof(key []byte, challenge string, h hello) string {
 	m := hmac.New(sha256.New, key)
 	// Fixed order and JSON encoding avoid ambiguous concatenation.
-	b, _ := json.Marshal([]any{Protocol, challenge, h.ID, h.IP, h.Network, h.MTU})
+	parts := []any{Protocol, challenge, h.ID, h.IP, h.Network, h.MTU}
+	if h.Probe {
+		parts = append(parts, "probe-v1")
+	}
+	b, _ := json.Marshal(parts)
 	m.Write(b)
 	return hex.EncodeToString(m.Sum(nil))
 }
@@ -82,7 +90,11 @@ func readJSON(r io.Reader, v any) error {
 
 func welcomeProof(key []byte, challenge string, h hello, w welcome) string {
 	m := hmac.New(sha256.New, key)
-	b, _ := json.Marshal([]any{Protocol, "server", challenge, h.ID, w.IP, w.Gateway, w.Network, w.MTU})
+	parts := []any{Protocol, "server", challenge, h.ID, w.IP, w.Gateway, w.Network, w.MTU}
+	if h.Probe {
+		parts = append(parts, "probe-v1", w.Probe, w.AddressInUse, w.ClientLimitReached)
+	}
+	b, _ := json.Marshal(parts)
 	m.Write(b)
 	return hex.EncodeToString(m.Sum(nil))
 }

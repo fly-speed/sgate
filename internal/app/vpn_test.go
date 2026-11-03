@@ -7,6 +7,10 @@ import (
 	"net"
 	"net/http/httptest"
 	"net/netip"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -130,5 +134,28 @@ func TestVPNOnlySharedHTTPRejectsProxyAndNativeQUIC(t *testing.T) {
 	s.ServeHTTP(response, httptest.NewRequest("GET", "/tunnel", nil))
 	if response.Code != 404 || s.NativeQUICServer() != nil {
 		t.Fatal("VPN-only admitted proxy", response.Code)
+	}
+}
+
+func TestVPNServerBuildSupportsMacOSAndLinux(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("unsupported VPN platform")
+	}
+	key := filepath.Join(t.TempDir(), "vpn.key")
+	if e := os.WriteFile(key, []byte(strings.Repeat("01", 32)), 0600); e != nil {
+		t.Fatal(e)
+	}
+	cert, private := managedCertificate(t)
+	fs := appFlags("server")
+	fs.Set("key-file", key)
+	fs.Set("vpn-mode", "only")
+	fs.Set("vpn-tls-cert", cert)
+	fs.Set("vpn-tls-key", private)
+	d, e := build("server", fs, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if !d.vpnOnly || d.vpn == nil || d.vpn.Role != "server" || !d.vpn.Network.Server || !vpn.PlatformSupport("server").Supported {
+		t.Fatal("server not enabled on supported platform")
 	}
 }

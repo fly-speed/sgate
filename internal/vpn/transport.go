@@ -256,6 +256,10 @@ func (s *Server) accept(ctx context.Context, conn *quic.Conn) {
 		reject(control, "invalid VPN address, network, MTU or datagram capability")
 		return
 	}
+	if h.Probe {
+		s.serveProbe(authCtx, conn, control, challenge, h, ip)
+		return
+	}
 	p := &peer{conn: conn, control: control, id: h.ID, ip: ip, queue: make(chan []byte, queueSize)}
 	s.mu.Lock()
 	old := s.peers[ip]

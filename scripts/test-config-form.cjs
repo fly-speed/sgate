@@ -1908,3 +1908,55 @@ test("API retains structured configuration field errors", async () => {
   context.fetch=async()=>({ok:false,status:400,json:async()=>({error:"Cannot enable VPN",field_errors:{"vpn-mode":"Linux required"}})});
   await assert.rejects(vm.runInContext('api("config",{method:"PUT",body:"{}"})',context), error=>error.status===400&&error.fieldErrors["vpn-mode"]==="Linux required");
 });
+
+test("macOS server VPN mode is editable when backend advertises support", async () => {
+  const {context}=await page();
+  vm.runInContext(`renderConfigFields([{key:"vpn-mode",value:"disabled",group:"独立 VPN",validation:{type:"enum",choices:["disabled","both","only"]}}],{vpn_support:{supported:true,os:"darwin"}},"server");configInputs[0].input.value="both";configInputs[0].input.listeners.input()`,context);
+  assert.equal(vm.runInContext('validateConfigForm(null,false)',context),true);
+  assert.equal(vm.runInContext('configInputs[0].error.hidden',context),true);
+});
+
+async function vpnProbePage() {
+  const p=await page();
+  vm.runInContext(`renderConfigFields([
+    {key:"vpn-mode",value:"disabled",group:"独立 VPN",validation:{type:"enum",choices:["disabled","both","only"]}},
+    {key:"vpn-server",value:"quic://vpn.example.com:8444/vpn",group:"独立 VPN",validation:{type:"url"}},
+    {key:"vpn-client-ip",value:"10.77.0.2",group:"独立 VPN"}
+  ],{},"client");var vpnModeRow=configInputs.find(row=>row.key==="vpn-mode"),vpnServerRow=configInputs.find(row=>row.key==="vpn-server")`,p.context);
+  return p;
+}
+test("VPN connection button tests unsaved values and displays results without saving", async () => {
+  const {context}=await vpnProbePage();
+  assert.equal(vm.runInContext('vpnProbeState.button.disabled',context),true);
+  vm.runInContext('vpnModeRow.input.value="only";vpnModeRow.input.listeners.input();vpnServerRow.input.value="quic://draft.example.com:8444/vpn";vpnServerRow.input.listeners.input();revision="r1"',context);
+  let request;
+  context.api=async(path,options)=>{request={path,body:JSON.parse(options.body)};return {ok:true,stage:"datagram",elapsed_ms:4,detail:"echo verified",address_in_use:true}};
+  await vm.runInContext('testVPNConnection()',context);
+  assert.equal(request.path,"vpn-test");
+  assert.equal(request.body.fields["vpn-server"],"quic://draft.example.com:8444/vpn");
+  assert.equal(request.body.fields["vpn-mode"],"only");
+  assert.equal(vm.runInContext('revision',context),"r1");
+  assert.equal(vm.runInContext('vpnServerRow.dirty',context),true);
+  assert.match(vm.runInContext('vpnProbeState.result.textContent',context),/4 ms/);
+  assert.match(vm.runInContext('vpnProbeState.result.textContent',context),/echo verified/);
+  assert.equal(vm.runInContext('vpnProbeState.button.disabled',context),false);
+});
+test("VPN connection tests suppress stale responses and recover after failures", async () => {
+  const {context}=await vpnProbePage();
+  vm.runInContext('vpnModeRow.input.value="both";vpnModeRow.input.listeners.input()',context);
+  let finish;let calls=0;context.api=()=>{calls++;return new Promise(resolve=>finish=resolve)};
+  const pending=vm.runInContext('testVPNConnection()',context);
+  await vm.runInContext('testVPNConnection()',context);
+  assert.equal(calls,1);
+  assert.equal(vm.runInContext('vpnProbeState.button.disabled',context),true);
+  vm.runInContext('vpnServerRow.input.value="quic://changed.example.com:8444/vpn";vpnServerRow.input.listeners.input()',context);
+  finish({ok:true,stage:"datagram",elapsed_ms:1});await pending;
+  assert.equal(vm.runInContext('vpnProbeState.result.hidden',context),true);
+  assert.equal(vm.runInContext('vpnProbeState.button.disabled',context),false);
+  context.api=async()=>{throw new Error("certificate signed by unknown authority")};
+  await vm.runInContext('testVPNConnection()',context);
+  assert.match(vm.runInContext('vpnProbeState.result.textContent',context),/unknown authority/);
+  assert.equal(vm.runInContext('vpnProbeState.button.disabled',context),false);
+  vm.runInContext('renderConfigFields([{key:"vpn-mode",value:"both",group:"独立 VPN"}],{},"server")',context);
+  assert.equal(vm.runInContext('vpnProbeState',context),null);
+});

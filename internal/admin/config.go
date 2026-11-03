@@ -18,6 +18,7 @@ import (
 
 	"sgate/internal/cli"
 	"sgate/internal/tunnel"
+	"sgate/internal/vpn"
 )
 
 type Config struct {
@@ -119,6 +120,7 @@ type View struct {
 	ProxyListeners       func(path string) ([]string, error)
 	MappingCandidate     func(path, target, staged string) ([]string, error)
 	TestProxy            func(context.Context, ProxyMapping) (tunnel.ProbeResult, error)
+	TestVPN              func(context.Context, map[string]string) (vpn.ProbeResult, error)
 	ManageTunnelAccounts func(*TunnelAccountChange) (TunnelAccountsSnapshot, error)
 	Apply                func() error
 	ApplyLive            func([]string) error

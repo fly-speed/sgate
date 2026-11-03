@@ -16,6 +16,7 @@ let tunnelAccountsRevision = "", tunnelAccountRows = [], tunnelAccountsBusy = fa
 let tunnelAccountCreateMappings = null;
 let configRole = "";
 let vpnConfigSupport = null;
+let vpnProbeState = null;
 // Keep each role's expanded sections across saves and language changes.
 const configGroupOpen = new Map();
 let configInputs = [],
@@ -26,6 +27,7 @@ let configInputs = [],
 function renderConfigFields(fields, runtime, role) {
   configRole = role || state.role || "";
   vpnConfigSupport = runtime.vpn_support || null;
+  vpnProbeState = null;
   const vpnOnly = (runtime.cli_overrides || []).includes("vpn-mode") ? runtime.vpn_mode === "only" : fields.some((field) => field.key === "vpn-mode" && field.value === "only");
   if (role === "client" && !vpnOnly && !fields.some((field) => field.key === "proxies")) {
     fields = [...fields, { key: "proxies", kind: "proxies", mappings: [], group: t("代理与通道") }];
@@ -154,6 +156,7 @@ function renderConfigFields(fields, runtime, role) {
     };
     input.addEventListener("input", () => {
       entry.dirty = input.value !== entry.original;
+      if (entry.key.startsWith("vpn-") || ["key-file","tls-ca"].includes(entry.key)) invalidateVPNProbe();
       validateConfigForm(null, false);
       updateConfigSaveButton(entry, configSaving || serviceRestarting);
       localText($("pending-label"), () => Object.keys(configEdits()).length
@@ -163,6 +166,7 @@ function renderConfigFields(fields, runtime, role) {
     updateConfigSaveButton(entry);
     saveButton.addEventListener("click", () => saveConfigField(entry));
     configInputs.push(entry);
+    if (configRole === "client" && field.key === "vpn-mode") renderVPNProbe(editor,entry);
     row.append(label, editor, saveButton);
     group.append(row);
   }
@@ -825,6 +829,7 @@ function setConfigBusy(busy) {
     updateConfigSaveButton(entry, busy);
   }
   for (const id of ["save-config", "apply-config", "reload-config"]) $(id).disabled = busy;
+  updateVPNProbeButton();
 }
 
 function updateConfigSaveButton(entry, busy = false) {
@@ -888,6 +893,53 @@ async function saveConfigField(entry) {
     entry.saveButton.setAttribute("aria-busy", "false");
     setConfigBusy(serviceRestarting);
   }
+}
+function renderVPNProbe(editor,mode) {
+  const button=document.createElement("button");button.type="button";button.className="secondary vpn-test-button";button.id="vpn-test-button";
+  const result=document.createElement("small");result.className="vpn-test-result";result.hidden=true;result.setAttribute("role","status");result.setAttribute("aria-live","polite");
+  const help=document.createElement("small");help.className="muted";
+  localText(help,()=>t("使用当前表单测试 QUIC、证书、密钥认证及数据报回显；不保存配置、不修改系统网络，不验证完整网络转发。"));
+  vpnProbeState={button,result,mode,busy:false,version:0};
+  button.addEventListener("click",testVPNConnection);
+  editor.append(button,help,result);updateVPNProbeButton();
+}
+function updateVPNProbeButton() {
+  const p=vpnProbeState;if(!p)return;
+  p.button.disabled=p.busy||configSaving||serviceRestarting||!["both","only"].includes(p.mode.input.value);
+  localText(p.button,()=>p.busy?t("测试中…"):t("测试 VPN 连接"));
+}
+function invalidateVPNProbe() {
+  const p=vpnProbeState;if(!p)return;p.version++;p.result.hidden=true;updateVPNProbeButton();
+}
+async function testVPNConnection() {
+  const p=vpnProbeState;if(!p||p.busy||configSaving||serviceRestarting)return;
+  if(!["both","only"].includes(p.mode.input.value))return;
+  const fields={};const candidate=configCandidate();
+  for(const entry of configInputs){
+    if(!entry.input||!(entry.key.startsWith("vpn-")||["key-file","tls-ca"].includes(entry.key)))continue;
+    const error=configValueError(entry.key,entry.input.value,entry.rule,candidate);
+    setConfigError(entry.input,error,entry.error);
+    if(error){notice(()=>entry.key+t("：")+error,true);return;}
+    fields[entry.key]=entry.input.value;
+  }
+  const relation=configRelationErrors(candidate);
+  for(const [key,error] of relation){if(key.startsWith("vpn-")){notice(()=>key+t("：")+error,true);return;}}
+  const version=p.version;p.busy=true;p.result.hidden=false;p.result.classList.toggle("bad",false);updateVPNProbeButton();
+  localText(p.result,()=>t("正在测试 VPN 连接、认证和数据报回显…"));
+  try{
+    const result=await api("vpn-test",{method:"POST",body:JSON.stringify({fields})});
+    if(p!==vpnProbeState||p.version!==version)return;
+    const stages={config:"客户端配置",resolve:"地址解析",quic:"QUIC/TLS 连接",auth:"VPN 认证",datagram:"数据报回显"};
+    p.result.classList.toggle("bad",!result.ok);
+    localText(p.result,()=> (result.ok?t("VPN 测试成功"):t("VPN 测试失败"))+" · "+t(stages[result.stage]||result.stage)+
+      (result.detail?" · "+t(result.detail):"")+(result.error?" · "+t(result.error):"")+
+      (result.target?" · "+t("目标：")+result.target:"")+" · "+result.elapsed_ms+" ms"+
+      (result.address_in_use?" · "+t("虚拟 IP 已有在线连接；本次测试不会中断它。") : "")+
+      (result.client_limit_reached?" · "+t("服务端客户端数量已达上限，新连接可能被拒绝。") : ""));
+  }catch(error){
+    if(p!==vpnProbeState||p.version!==version)return;
+    p.result.classList.toggle("bad",true);localText(p.result,()=>t("VPN 测试失败")+" · "+errorText(error));
+  }finally{p.busy=false;if(p===vpnProbeState)updateVPNProbeButton();}
 }
 function showConfigSaveError(error, selected = null) {
   const errors = {...(error.fieldErrors || {})};
@@ -990,6 +1042,7 @@ async function refreshAuth() {
 }
 
 function renderSignedOut() {
+ vpnProbeState=null;
   tunnelAccountsLoad++;
   tunnelAccountsRevision = "";
   tunnelAccountRows = [];

@@ -38,7 +38,7 @@ func Settings(role string) []Setting {
 			Setting{"vpn-tls-cert", "", "VPN 服务器证书；留空复用 tls-cert。"},
 			Setting{"vpn-tls-key", "", "VPN 证书私钥；留空复用 tls-key。"},
 			Setting{"vpn-max-clients", "64", "最多同时认证客户端数，1～254；各客户端须配置不同虚拟 IP。"},
-			Setting{"vpn-egress-interface", "", "Linux 物理出口网卡；留空按当前路由识别。"},
+			Setting{"vpn-egress-interface", "", "macOS/Linux 物理出口网卡；留空按当前路由识别。"},
 			Setting{"vpn-allow-private", "false", "允许访问服务器侧私网；始终禁止客户端互访。"})
 	}
 	return append(s,
