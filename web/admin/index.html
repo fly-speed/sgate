@@ -66,9 +66,27 @@
         ><p class="eyebrow nav-label"><span data-i18n="管理工作台">管理工作台</span></p
         ><nav
           ><button data-tab="overview" class="selected">◉ <span><span data-i18n="实时概览">实时概览</span></span></button
-          ><button data-tab="configuration">☷ <span><span data-i18n="代理配置">代理配置</span></span></button
+          ><button id="server-config-nav" data-tab="configuration">☷ <span><span data-i18n="代理配置">代理配置</span></span></button
+          ><details id="client-proxy-nav" class="nav-group" hidden>
+            <summary data-i18n="代理配置">代理配置</summary>
+            <div class="nav-children">
+              <button data-tab="configuration" data-config-section="mappings" hidden><span data-i18n="代理映射">代理映射</span></button>
+              <button data-tab="configuration" data-config-section="connection" hidden><span data-i18n="代理连接">代理连接</span></button>
+              <button data-tab="configuration" data-config-section="performance" hidden><span data-i18n="代理性能">代理性能</span></button>
+              <button data-tab="configuration" data-config-section="noise" hidden><span data-i18n="代理白噪音">代理白噪音</span></button>
+            </div>
+          </details
+          ><details id="client-vpn-nav" class="nav-group" hidden>
+            <summary data-i18n="VPN 配置">VPN 配置</summary>
+            <div class="nav-children">
+              <button data-tab="configuration" data-config-section="vpn" hidden><span data-i18n="VPN 参数">VPN 参数</span></button>
+              <button data-tab="vpn-accounts"><span data-i18n="VPN 账号">VPN 账号</span></button>
+            </div>
+          </details
           ><button id="tunnel-accounts-nav" data-tab="tunnel-accounts" hidden>♧ <span data-i18n="客户端账号">客户端账号</span></button
-          ><button data-tab="vpn-accounts">♧ <span data-i18n="VPN 账号">VPN 账号</span></button
+          ><button id="server-vpn-accounts-nav" data-tab="vpn-accounts">♧ <span data-i18n="VPN 账号">VPN 账号</span></button
+          ><button data-tab="configuration" data-config-section="management" hidden>☷ <span data-i18n="Web 管理">Web 管理</span></button
+          ><button data-tab="configuration" data-config-section="framework" hidden>⚙ <span data-i18n="服务框架">服务框架</span></button
           ><button data-tab="account">◇ <span><span data-i18n="账号与会话">账号与会话</span></span></button></nav
         ><div class="aside-bottom"
           ><span class="pulse"></span><span id="side-role"><span data-i18n="代理管理">代理管理</span></span
@@ -173,7 +191,7 @@
         >
         <section id="configuration" class="tab" hidden
           ><div class="section-heading"
-            ><div><h2><span data-i18n="服务配置">服务配置</span></h2><p id="config-path" class="muted"></p></div
+            ><div><h2 id="config-heading" data-i18n="服务配置">服务配置</h2><p id="config-path" class="muted"></p></div
             ><button id="reload-config" class="secondary"><span data-i18n="重新加载">重新加载</span></button></div
           ><div class="config-note"
             ><b><span data-i18n="命令行参数优先">命令行参数优先</span></b
@@ -189,8 +207,8 @@
               ><span data-i18n="标注“保存后立即生效”的参数会同步保存并在线更新，无需重启；其他参数保存后需应用或重启。行内图标保存该项，旧文件备份为 .bak。应用非即时参数时会中断现有代理连接。">标注“保存后立即生效”的参数会同步保存并在线更新，无需重启；其他参数保存后需应用或重启。行内图标保存该项，旧文件备份为
               .bak。应用非即时参数时会中断现有代理连接。</span></p
             ><div
-              ><button id="save-config" class="secondary"><span data-i18n="保存配置">保存配置</span></button
-              ><button id="apply-config" class="primary"><span data-i18n="保存并应用 ↗">保存并应用 ↗</span></button
+              ><button id="save-config" class="secondary"><span id="save-config-label" data-i18n="保存配置">保存配置</span></button
+              ><button id="apply-config" class="primary"><span id="apply-config-label" data-i18n="保存并应用 ↗">保存并应用 ↗</span></button
               ><button id="restart-service" class="secondary" hidden
                 ><span data-i18n="通过 acl_master 重启服务 ↗">通过 acl_master 重启服务 ↗</span></button
               ></div

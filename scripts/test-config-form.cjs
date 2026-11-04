@@ -116,7 +116,7 @@ test("configuration sections retain independent collapse state for each role", a
   vm.runInContext('renderConfigFields(fields, {}, "client")', context);
   let groups = elements.get("config-fields").children;
   assert.equal(groups[0].className, "config-group");
-  assert.equal(groups[0].children[0].textContent, "代理与通道");
+  assert.equal(groups[0].children[0].textContent, "代理映射");
   assert.ok(groups.every(group => group.open === false));
   groups[0].open = true;
   groups[0].listeners.toggle();
@@ -2144,4 +2144,89 @@ test("server VPN account rows expose rename, disable and delete without revealin
   await new Promise(setImmediate);
   assert.deepEqual(calls[1],{action:"delete",username:"bob",revision:"v2"});
   assert.equal(elements.get("vpn-account-list").children.length,0);
+});
+
+test("client settings use feature navigation and retain drafts across sections", async () => {
+  const { context, elements } = await page();
+  const panel = Object.assign(context.document.getElementById("configuration"), {id:"configuration", hidden:true});
+  const entries = ["mappings","connection","performance","noise","vpn","management","framework"];
+  const proxyNav = context.document.getElementById("client-proxy-nav");
+  const vpnNav = context.document.getElementById("client-vpn-nav");
+  const nav = entries.map(configSection => ({
+    dataset:{tab:"configuration",configSection},
+    classList:{toggle(_,selected){this.selected=selected;}},
+    closest(selector) {
+      const group = configSection === "vpn" ? vpnNav : entries.indexOf(configSection) < 4 ? proxyNav : null;
+      if (selector === ".nav-group") return group;
+      return this.hidden || group?.hidden ? this : null;
+    },
+  }));
+  const original = context.document.querySelectorAll;
+  context.document.querySelectorAll = selector => {
+    if (selector === "[data-config-section]") return nav;
+    if (selector === "[data-tab]") return nav;
+    if (selector === ".tab") return [panel];
+    return original(selector);
+  };
+  context.featureFields = [
+    {key:"proxies",kind:"proxies",mappings:[],group:"代理与通道"},
+    {key:"server",value:"ws://localhost:8080/tunnel",group:"代理与通道"},
+    {key:"buffer-bytes",value:"4194304",group:"代理与通道",validation:{type:"integer",min:"0"}},
+    {key:"noise-interval",value:"0s",group:"代理与通道"},
+    {key:"vpn-mode",value:"disabled",group:"独立 VPN",validation:{choices:["disabled","only","both"]}},
+    {key:"vpn-server",value:"",group:"独立 VPN"},
+    {key:"admin_enabled",value:"true",group:"Web 管理"},
+    {key:"master_type",value:"sock",group:"服务框架"},
+  ];
+  vm.runInContext('renderConfigFields(featureFields, {vpn_restart_supported:true}, "client"); showAdminTab("configuration","connection")', context);
+  const shown = () => elements.get("config-fields").children.filter(group => !group.hidden).map(group => group.configSection);
+  assert.deepEqual(shown(),["mappings","connection"]);
+  assert.equal(elements.get("server-config-nav").hidden,true);
+  assert.equal(proxyNav.hidden,false);
+  assert.equal(proxyNav.open,true);
+  assert.equal(vpnNav.hidden,false);
+  assert.equal(elements.get("server-vpn-accounts-nav").hidden,true);
+  assert.ok(nav.every(button => !button.hidden));
+  const entry = key => vm.runInContext('configInputs.find(e => e.key === ' + JSON.stringify(key) + ')', context);
+  const mappings = entry("proxies");
+  mappings.controls[0].listeners.click();
+  const draftMapping = mappings.rows[0];
+  draftMapping.listen.value = "127.0.0.1:9001";
+  draftMapping.server.value = "ws://localhost:8080/tunnel";
+  draftMapping.listen.listeners.input();
+  vm.runInContext('showAdminTab("configuration","mappings")', context);
+  assert.deepEqual(shown(),["mappings"]);
+  assert.equal(entry("proxies").rows[0],draftMapping);
+  assert.equal(entry("proxies").rows[0].listen.value,"127.0.0.1:9001");
+  vm.runInContext('showAdminTab("configuration","connection")', context);
+  assert.deepEqual(shown(),["mappings","connection"]);
+  const server = entry("server").input;
+  server.value = "ws://localhost:9000/tunnel";
+  server.listeners.input();
+  vm.runInContext('showAdminTab("configuration","vpn")', context);
+  assert.deepEqual(shown(),["vpn"]);
+  assert.equal(elements.get("config-heading").textContent,"VPN 配置");
+  assert.equal(nav.find(button=>button.dataset.configSection==="vpn").classList.selected,true);
+  assert.equal(vpnNav.open,true);
+  assert.equal(vm.runInContext('vpnRestartButtons.length',context),1);
+  assert.ok(elements.get("vpn-test-button") || vm.runInContext('vpnProbeState.button',context));
+  vm.runInContext('showAdminTab("configuration","connection")', context);
+  assert.equal(entry("server").input,server);
+  assert.equal(vm.runInContext('configEdits().server', context),"ws://localhost:9000/tunnel");
+
+  const buffer = entry("buffer-bytes").input;
+  buffer.value = "bad";
+  assert.equal(vm.runInContext('validateConfigForm()',context),false);
+  assert.deepEqual(shown(),["performance"]);
+  assert.equal(buffer.focused,true);
+  vm.runInContext('showConfigSaveError({message:"invalid VPN",fieldErrors:{"vpn-mode":"invalid VPN"}})',context);
+  assert.deepEqual(shown(),["vpn"]);
+
+  vm.runInContext('renderConfigFields(featureFields, {}, "server")',context);
+  assert.equal(elements.get("server-config-nav").hidden,false);
+  assert.equal(elements.get("server-vpn-accounts-nav").hidden,false);
+  assert.equal(proxyNav.hidden,true);
+  assert.equal(vpnNav.hidden,true);
+  assert.ok(nav.every(button => button.hidden));
+  assert.ok(elements.get("config-fields").children.every(group => !group.hidden));
 });

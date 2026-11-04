@@ -15,6 +15,21 @@ let tunnelAccountsLoad = 0;
 let tunnelAccountsRevision = "", tunnelAccountRows = [], tunnelAccountsBusy = false, tunnelAccountsEnabled = false, tunnelAccountsCanCreate = false;
 let tunnelAccountCreateMappings = null;
 let configRole = "";
+let activeConfigSection = "";
+const clientConfigSections = {
+  mappings: "代理映射",
+  connection: "代理连接",
+  performance: "代理性能",
+  noise: "代理白噪音",
+  vpn: "VPN 配置",
+  management: "Web 管理",
+  framework: "服务框架",
+};
+const proxyPerformanceFields = new Set([
+  "reconnect-min", "reconnect-max", "offline-timeout", "max-streams", "buffer-bytes", "heartbeat", "heartbeat-timeout",
+  "quic-initial-packet-bytes", "quic-stream-window", "quic-connection-window", "quic-stream-buffer",
+  "quic-replay-bytes", "quic-receive-bytes", "memory-budget-bytes",
+]);
 let vpnConfigSupport = null;
 let vpnProbeState = null;
 let vpnAccountsView = null, vpnAccountsBusy = false;
@@ -25,6 +40,55 @@ let configInputs = [],
   configSaving = false,
   loggingOut = false;
 
+function clientConfigSection(field) {
+  if (field.key.startsWith("vpn-")) return "vpn";
+  if (field.kind === "proxies" || ["proxies", "proxies-file"].includes(field.key)) return "mappings";
+  if (field.group === "服务框架") return "framework";
+  if (field.group === "Web 管理") return "management";
+  if (field.key.startsWith("noise-")) return "noise";
+  if (proxyPerformanceFields.has(field.key)) return "performance";
+  return "connection";
+}
+
+function updateNavigationRole(role) {
+  const client = role === "client";
+  $("server-config-nav").hidden = client;
+  $("server-vpn-accounts-nav").hidden = client;
+  $("client-proxy-nav").hidden = !client;
+  $("client-vpn-nav").hidden = !client;
+}
+
+function updateConfigSections(open = false) {
+  const client = configRole === "client";
+  updateNavigationRole(configRole);
+  const groups = Array.from($("config-fields").children);
+  const sections = new Set(groups.map(group => group.configSection));
+  if (!sections.has(activeConfigSection)) {
+    activeConfigSection = Object.keys(clientConfigSections).find(section => sections.has(section)) || "";
+  }
+  for (const button of document.querySelectorAll("[data-config-section]")) {
+    const section = button.dataset.configSection;
+    button.hidden = !client || !sections.has(section);
+    const selected = !button.hidden && !$("configuration").hidden && section === activeConfigSection;
+    button.classList.toggle("selected", selected);
+    if (open && selected) {
+      const group = button.closest?.(".nav-group");
+      if (group) group.open = true;
+    }
+  }
+  for (const group of groups) {
+    const mappingsInConnection = activeConfigSection === "connection" && group.configSection === "mappings";
+    group.hidden = client && group.configSection !== activeConfigSection && !mappingsInConnection;
+    if (client && open && !group.hidden) group.open = true;
+  }
+  localText($("config-heading"), () => t((client && clientConfigSections[activeConfigSection]) || "服务配置"));
+  localText($("save-config-label"), () => t(client ? "保存全部修改" : "保存配置"));
+  localText($("apply-config-label"), () => t(client ? "保存全部修改并应用 ↗" : "保存并应用 ↗"));
+  if (client && !$("configuration").hidden) {
+    localText($("page-title"), () => t(clientConfigSections[activeConfigSection] || "服务配置"));
+  }
+}
+
 // 字段值由服务端解析；浏览器不解析或拼接 .cf，避免破坏引号、注释与密码。
 function renderConfigFields(fields, runtime, role) {
   configRole = role || state.role || "";
@@ -32,7 +96,7 @@ function renderConfigFields(fields, runtime, role) {
   vpnProbeState = null;
   const vpnOnly = (runtime.cli_overrides || []).includes("vpn-mode") ? runtime.vpn_mode === "only" : fields.some((field) => field.key === "vpn-mode" && field.value === "only");
   if (role === "client" && !vpnOnly && !fields.some((field) => field.key === "proxies")) {
-    fields = [...fields, { key: "proxies", kind: "proxies", mappings: [], group: t("代理与通道") }];
+    fields = [...fields, { key: "proxies", kind: "proxies", mappings: [], group: "代理与通道" }];
   }
   if (role === "client") {
     fields = [
@@ -47,15 +111,18 @@ function renderConfigFields(fields, runtime, role) {
   const groups = new Map();
   const overrides = new Set(runtime.cli_overrides || []);
   for (const field of fields) {
-    let group = groups.get(field.group);
+    const section = configRole === "client" ? clientConfigSection(field) : "";
+    const groupName = section && field.group === "代理与通道" ? clientConfigSections[section] : field.group;
+    const groupKey = configRole + ":" + section + ":" + groupName;
+    let group = groups.get(groupKey);
     if (!group) {
       group = document.createElement("details");
       group.className = "config-group";
-      const groupKey = configRole + ":" + field.group;
+      group.configSection = section;
       group.open = configGroupOpen.get(groupKey) ?? false;
       group.addEventListener("toggle", () => configGroupOpen.set(groupKey, group.open));
       const summary = document.createElement("summary");
-      localText(summary, () => t(field.group));
+      localText(summary, () => t(groupName));
       if(field.group==="独立 VPN" && runtime.vpn_restart_supported){
         const restart=document.createElement("button");restart.type="button";restart.className="secondary";
         localText(restart,()=>t("重启 VPN 使配置生效"));
@@ -66,10 +133,11 @@ function renderConfigFields(fields, runtime, role) {
       }
       group.append(summary);
       container.append(group);
-      groups.set(field.group, group);
+      groups.set(groupKey, group);
     }
     if (field.kind === "proxies") {
       renderProxyMappings(group, field, overrides.has("proxies") || overrides.has("proxies-file"));
+      configInputs.at(-1).section = section;
       continue;
     }
     const row = document.createElement("div");
@@ -165,6 +233,7 @@ function renderConfigFields(fields, runtime, role) {
       rule: field.validation || {},
       error,
       key: field.key,
+      section,
       input,
       saveButton,
       original: input.value,
@@ -187,6 +256,7 @@ function renderConfigFields(fields, runtime, role) {
     row.append(label, editor, saveButton);
     group.append(row);
   }
+  updateConfigSections();
 }
 
 // 使用服务端下发的规则，不把配置文件原文交给浏览器解析。
@@ -530,6 +600,7 @@ function validateConfigForm(single = null, report = true) {
   }
   if (first && report) {
     // Validation must reveal a collapsed section before focusing its control.
+    revealConfigSection(first.section || configInputs.find(entry => entry.key === first.key)?.section);
     const control = first.input || first.controls?.[0];
     const group = control?.closest?.("details.config-group");
     if (group) group.open = true;
@@ -1089,6 +1160,7 @@ function showConfigSaveError(error, selected = null) {
   const errors = {...(error.fieldErrors || {})};
   const mode = configInputs.find(row => row.key === "vpn-mode");
   if (!Object.keys(errors).length && (selected?.key === "vpn-mode" || mode?.dirty)) errors["vpn-mode"] = errorText(error);
+  revealConfigSection(configInputs.find(row => errors[row.key])?.section);
   for (const row of configInputs) {
     if (!row.input || !errors[row.key]) continue;
     setConfigError(row.input,t(errors[row.key]),row.error);
@@ -1165,6 +1237,7 @@ async function refreshAuth() {
     return;
   }
   $("tunnel-accounts-nav").hidden = state.role !== "server";
+  updateNavigationRole(state.role);
   localText($("role-title"), () => state.role === "server" ? "SERVER" : "CLIENT");
   localText($("side-role"), () => state.role === "server" ? t("服务端代理") : t("客户端代理"));
   localText($("user-label"), () => state.username);
@@ -1187,6 +1260,7 @@ async function refreshAuth() {
 
 function renderSignedOut() {
  vpnProbeState=null;
+  activeConfigSection = "";
   vpnAccountsView = null;
   vpnAccountsBusy = false;
   $("vpn-account-name").value = $("vpn-account-password").value = "";
@@ -1854,22 +1928,41 @@ $("login-form").addEventListener("submit", async (e) => {
   }
 });
 $("logout").addEventListener("click", logoutAdmin);
-document.querySelectorAll("[data-tab]").forEach((b) =>
-  b.addEventListener("click", () => {
-    document.querySelectorAll("[data-tab]").forEach((x) => x.classList.toggle("selected", x === b));
-    document.querySelectorAll(".tab").forEach((x) => (x.hidden = x.id !== b.dataset.tab));
-    localText($("page-title"), () => ({
-      overview: t("实时概览"),
-      configuration: t("代理配置"),
-      account: t("账号与会话"),
-      "tunnel-accounts":t("客户端账号"),
-      "vpn-accounts":t("VPN 账号"),
-    }[b.dataset.tab]));
-    if (b.dataset.tab === "tunnel-accounts") loadTunnelAccounts().catch((e) => notice(() => errorText(e), true));
-    if (b.dataset.tab === "vpn-accounts") runVPNAccountAction("load");
-    drawChart();
-  }),
-);
+function showAdminTab(tab, section = "") {
+  document.querySelectorAll("[data-tab]").forEach(button => {
+    const selected = !button.hidden && !button.closest?.("[hidden]") &&
+      button.dataset.tab === tab && (button.dataset.configSection || "") === section;
+    button.classList.toggle("selected", selected);
+    if (selected) {
+      const group = button.closest?.(".nav-group");
+      if (group) group.open = true;
+    }
+  });
+  document.querySelectorAll(".tab").forEach(panel => { panel.hidden = panel.id !== tab; });
+  localText($("page-title"), () => t({
+    overview: "实时概览",
+    configuration: clientConfigSections[section] || "代理配置",
+    account: "账号与会话",
+    "tunnel-accounts": "客户端账号",
+    "vpn-accounts": "VPN 账号",
+  }[tab]));
+  if (tab === "configuration" && configRole === "client") {
+    activeConfigSection = section;
+    updateConfigSections(true);
+  }
+}
+function revealConfigSection(section) {
+  if (configRole === "client" && section && (section !== activeConfigSection || $("configuration").hidden)) {
+    showAdminTab("configuration", section);
+  }
+}
+document.querySelectorAll("[data-tab]").forEach(button => button.addEventListener("click", () => {
+  const tab = button.dataset.tab;
+  showAdminTab(tab, button.dataset.configSection);
+  if (tab === "tunnel-accounts") loadTunnelAccounts().catch(e => notice(() => errorText(e), true));
+  if (tab === "vpn-accounts") runVPNAccountAction("load");
+  drawChart();
+}));
 $("reload-config").addEventListener("click", () =>
   loadConfig().catch((e) => notice(() => errorText(e), true)),
 );

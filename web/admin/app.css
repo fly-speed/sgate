@@ -235,6 +235,7 @@ input {
 }
 aside {
   width: 220px;
+  overflow-y: auto;
   position: fixed;
   top: 0;
   bottom: 0;
@@ -273,6 +274,26 @@ nav button.selected {
 }
 nav button:hover {
   background: #213942;
+}
+.nav-group > summary {
+  padding: 14px 16px;
+  border-radius: 8px;
+  color: #d0e1e5;
+  font-size: 13px;
+  cursor: pointer;
+}
+.nav-group > summary:hover {
+  background: #213942;
+}
+.nav-children {
+  display: grid;
+  gap: 4px;
+  margin: 2px 0 0 14px;
+  padding-left: 8px;
+  border-left: 1px solid #375057;
+}
+.nav-children button {
+  padding: 9px 12px;
 }
 .aside-bottom {
   margin-top: auto;
@@ -718,6 +739,8 @@ footer {
   }
   nav {
     display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
     gap: 5px;
   }
   nav button {
@@ -728,6 +751,13 @@ footer {
   }
   nav button span {
     font-size: 12px;
+  }
+  .nav-group {
+    flex: 1;
+  }
+  .nav-group > summary {
+    padding: 10px 12px;
+    white-space: nowrap;
   }
   #dashboard {
     display: block;
