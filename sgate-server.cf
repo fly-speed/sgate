@@ -168,11 +168,11 @@ service sgate-server {
     # Minimum gap between bulk raw UDP VPN packets; 0 disables, maximum 10ms. LIVE: applies to local sends.
     vpn-udp-send-interval = 0s
     # New TUN device name; empty uses sgate0 on Linux or automatically allocates utunN on macOS.
-    vpn-tun-name = ''
+    vpn-tun-name =
     # Automatically configure routes, DNS or server NAT; requires administrator privileges.
     vpn-manage-network = true
     # VPN shared key file; empty reuses key-file. VPN authentication is separate from proxy and Web accounts.
-    vpn-key-file = ''
+    vpn-key-file =
     # Per authenticated VPN connection, local padding payload bytes/second; K/M supported, 0 disables, maximum 10M. LIVE: Web saves apply without VPN reconnection.
     vpn-noise-rate = 0
     # Allow padding during business IP traffic; queued business data and congestion take priority. LIVE: Web saves apply without VPN reconnection.
@@ -188,21 +188,21 @@ service sgate-server {
     # TCP and UDP may use the same numeric port; other TCP services cannot share it.
     # Leave vpn-listen empty when only TCP/WSS or raw UDP is intended.
     # The listener reuses vpn-tls-cert/vpn-tls-key (or tls-cert/tls-key).
-    vpn-tcp-listen = ''
+    vpn-tcp-listen =
     # Linux TCP/WSS unsent-data low-water mark, 0 uses the system default.
     vpn-tcp-notsent-lowat = 0
     # Optional raw UDP VPN listener. Use a different UDP port from vpn-listen and quic-listen.
     # Uses the shared key for DTLS encryption/authentication; IP data has no tunnel ACK or retransmission.
-    vpn-udp-listen = ''
+    vpn-udp-listen =
 
     # VPN server certificate PEM; empty reuses tls-cert.
-    vpn-tls-cert = ''
+    vpn-tls-cert =
     # VPN certificate private key PEM; empty reuses tls-key.
-    vpn-tls-key = ''
+    vpn-tls-key =
     # Maximum simultaneous authenticated clients, from 1 to 254; each client needs a unique virtual IP. LIVE: new admissions only; existing clients remain connected.
     vpn-max-clients = 64
     # macOS/Linux physical egress interface; empty detects it from the current route.
-    vpn-egress-interface = ''
+    vpn-egress-interface =
     # Allow access to private networks on the server side; inter-client traffic is always denied. LIVE: applies to subsequent packets in both directions.
     vpn-allow-private = false
 
