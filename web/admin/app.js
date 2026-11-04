@@ -15,6 +15,7 @@ let tunnelAccountsLoad = 0;
 let tunnelAccountsRevision = "", tunnelAccountRows = [], tunnelAccountsBusy = false, tunnelAccountsEnabled = false, tunnelAccountsCanCreate = false;
 let tunnelAccountCreateMappings = null;
 let configRole = "";
+let proxyVPNModeOverride = false, appliedVPNMode = "";
 let activeConfigSection = "";
 const clientConfigSections = {
   mappings: "代理映射",
@@ -52,6 +53,7 @@ function clientConfigSection(field) {
 
 function updateNavigationRole(role) {
   const client = role === "client";
+  $("admin-nav").classList.toggle("client-nav", client);
   $("server-config-nav").hidden = client;
   $("server-vpn-accounts-nav").hidden = client;
   $("client-proxy-nav").hidden = !client;
@@ -79,7 +81,9 @@ function updateConfigSections(open = false) {
   for (const group of groups) {
     const mappingsInConnection = activeConfigSection === "connection" && group.configSection === "mappings";
     group.hidden = client && group.configSection !== activeConfigSection && !mappingsInConnection;
-    if (client && open && !group.hidden) group.open = true;
+    if (client && !group.hidden && (open || (group.configSection === "mappings" && $("configuration").hidden === false))) {
+      group.open = true;
+    }
   }
   localText($("config-heading"), () => t((client && clientConfigSections[activeConfigSection]) || "服务配置"));
   localText($("save-config-label"), () => t(client ? "保存全部修改" : "保存配置"));
@@ -92,10 +96,12 @@ function updateConfigSections(open = false) {
 // 字段值由服务端解析；浏览器不解析或拼接 .cf，避免破坏引号、注释与密码。
 function renderConfigFields(fields, runtime, role) {
   configRole = role || state.role || "";
+  proxyVPNModeOverride = (runtime.cli_overrides || []).includes("vpn-mode");
+  appliedVPNMode = runtime.vpn_mode || "";
   vpnConfigSupport = runtime.vpn_support || null;
   vpnProbeState = null;
   const vpnOnly = (runtime.cli_overrides || []).includes("vpn-mode") ? runtime.vpn_mode === "only" : fields.some((field) => field.key === "vpn-mode" && field.value === "only");
-  if (role === "client" && !vpnOnly && !fields.some((field) => field.key === "proxies")) {
+  if (configRole === "client" && !fields.some((field) => field.key === "proxies")) {
     fields = [...fields, { key: "proxies", kind: "proxies", mappings: [], group: "代理与通道" }];
   }
   if (role === "client") {
@@ -136,7 +142,7 @@ function renderConfigFields(fields, runtime, role) {
       groups.set(groupKey, group);
     }
     if (field.kind === "proxies") {
-      renderProxyMappings(group, field, overrides.has("proxies") || overrides.has("proxies-file"));
+      renderProxyMappings(group, field, overrides.has("proxies") || overrides.has("proxies-file"), configRole === "client" && vpnOnly);
       configInputs.at(-1).section = section;
       continue;
     }
@@ -242,6 +248,7 @@ function renderConfigFields(fields, runtime, role) {
     };
     input.addEventListener("input", () => {
       entry.dirty = input.value !== entry.original;
+      if (entry.key === "vpn-mode") updateProxyMappingMode();
       if (entry.key.startsWith("vpn-") || ["key-file","tls-ca"].includes(entry.key)) invalidateVPNProbe();
       validateConfigForm(null, false);
       updateConfigSaveButton(entry, configSaving || serviceRestarting);
@@ -257,6 +264,48 @@ function renderConfigFields(fields, runtime, role) {
     group.append(row);
   }
   updateConfigSections();
+  updateProxyMappingMode();
+}
+
+function proxyMappingLockReason() {
+  if (configRole !== "client") return "";
+  const mode = configInputs.find(entry => entry.key === "vpn-mode");
+  if (proxyVPNModeOverride) {
+    return appliedVPNMode === "only" ? "命令行已指定仅 VPN 模式，代理映射为只读。" : "";
+  }
+  if (mode?.input.value === "only" && mode.dirty) {
+    return "已选择仅 VPN 模式，代理映射暂为只读。恢复启用代理的模式可继续编辑。";
+  }
+  if (mode?.original === "only" || appliedVPNMode === "only") {
+    if (mode?.dirty && mode.input.value !== "only") {
+      return "已选择启用代理的模式。请保存并应用模式变更后再编辑代理映射。";
+    }
+    return "当前为仅 VPN 模式。以下是已保存的代理映射；应用代理模式或代理与 VPN 共存模式后可编辑。";
+  }
+  return "";
+}
+
+function updateProxyMappingMode(busy = configSaving || serviceRestarting) {
+  const reason = proxyMappingLockReason();
+  for (const entry of configInputs) {
+    if (!["proxies", "proxies-file"].includes(entry.key)) continue;
+    if (entry.kind === "proxies") {
+      if (reason && !entry.readOnly) {
+        for (const row of entry.rows) {
+          row.testVersion = (row.testVersion || 0) + 1;
+          row.result.hidden = true;
+        }
+      }
+      entry.readOnly = !!reason;
+      entry.controls.forEach(control => { control.disabled = busy || entry.readOnly; });
+      entry.rows.forEach(row => { if (row.testing) row.testButton.disabled = true; });
+      entry.updateModeHelp(reason);
+    } else {
+      entry.readOnly = !!reason;
+      entry.input.disabled = busy || entry.readOnly;
+    }
+    updateConfigSaveButton(entry, busy);
+  }
 }
 
 // 使用服务端下发的规则，不把配置文件原文交给浏览器解析。
@@ -544,6 +593,7 @@ function validateConfigForm(single = null, report = true) {
   const candidate = configCandidate(single);
   let first = null;
   for (const entry of selected) {
+    if (entry.readOnly) continue;
     if (entry.kind === "proxies") {
       const ports = new Set();
       for (const row of entry.rows)
@@ -622,7 +672,7 @@ function configPayload(edits, apply) {
   return result;
 }
 
-function renderProxyMappings(group, field, overridden) {
+function renderProxyMappings(group, field, overridden, readOnly = false) {
   const section = document.createElement("div");
   section.className = "proxy-editor";
   const header = document.createElement("div");
@@ -631,7 +681,10 @@ function renderProxyMappings(group, field, overridden) {
   localText(title, () => t("多端口代理映射"));
   const help = document.createElement("p");
   help.className = "muted";
-  localText(help, () => (t("每行将一个本地端口映射到远程服务。后端地址可选，须在服务端允许列表内；没有映射时使用下面的单代理配置。") +
+  help.setAttribute("aria-live", "polite");
+  const updateHelp = reason => localText(help, () => reason
+    ? t(reason) + (field.description ? " " + t(field.description) : "")
+    : (t("每行将一个本地端口映射到远程服务。后端地址可选，须在服务端允许列表内；没有映射时使用下面的单代理配置。") +
     (overridden ? t(" 当前映射来源受命令行覆盖，保存配置不会移除启动时的覆盖参数。") : "") +
     " " + t("每个映射可使用独立账号密码；关闭独立认证则继承公共凭据。测试使用本行认证和地址，密钥、TLS 和 send-addr 沿用生效设置。密码不会回显，留空保留已保存密码。") +
     " " + t("配置 proxies-file 后映射保存在独立 JSON 文件；留空继续使用内联 proxies。更改文件路径时自动迁移当前映射，已有文件则加载其映射。") +
@@ -644,16 +697,23 @@ function renderProxyMappings(group, field, overridden) {
   localAttr(saveButton, "aria-label", () => t("保存代理映射"));
   const list = document.createElement("div");
   const add = document.createElement("button");
+  const badge = document.createElement("span");
   add.type = "button";
   add.className = "secondary";
   localText(add, () => t("＋ 添加映射"));
   const entry = {
     key: "proxies",
     kind: "proxies",
+    readOnly,
     saveButton,
     rows: [],
     controls: [],
     dirty: false,
+  };
+  entry.updateModeHelp = reason => {
+    updateHelp(reason);
+    badge.hidden = !!reason;
+    if (entry.empty) localText(entry.empty, () => t(reason ? "没有可显示的代理映射。" : "尚未添加映射，当前使用单代理配置。"));
   };
   entry.read = () =>
     entry.rows.map((row) => ({
@@ -678,10 +738,12 @@ function renderProxyMappings(group, field, overridden) {
     list.replaceChildren();
     entry.rows = [];
     entry.controls = [add];
+    entry.empty = null;
     if (!values.length) {
       const empty = document.createElement("p");
       empty.className = "muted";
-      localText(empty, () => t("尚未添加映射，当前使用单代理配置。"));
+      entry.empty = empty;
+      localText(empty, () => t(entry.readOnly ? "没有可显示的代理映射。" : "尚未添加映射，当前使用单代理配置。"));
       list.append(empty);
     }
     for (const value of values) {
@@ -787,6 +849,7 @@ function renderProxyMappings(group, field, overridden) {
       localText(remove, () => t("删除"));
       localAttr(remove, "aria-label", () => t("删除本地端口 ") + (value.listen || t("未填写")) + t(" 的映射"));
       remove.addEventListener("click", () => {
+        if (entry.readOnly) return;
         const values = entry.read();
         values.splice(entry.rows.indexOf(controls), 1);
         draw(values);
@@ -803,7 +866,7 @@ function renderProxyMappings(group, field, overridden) {
       controls.result.setAttribute("role", "status");
       controls.result.setAttribute("aria-live", "polite");
       controls.result.hidden = true;
-      test.addEventListener("click", () => testProxyMapping(controls));
+      test.addEventListener("click", () => testProxyMapping(controls, entry));
       const actions = document.createElement("div");
       actions.className = "proxy-actions";
       actions.append(test, remove);
@@ -812,6 +875,7 @@ function renderProxyMappings(group, field, overridden) {
       row.append(actions, controls.result);
       list.append(row);
     }
+    if (entry.readOnly) entry.controls.forEach(control => { control.disabled = true; });
   };
   entry.replaceMappings = (mappings) => { draw(mappings); entry.original=JSON.stringify(entry.read());entry.dirty=false; };
   entry.saved = () => {
@@ -825,6 +889,7 @@ function renderProxyMappings(group, field, overridden) {
   draw(field.mappings || []);
   entry.original = JSON.stringify(entry.read());
   add.addEventListener("click", () => {
+    if (entry.readOnly) return;
     draw([...entry.read(), { listen: "", server: "", addr: "" }]);
     changed();
   });
@@ -832,7 +897,6 @@ function renderProxyMappings(group, field, overridden) {
   updateConfigSaveButton(entry);
   configInputs.push(entry);
   if (field.validation?.live) {
-    const badge = document.createElement("span");
     badge.className = "config-live";
     localText(badge, () => t("支持在线修改"));
     header.append(title, badge, saveButton);
@@ -851,8 +915,8 @@ function mappingCredentialError(row) {
 
 // Keep testing separate from saving: unrelated drafts and mapping overrides
 // must not be submitted, persisted, or silently substituted into the probe.
-async function testProxyMapping(row) {
-  if (row.testing || configSaving || serviceRestarting) return;
+async function testProxyMapping(row, entry) {
+  if (row.testing || configSaving || serviceRestarting || entry?.readOnly) return;
   try {
     if (!configAddress(row.listen.value, true)) throw new Error(t("映射监听端口须为 1～65535，且不能重复"));
     configURL(row.server.value, !row.addr.value);
@@ -899,7 +963,7 @@ async function testProxyMapping(row) {
     localText(row.result, () => t("测试失败：") + errorText(error));
   } finally {
     row.testing = false;
-    row.testButton.disabled = configSaving || serviceRestarting;
+    row.testButton.disabled = configSaving || serviceRestarting || !!entry?.readOnly;
     localText(row.testButton, () => t("测试"));
   }
 }
@@ -919,25 +983,27 @@ function configEdits() {
 function setConfigBusy(busy) {
   vpnRestartButtons.forEach(button=>button.disabled=busy);
   for (const entry of configInputs) {
-    if (entry.kind === "proxies") {
-      entry.controls.forEach((control) => (control.disabled = busy));
-      entry.rows.forEach((row) => { if (row.testing) row.testButton.disabled = true; });
-    }
-    else entry.input.disabled = busy;
+    if (["proxies", "proxies-file"].includes(entry.key)) continue;
+    entry.input.disabled = busy;
     updateConfigSaveButton(entry, busy);
   }
+  updateProxyMappingMode(busy);
   for (const id of ["save-config", "apply-config", "reload-config"]) $(id).disabled = busy;
   updateVPNProbeButton();
 }
 
 function updateConfigSaveButton(entry, busy = false) {
-  entry.saveButton.disabled = busy || !entry.dirty;
+  entry.saveButton.disabled = busy || !!entry.readOnly || !entry.dirty;
   localAttr(entry.saveButton, "title", () => entry.dirty ? t("保存此项") : t("未修改"));
 }
 
 // 单项存盘不重新加载表单，其他行尚未保存的编辑与密码输入继续保留。
 async function saveConfigField(entry) {
-  if (configSaving || serviceRestarting) return;
+  if (configSaving || serviceRestarting || entry.readOnly) return;
+  if (entry.key === "vpn-mode" && configInputs.some(item => item.readOnly && item.dirty)) {
+    notice(() => t("代理映射仍有未保存的修改。请恢复启用代理的模式并先保存映射。"), true);
+    return;
+  }
   if (!validateConfigForm(entry)) return;
   if (
     entry.kind === "proxies"
@@ -1361,6 +1427,10 @@ async function loadConfig() {
   renderRuntime(data.runtime || {});
 }
 function renderRuntime(rt) {
+  if (typeof rt.vpn_mode === "string" && rt.vpn_mode !== appliedVPNMode) {
+    appliedVPNMode = rt.vpn_mode;
+    updateProxyMappingMode();
+  }
   renderVPNControls(rt.vpn);
   if (Array.isArray(rt.websocket_listeners)) {
     serverTunnelListeners = rt.websocket_listeners;
@@ -2001,6 +2071,10 @@ async function restartSavedVPN(){
 }
 async function saveConfig(apply) {
   if (serviceRestarting || configSaving) return;
+  if (configInputs.some(entry => entry.readOnly && entry.dirty)) {
+    notice(() => t("代理映射仍有未保存的修改。请恢复启用代理的模式并先保存映射。"), true);
+    return;
+  }
   if (!validateConfigForm()) return;
   if (!$("config-form").reportValidity()) return;
   const fields = configEdits();

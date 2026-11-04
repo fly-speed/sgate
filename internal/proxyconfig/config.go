@@ -76,12 +76,20 @@ func Path(config, path string) string {
 }
 
 func Read(path string) ([]byte, error) {
+	// Reject FIFOs before opening so an unused mapping file cannot stall the UI.
+	st, err := os.Stat(path)
+	if err != nil {
+		return nil, errors.New("cannot open proxy mapping file; check path and permissions")
+	}
+	if !st.Mode().IsRegular() || st.Size() > MaxBytes {
+		return nil, errors.New("proxy mapping file must be a regular file of at most 1 MiB")
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, errors.New("cannot open proxy mapping file; check path and permissions")
 	}
 	defer f.Close()
-	st, err := f.Stat()
+	st, err = f.Stat()
 	if err != nil || !st.Mode().IsRegular() || st.Size() > MaxBytes {
 		return nil, errors.New("proxy mapping file must be a regular file of at most 1 MiB")
 	}

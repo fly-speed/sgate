@@ -64,11 +64,11 @@
       ><aside
         ><div class="brand"><span class="mark">s</span> sgate</div
         ><p class="eyebrow nav-label"><span data-i18n="管理工作台">管理工作台</span></p
-        ><nav
-          ><button data-tab="overview" class="selected">◉ <span><span data-i18n="实时概览">实时概览</span></span></button
+        ><nav id="admin-nav"
+          ><button data-tab="overview" class="selected"><span class="nav-icon" aria-hidden="true">◉</span><span data-i18n="实时概览">实时概览</span></button
           ><button id="server-config-nav" data-tab="configuration">☷ <span><span data-i18n="代理配置">代理配置</span></span></button
           ><details id="client-proxy-nav" class="nav-group" hidden>
-            <summary data-i18n="代理配置">代理配置</summary>
+            <summary><span class="nav-icon" aria-hidden="true">☷</span><span data-i18n="代理配置">代理配置</span></summary>
             <div class="nav-children">
               <button data-tab="configuration" data-config-section="mappings" hidden><span data-i18n="代理映射">代理映射</span></button>
               <button data-tab="configuration" data-config-section="connection" hidden><span data-i18n="代理连接">代理连接</span></button>
@@ -77,7 +77,7 @@
             </div>
           </details
           ><details id="client-vpn-nav" class="nav-group" hidden>
-            <summary data-i18n="VPN 配置">VPN 配置</summary>
+            <summary><span class="nav-icon" aria-hidden="true">◇</span><span data-i18n="VPN 配置">VPN 配置</span></summary>
             <div class="nav-children">
               <button data-tab="configuration" data-config-section="vpn" hidden><span data-i18n="VPN 参数">VPN 参数</span></button>
               <button data-tab="vpn-accounts"><span data-i18n="VPN 账号">VPN 账号</span></button>
@@ -85,9 +85,9 @@
           </details
           ><button id="tunnel-accounts-nav" data-tab="tunnel-accounts" hidden>♧ <span data-i18n="客户端账号">客户端账号</span></button
           ><button id="server-vpn-accounts-nav" data-tab="vpn-accounts">♧ <span data-i18n="VPN 账号">VPN 账号</span></button
-          ><button data-tab="configuration" data-config-section="management" hidden>☷ <span data-i18n="Web 管理">Web 管理</span></button
-          ><button data-tab="configuration" data-config-section="framework" hidden>⚙ <span data-i18n="服务框架">服务框架</span></button
-          ><button data-tab="account">◇ <span><span data-i18n="账号与会话">账号与会话</span></span></button></nav
+          ><button data-tab="configuration" data-config-section="management" hidden><span class="nav-icon" aria-hidden="true">☷</span><span data-i18n="Web 管理">Web 管理</span></button
+          ><button data-tab="configuration" data-config-section="framework" hidden><span class="nav-icon" aria-hidden="true">⚙</span><span data-i18n="服务框架">服务框架</span></button
+          ><button data-tab="account"><span class="nav-icon" aria-hidden="true">◇</span><span data-i18n="账号与会话">账号与会话</span></button></nav
         ><div class="aside-bottom"
           ><span class="pulse"></span><span id="side-role"><span data-i18n="代理管理">代理管理</span></span
           ><small><span data-i18n="独立管理服务">独立管理服务</span></small></div

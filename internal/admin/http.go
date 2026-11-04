@@ -605,6 +605,14 @@ func (h *Handler) getConfig(w http.ResponseWriter) {
 
 	if h.view.Role == "client" && h.vpnOnly(b) {
 		fields = slices.DeleteFunc(fields, func(f configField) bool { return f.Key == "proxies" || f.Key == "proxies-file" })
+		mappings, _, _, err := h.configuredMappingSnapshot(b)
+		field := configField{Key: "proxies", Kind: "proxies", Group: "代理与通道"}
+		if err == nil {
+			field.Mappings = maskedMappings(mappings)
+		} else {
+			field.Description = "无法读取已保存的代理映射，请检查映射文件。"
+		}
+		fields = append(fields, field)
 	}
 	v := map[string]any{
 		"fields":               fields,

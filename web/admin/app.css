@@ -285,6 +285,34 @@ nav button:hover {
 .nav-group > summary:hover {
   background: #213942;
 }
+.client-nav > button,
+.client-nav > .nav-group > summary {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 8px;
+  align-items: center;
+  column-gap: 10px;
+  min-height: 46px;
+  padding: 10px 16px;
+  line-height: 20px;
+}
+.client-nav .nav-icon {
+  text-align: center;
+  font-size: 15px;
+}
+.client-nav summary::-webkit-details-marker {
+  display: none;
+}
+.client-nav .nav-group > summary::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border: solid currentColor;
+  border-width: 0 1px 1px 0;
+  transform: rotate(-45deg);
+}
+.client-nav .nav-group[open] > summary::after {
+  transform: rotate(45deg);
+}
 .nav-children {
   display: grid;
   gap: 4px;
@@ -758,6 +786,11 @@ footer {
   .nav-group > summary {
     padding: 10px 12px;
     white-space: nowrap;
+  }
+  .client-nav > button,
+  .client-nav > .nav-group > summary {
+    padding-inline: 12px;
+    font-size: 12px;
   }
   #dashboard {
     display: block;

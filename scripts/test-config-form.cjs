@@ -1855,13 +1855,25 @@ test("VPN status and IP bandwidth use independent counters and survive a VPN res
   assert.equal(vm.runInContext('trafficRates({time_ms:2000,tx_bytes:0,rx_bytes:0,health:{vpn:{stats:{tx_ip_bytes:0}}}},{time_ms:1000,tx_bytes:0,rx_bytes:0,health:{vpn:{stats:{tx_ip_bytes:100}}}}).vpnTX',context), null);
 });
 
-test("VPN-only configuration hides proxy creation and respects mode CLI overrides", async () => {
+test("VPN-only configuration displays saved mappings read-only and respects CLI overrides", async () => {
   const {context} = await page();
   vm.runInContext('fields=[{key:"vpn-mode",value:"only",group:"独立 VPN",validation:{type:"enum",choices:["disabled","both","only"]}}]; renderConfigFields(fields,{},"client")', context);
-  assert.equal(vm.runInContext('configInputs.some(row=>row.field?.key==="proxies")',context),false);
-  assert.equal(vm.runInContext('configInputs.length',context),1);
+  assert.equal(vm.runInContext('configInputs.find(row=>row.key==="proxies").controls[0].disabled',context),true);
   vm.runInContext('renderConfigFields([{key:"vpn-mode",value:"disabled",group:"独立 VPN"}],{cli_overrides:["vpn-mode"],vpn_mode:"only"},"client")',context);
-  assert.equal(vm.runInContext('configInputs.length',context),1);
+  assert.equal(vm.runInContext('configInputs.find(row=>row.key==="proxies").readOnly',context),true);
+  vm.runInContext(`renderConfigFields([
+    {key:"vpn-mode",value:"only",group:"独立 VPN"},
+    {key:"proxies",kind:"proxies",group:"代理与通道",mappings:[
+      {listen:"127.0.0.1:2900",server:"quic://example.com:1080/tunnel",addr:"127.0.0.1:2900",username:"test",password:"__SGATE_KEEP_EXISTING_PASSWORD__",allow_reverse:true},
+      {listen:"127.0.0.1:9000",server:"wss://127.0.0.1:8081/tunnel"}
+    ]}
+  ],{},"client"); setConfigBusy(false)`,context);
+  const mappings = vm.runInContext('configInputs.find(row=>row.key==="proxies")',context);
+  assert.equal(mappings.rows.length,2);
+  assert.equal(mappings.rows[0].username.value,"test");
+  assert.equal(mappings.rows[0].password.value,"");
+  assert.equal(mappings.rows[0].allowReverse.checked,true);
+  assert.ok(mappings.controls.every(control=>control.disabled));
 });
 
 test("VPN-only form can save without a proxy upstream or backend", async () => {
@@ -2229,4 +2241,47 @@ test("client settings use feature navigation and retain drafts across sections",
   assert.equal(vpnNav.hidden,true);
   assert.ok(nav.every(button => button.hidden));
   assert.ok(elements.get("config-fields").children.every(group => !group.hidden));
+});
+
+test("proxy mapping controls follow the VPN mode draft, applied mode and CLI override", async () => {
+  const { context, elements } = await page();
+  context.modeFields = [
+    {key:"vpn-mode",value:"both",group:"独立 VPN"},
+    {key:"proxies-file",value:"mappings.json",group:"代理与通道"},
+    {key:"proxies",kind:"proxies",group:"代理与通道",validation:{live:true},mappings:[
+      {listen:"127.0.0.1:2900",server:"quic://example.com:1080/tunnel"}
+    ]},
+  ];
+  vm.runInContext('renderConfigFields(modeFields, {vpn_mode:"both"}, "client")',context);
+  const field = key => vm.runInContext('configInputs.find(e=>e.key===' + JSON.stringify(key) + ')',context);
+  const editor = field("proxies");
+  const row = editor.rows[0];
+  row.listen.value = "127.0.0.1:9001";
+  row.listen.listeners.input();
+  const choose = mode => {
+    field("vpn-mode").input.value = mode;
+    field("vpn-mode").input.listeners.input();
+  };
+  choose("only");
+  assert.ok(editor.controls.every(control => control.disabled));
+  assert.equal(editor.saveButton.disabled,true);
+  assert.equal(field("proxies-file").input.disabled,true);
+  const help = elements.get("config-fields").children.find(group => group.configSection === "mappings").children[1].children[1];
+  assert.match(help.textContent,/已选择仅 VPN/);
+  await vm.runInContext("saveConfig(true)",context);
+  assert.match(elements.get("notice").textContent,/未保存/);
+
+  choose("both");
+  assert.equal(editor.readOnly,false);
+  assert.equal(editor.saveButton.disabled,false);
+  assert.equal(row.listen.value,"127.0.0.1:9001");
+  vm.runInContext('modeFields[0].value="only"; renderConfigFields(modeFields, {vpn_mode:"only"}, "client")',context);
+  choose("both");
+  assert.equal(field("proxies").readOnly,true);
+  vm.runInContext('configInputs.find(e=>e.key==="vpn-mode").original="both"; appliedVPNMode="both"; updateProxyMappingMode()',context);
+  assert.equal(field("proxies").readOnly,false);
+
+  vm.runInContext('renderConfigFields(modeFields, {vpn_mode:"only",cli_overrides:["vpn-mode"]}, "client")',context);
+  choose("both");
+  assert.equal(field("proxies").readOnly,true);
 });

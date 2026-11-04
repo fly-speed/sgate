@@ -41,6 +41,10 @@ func (h *Handler) mappingSnapshot(content []byte) ([]proxyMapping, string, strin
 	if h.vpnOnly(content) {
 		return nil, "", digest(content), nil
 	}
+	return h.configuredMappingSnapshot(content)
+}
+
+func (h *Handler) configuredMappingSnapshot(content []byte) ([]proxyMapping, string, string, error) {
 	mappings, path, err := mappingConfig(content)
 	if path == "" {
 		return mappings, "", digest(content), err

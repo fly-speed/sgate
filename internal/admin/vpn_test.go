@@ -4,10 +4,12 @@ import (
 	"flag"
 	"io"
 	"os"
-	"sgate/internal/cli"
-	"sgate/internal/vpn"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"sgate/internal/cli"
+	"sgate/internal/vpn"
 )
 
 func TestVPNFieldsUpgradeOldConfigThroughAuthenticatedAPI(t *testing.T) {
@@ -94,6 +96,50 @@ func TestVPNOnlyIgnoresUnusedMappingsAndHonorsCLIOverride(t *testing.T) {
 	h.view.Runtime = func() any { return map[string]any{"cli_overrides": []string{"vpn-mode"}, "vpn_mode": "only"} }
 	if !h.vpnOnly([]byte("vpn-mode = disabled\n")) {
 		t.Fatal("CLI-only mode ignored")
+	}
+}
+
+func TestVPNOnlyConfigShowsSavedMappingCardsWithoutExposingPasswords(t *testing.T) {
+	h, cfg := adminFixture(t)
+	config := []byte("vpn-mode = only\nproxies-file = mappings.json\n")
+	if err := os.WriteFile(h.view.AppConfigPath, config, 0600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(filepath.Dir(h.view.AppConfigPath), "mappings.json")
+	mappings := []byte(`[{"listen":"127.0.0.1:2900","server":"quic://example.com:1080/tunnel","addr":"127.0.0.1:2900","username":"test","password":"private-mapping-secret","allow_reverse":true},{"listen":"127.0.0.1:9000","server":"wss://127.0.0.1:8081/tunnel"}]`)
+	if err := os.WriteFile(path, mappings, 0600); err != nil {
+		t.Fatal(err)
+	}
+	cookie, csrf := setupAccount(t, h, cfg)
+	read := func() map[string]any {
+		t.Helper()
+		w := request(h, "GET", "/api/config", nil, cookie, csrf, "")
+		if w.Code != 200 || strings.Contains(w.Body.String(), "private-mapping-secret") {
+			t.Fatal("configuration failed to load safely", w.Code)
+		}
+		result := object(t, w)
+		if result["revision"] != digest(config) {
+			t.Fatal("dormant mappings changed the configuration revision")
+		}
+		for _, item := range result["fields"].([]any) {
+			field := item.(map[string]any)
+			if field["key"] == "proxies" {
+				return field
+			}
+		}
+		t.Fatal("multi-port proxy editor missing")
+		return nil
+	}
+	rows := read()["mappings"].([]any)
+	first := rows[0].(map[string]any)
+	if len(rows) != 2 || first["listen"] != "127.0.0.1:2900" || first["username"] != "test" || first["allow_reverse"] != true || first["password"] != secretMarker {
+		t.Fatal("saved mapping card fields were lost")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if field := read(); field["description"] == "" {
+		t.Fatal("missing mapping file reason was not shown")
 	}
 }
 
