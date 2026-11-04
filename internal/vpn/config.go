@@ -33,6 +33,7 @@ type Config struct {
 	server                     bool
 	Address                    string
 	Transport, Host, TCPListen string
+	TCPNotSentLowat            int
 	TLS                        *tls.Config
 	Key                        []byte
 	Network                    netip.Prefix
@@ -42,6 +43,7 @@ type Config struct {
 	AllowPrivate               bool
 	Noise                      NoiseConfig
 	QueueMaxAge                time.Duration
+	UDPSendInterval            time.Duration
 	RetryMin, RetryMax         time.Duration
 	// Called after authentication. Dynamic clients clean up and reinstall the
 	// network on each authenticated assignment; the final cleanup runs on exit.
@@ -53,6 +55,9 @@ type Config struct {
 }
 
 func (c Config) normalized(server bool) (Config, error) {
+	if c.TCPNotSentLowat < 0 || c.TCPNotSentLowat > 1<<20 {
+		return c, errors.New("VPN TCP unsent low-water mark must be 0..1MiB")
+	}
 	address := c.Address
 	if server && address == "" {
 		address = c.TCPListen

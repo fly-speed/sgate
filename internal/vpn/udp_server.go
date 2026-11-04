@@ -14,7 +14,13 @@ func (s *Server) listenUDP() error {
 	if err != nil {
 		return err
 	}
-	s.udp, err = dtls.Listen("udp", a, udpSecurity(s.cfg.Key))
+	security := udpSecurity(s.cfg.Key)
+	options := make([]dtls.ServerOption, 0, len(security)+1)
+	for _, option := range security {
+		options = append(options, option)
+	}
+	options = append(options, dtls.WithListenConfig(udpListenConfig()))
+	s.udp, err = dtls.ListenWithOptions("udp", a, options...)
 	return err
 }
 func (s *Server) acceptUDP(ctx context.Context) {
@@ -49,13 +55,14 @@ func (s *Server) acceptUDP(ctx context.Context) {
 				defer s.udpConns.Delete(raw)
 				defer raw.Close()
 				authCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
-				err := raw.(*dtls.Conn).HandshakeContext(authCtx)
+				dtlsConn := raw.(*dtls.Conn)
+				err := dtlsConn.HandshakeContext(authCtx)
 				cancel()
 				if err != nil {
 					s.cfg.Stats.auth.Add(1)
 					return
 				}
-				conn := newUDPConnection(raw, s.cfg.Stats)
+				conn := newUDPConnection(dtlsConn, s.cfg.Stats)
 				defer conn.CloseWithError(0, "VPN UDP listener stopped")
 				select {
 				case s.incoming <- conn:

@@ -29,6 +29,7 @@ func Settings(role string) []Setting {
 		{"vpn-network", "10.77.0.0/24", "两端一致的 IPv4 VPN 子网，避免与现有网络重叠。"},
 		{"vpn-mtu", "1280", "TUN MTU，576～1500 字节。"},
 		{"vpn-queue-max-age", "0s", "发送队列过期时间，0 关闭过期丢弃（默认）；最多 1m。弱网 TCP 建议保持 0，队列容量仍有上限。"},
+		{"vpn-udp-send-interval", "0s", "纯 UDP VPN 每条连接发送大包的最小间隔，0 关闭，最多 10ms；仅影响本端发送，保存后立即生效。"},
 		{"vpn-tun-name", "", "新建设备名；Linux 默认 sgate0，macOS 自动分配 utunN。"},
 		{"vpn-manage-network", "true", "自动配置路由、DNS 或服务端 NAT；需要管理员权限。"},
 		{"vpn-key-file", "", "VPN 共享密钥文件；留空复用 key-file；不是代理或 Web 账号认证。"},
@@ -42,6 +43,7 @@ func Settings(role string) []Setting {
 			Setting{"vpn-listen", "0.0.0.0:8444", "独立 QUIC UDP 监听，不能与 quic-listen 共用 UDP 端口；配置 TCP 监听后可留空以关闭 UDP。"},
 			Setting{"vpn-udp-listen", "", "纯 UDP VPN 监听，例如 0.0.0.0:8445；与 QUIC 分开 UDP 端口，业务包不确认或重传，使用共享密钥加密认证。"},
 			Setting{"vpn-tcp-listen", "", "可选 TLS/TCP 与 WSS 共用监听，例如 0.0.0.0:8444；可与 VPN UDP 使用相同数字端口，不能与其他 TCP 服务共用。"},
+			Setting{"vpn-tcp-notsent-lowat", "0", "Linux VPN 服务端 TCP/WSS 套接字的未发送数据水位，支持 K/M，0 使用系统默认，最大 1M；重启 VPN 生效。"},
 			Setting{"vpn-tls-cert", "", "VPN 服务器证书；留空复用 tls-cert。"},
 			Setting{"vpn-tls-key", "", "VPN 证书私钥；留空复用 tls-key。"},
 			Setting{"vpn-max-clients", "64", "最多同时认证客户端数，1～254；降低上限不踢现有客户端，仅限制新连接；各客户端虚拟 IP 唯一。"},
@@ -64,11 +66,11 @@ func RegisterFlags(fs *flag.FlagSet, role string) {
 		switch s.Key {
 		case "vpn-manage-network", "vpn-allow-private", "vpn-block-ipv6", "vpn-noise-traffic", "vpn-noise-idle":
 			fs.Bool(s.Key, s.Default == "true", s.Description)
-		case "vpn-noise-rate":
+		case "vpn-noise-rate", "vpn-tcp-notsent-lowat":
 			cli.ByteSizeVar(fs, new(int), s.Key, 0, s.Description)
 		case "vpn-noise-idle-after":
 			fs.Duration(s.Key, time.Second, s.Description)
-		case "vpn-queue-max-age":
+		case "vpn-queue-max-age", "vpn-udp-send-interval":
 			fs.Duration(s.Key, 0, s.Description)
 		case "vpn-mtu":
 			fs.Int(s.Key, 1280, s.Description)
@@ -139,9 +141,14 @@ func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Pref
 	if noiseErr != nil {
 		return nil, noiseErr
 	}
+	p.Config.UDPSendInterval = fs.Lookup("vpn-udp-send-interval").Value.(flag.Getter).Get().(time.Duration)
 	p.Config.Noise = NoiseConfig{Rate: noiseRate, Traffic: get("vpn-noise-traffic") == "true", Idle: get("vpn-noise-idle") == "true", IdleAfter: idleAfter}
 	p.Config.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
 	if p.Role == "server" {
+		p.Config.TCPNotSentLowat, noiseErr = cli.ParseByteSize(get("vpn-tcp-notsent-lowat"))
+		if noiseErr != nil {
+			return nil, invalidFields(noiseErr.Error(), "vpn-tcp-notsent-lowat")
+		}
 		p.Config.Address = get("vpn-listen")
 		p.Config.TCPListen = get("vpn-tcp-listen")
 		p.Config.UDPListen = get("vpn-udp-listen")

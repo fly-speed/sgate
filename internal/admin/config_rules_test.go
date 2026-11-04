@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestEveryApplicationConfigFieldHasValidationAndRoundTrips(t *testing.T) {
@@ -97,6 +98,9 @@ func TestEveryApplicationConfigFieldHasValidationAndRoundTrips(t *testing.T) {
 func exampleConfigValue(field configField) string {
 	switch field.Validation.Type {
 	case "duration":
+		if upper, err := strconv.ParseInt(field.Validation.Max, 10, 64); err == nil && time.Duration(upper) < 30*time.Second {
+			return time.Duration(upper).String()
+		}
 		return "30s"
 	case "bytes":
 		return "2K"

@@ -11,10 +11,11 @@ import (
 )
 
 type LiveConfig struct {
-	Noise        NoiseConfig
-	QueueMaxAge  time.Duration
-	MaxClients   int
-	AllowPrivate bool
+	Noise           NoiseConfig
+	QueueMaxAge     time.Duration
+	UDPSendInterval time.Duration
+	MaxClients      int
+	AllowPrivate    bool
 }
 type liveValue struct {
 	config  LiveConfig
@@ -26,14 +27,14 @@ type LiveSettings struct {
 }
 
 func LiveFields(role string) []string {
-	keys := []string{"vpn-noise-rate", "vpn-noise-traffic", "vpn-noise-idle", "vpn-noise-idle-after", "vpn-queue-max-age"}
+	keys := []string{"vpn-noise-rate", "vpn-noise-traffic", "vpn-noise-idle", "vpn-noise-idle-after", "vpn-queue-max-age", "vpn-udp-send-interval"}
 	if role == "server" {
 		keys = append(keys, "vpn-max-clients", "vpn-allow-private")
 	}
 	return keys
 }
 func LiveFromConfig(c Config) LiveConfig {
-	return LiveConfig{Noise: c.Noise, QueueMaxAge: c.QueueMaxAge, MaxClients: c.MaxClients, AllowPrivate: c.AllowPrivate}
+	return LiveConfig{Noise: c.Noise, QueueMaxAge: c.QueueMaxAge, UDPSendInterval: c.UDPSendInterval, MaxClients: c.MaxClients, AllowPrivate: c.AllowPrivate}
 }
 func normalizeLive(c LiveConfig) (LiveConfig, error) {
 	if c.Noise.Rate < 0 || c.Noise.Rate > maxNoiseRate || c.Noise.IdleAfter < 0 {
@@ -44,6 +45,9 @@ func normalizeLive(c LiveConfig) (LiveConfig, error) {
 	}
 	if c.QueueMaxAge < 0 || c.QueueMaxAge > time.Minute {
 		return c, errors.New("VPN queue maximum age must be 0..1m")
+	}
+	if c.UDPSendInterval < 0 || c.UDPSendInterval > 10*time.Millisecond {
+		return c, errors.New("VPN UDP send interval must be 0..10ms")
 	}
 	if c.MaxClients == 0 {
 		c.MaxClients = 64
@@ -104,6 +108,8 @@ func WithLiveValues(c LiveConfig, values map[string]string, keys []string) (Live
 			c.Noise.IdleAfter, err = time.ParseDuration(value)
 		case "vpn-queue-max-age":
 			c.QueueMaxAge, err = time.ParseDuration(value)
+		case "vpn-udp-send-interval":
+			c.UDPSendInterval, err = time.ParseDuration(value)
 		case "vpn-max-clients":
 			c.MaxClients, err = strconv.Atoi(value)
 		case "vpn-allow-private":
@@ -118,6 +124,7 @@ func WithLiveValues(c LiveConfig, values map[string]string, keys []string) (Live
 func (c *Config) setLive(v LiveConfig) {
 	c.Noise = v.Noise
 	c.QueueMaxAge = v.QueueMaxAge
+	c.UDPSendInterval = v.UDPSendInterval
 	c.MaxClients = v.MaxClients
 	c.AllowPrivate = v.AllowPrivate
 }

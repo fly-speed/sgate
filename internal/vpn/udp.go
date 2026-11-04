@@ -16,43 +16,46 @@ import (
 )
 
 const udpProtocol = "sgate-vpn-udp-v1"
+const udpReliableControlProtocol = "sgate-vpn-udp-control-v1"
 const udpHeaderSize = 8
 const udpFrameMax = 1200
+const udpReceiveBuffer = 1024 * 1024
 const (
 	udpControl byte = 1 + iota
 	udpPacket
 	udpKeepalive
 	udpClose
 	udpControlFIN
+	udpControlACK
 )
 
-func udpSecurity(key []byte) *dtls.Config {
+func udpSecurity(key []byte) []dtls.Option {
 	m := hmac.New(sha256.New, key)
 	m.Write([]byte(udpProtocol))
 	psk := m.Sum(nil)
-	return &dtls.Config{
-		PSK: func(hint []byte) ([]byte, error) {
+	return []dtls.Option{
+		dtls.WithPSK(func(hint []byte) ([]byte, error) {
 			if !hmac.Equal(hint, []byte(udpProtocol)) {
 				return nil, errors.New("invalid UDP VPN identity")
 			}
 			return append([]byte(nil), psk...), nil
-		},
-		PSKIdentityHint:        []byte(udpProtocol),
-		CipherSuites:           []dtls.CipherSuiteID{dtls.TLS_PSK_WITH_AES_128_GCM_SHA256},
-		ExtendedMasterSecret:   dtls.RequireExtendedMasterSecret,
-		SupportedProtocols:     []string{udpProtocol},
-		ReplayProtectionWindow: 4096,
-		MTU:                    udpFrameMax,
-		// Establishment is bounded to 8 seconds: a lost handshake flight fails
-		// this attempt instead of scheduling any tunnel-level retransmission.
-		FlightInterval: 30 * time.Second,
+		}),
+		dtls.WithPSKIdentityHint([]byte(udpProtocol)),
+		dtls.WithCipherSuites(dtls.TLS_PSK_WITH_AES_128_GCM_SHA256),
+		dtls.WithExtendedMasterSecret(dtls.RequireExtendedMasterSecret),
+		dtls.WithSupportedProtocols(udpReliableControlProtocol, udpProtocol),
+		dtls.WithReplayProtectionWindow(4096),
+		dtls.WithMTU(udpFrameMax),
+		// Retry handshake flights with DTLS backoff within the 8-second
+		// establishment deadline. Application records are sent separately.
+		dtls.WithFlightInterval(time.Second),
 	}
 }
 
-// UDP application records never carry acknowledgements or request retransmits.
+// UDP business records never carry acknowledgements or request retransmits.
 // Epochs, per-direction nonces, encryption and replay checks belong to DTLS.
 func encodeUDPFrame(kind byte, p []byte) ([]byte, error) {
-	if kind < udpControl || kind > udpControlFIN || len(p) > udpFrameMax-udpHeaderSize || (kind >= udpKeepalive && len(p) != 0) {
+	if !validUDPFrame(kind, len(p)) {
 		return nil, errors.New("invalid UDP VPN frame")
 	}
 	b := make([]byte, udpHeaderSize+len(p))
@@ -63,13 +66,23 @@ func encodeUDPFrame(kind byte, p []byte) ([]byte, error) {
 	return b, nil
 }
 func decodeUDPFrame(b []byte) (byte, []byte, error) {
-	if len(b) < udpHeaderSize || len(b) > udpFrameMax || string(b[:4]) != "SGU\x01" || b[5] != 0 || int(binary.BigEndian.Uint16(b[6:8])) != len(b)-udpHeaderSize || b[4] < udpControl || b[4] > udpControlFIN {
+	if len(b) < udpHeaderSize || string(b[:4]) != "SGU\x01" || b[5] != 0 || int(binary.BigEndian.Uint16(b[6:8])) != len(b)-udpHeaderSize || !validUDPFrame(b[4], len(b)-udpHeaderSize) {
 		return 0, nil, errors.New("invalid UDP VPN frame")
 	}
-	if b[4] >= udpKeepalive && len(b) != udpHeaderSize {
-		return 0, nil, errors.New("invalid UDP VPN command payload")
-	}
 	return b[4], b[8:], nil
+}
+
+func validUDPFrame(kind byte, length int) bool {
+	switch kind {
+	case udpControl, udpPacket:
+		return length <= udpFrameMax-udpHeaderSize
+	case udpKeepalive, udpClose, udpControlFIN:
+		return length == 0
+	case udpControlACK:
+		return length == 4
+	default:
+		return false
+	}
 }
 
 type udpConnection struct {
@@ -78,6 +91,7 @@ type udpConnection struct {
 	cancel         context.CancelFunc
 	reader, writer net.Conn
 	control        *udpControlChannel
+	reliable       *udpReliableControl
 	packets        chan []byte
 	stats          *Stats
 	writeMu        sync.Mutex
@@ -85,11 +99,15 @@ type udpConnection struct {
 	once           sync.Once
 }
 
-func newUDPConnection(raw net.Conn, stats *Stats) *udpConnection {
+func newUDPConnection(raw *dtls.Conn, stats *Stats) *udpConnection {
 	ctx, cancel := context.WithCancel(context.Background())
 	r, w := net.Pipe()
 	c := &udpConnection{raw: raw, ctx: ctx, cancel: cancel, reader: r, writer: w, packets: make(chan []byte, queueSize), stats: stats}
 	c.control = &udpControlChannel{c: c}
+	if state, ok := raw.ConnectionState(); ok && state.NegotiatedProtocol == udpReliableControlProtocol {
+		c.reliable = &udpReliableControl{incoming: make(chan []byte, 2), acks: make(chan uint32, 4)}
+		go c.deliverUDPControl()
+	}
 	go c.readFrames()
 	go c.keepAlive()
 	return c
@@ -169,11 +187,30 @@ func (c *udpConnection) readFrames() {
 		}
 		switch kind {
 		case udpControl:
+			if c.reliable != nil {
+				c.receiveUDPControl(p)
+				continue
+			}
 			if _, err = c.writer.Write(p); err != nil {
 				return
 			}
+		case udpControlACK:
+			if c.reliable != nil {
+				select {
+				case c.reliable.acks <- binary.BigEndian.Uint32(p):
+				default:
+				}
+			}
 		case udpControlFIN:
-			c.writer.Close()
+			if c.reliable == nil {
+				c.writer.Close()
+			} else {
+				// Deliver any acknowledged control data before EOF.
+				select {
+				case c.reliable.incoming <- nil:
+				default:
+				}
+			}
 		case udpPacket:
 			c.stats.udpRX.Add(1)
 			select {
@@ -208,6 +245,9 @@ type udpControlChannel struct{ c *udpConnection }
 
 func (c *udpControlChannel) Read(p []byte) (int, error) { return c.c.reader.Read(p) }
 func (c *udpControlChannel) Write(p []byte) (int, error) {
+	if c.c.reliable != nil {
+		return c.c.writeUDPControl(p)
+	}
 	if err := c.c.write(udpControl, p); err != nil {
 		return 0, err
 	}
@@ -228,8 +268,20 @@ func dialUDP(ctx context.Context, c Config) (connection, error) {
 	if err != nil {
 		return nil, err
 	}
-	raw, err := dtls.Dial("udp", address, udpSecurity(c.Key))
+	socket, err := net.ListenUDP("udp", nil)
 	if err != nil {
+		return nil, err
+	}
+	// A lower OS cap must not prevent VPN startup.
+	_ = socket.SetReadBuffer(udpReceiveBuffer)
+	security := udpSecurity(c.Key)
+	options := make([]dtls.ClientOption, len(security))
+	for i, option := range security {
+		options[i] = option
+	}
+	raw, err := dtls.ClientWithOptions(socket, address, options...)
+	if err != nil {
+		socket.Close()
 		return nil, err
 	}
 	authCtx, cancel := context.WithTimeout(ctx, 8*time.Second)

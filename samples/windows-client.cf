@@ -25,6 +25,8 @@ service sgate-client {
     vpn-dns = 1.1.1.1
     vpn-block-ipv6 = true
     vpn-queue-max-age = 0s
+    # Minimum gap between bulk raw UDP VPN packets; 0 disables, maximum 10ms. LIVE: applies to local sends.
+    vpn-udp-send-interval = 0s
     vpn-noise-rate = 0
 }
 

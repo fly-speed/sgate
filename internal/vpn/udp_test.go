@@ -72,11 +72,17 @@ func TestUDPDataLossIsNotRetransmittedAndReplayIsRejected(t *testing.T) {
 	var client net.Addr
 	var drop atomic.Bool
 	var writes atomic.Int64
+	var droppedHandshakeFlights atomic.Int32
+	var droppedControlFrames atomic.Int32
 	captured := make(chan []byte, 1)
 	relayDone := make(chan struct{})
 	go func() {
 		defer close(relayDone)
 		b := make([]byte, 65535)
+		dropClientHello := true
+		dropServerFinished := true
+		dropClientControl := true
+		dropServerControlACK := true
 		for {
 			n, from, e := relay.ReadFrom(b)
 			if e != nil {
@@ -84,14 +90,35 @@ func TestUDPDataLossIsNotRetransmittedAndReplayIsRejected(t *testing.T) {
 			}
 			data := append([]byte(nil), b[:n]...)
 			if from.String() == server.String() {
+				// The server's final DTLS flight starts with ChangeCipherSpec.
+				if dropServerFinished && len(data) > 0 && data[0] == 20 {
+					dropServerFinished = false
+					droppedHandshakeFlights.Add(1)
+					continue
+				}
+				if dropServerControlACK && len(data) > 0 && data[0] == 23 {
+					dropServerControlACK = false
+					droppedControlFrames.Add(1)
+					continue
+				}
 				if client != nil {
 					relay.WriteTo(data, client)
 				}
 				continue
 			}
 			client = from
+			if dropClientHello && len(data) > 13 && data[0] == 22 && data[13] == 1 {
+				dropClientHello = false
+				droppedHandshakeFlights.Add(1)
+				continue
+			}
 			// DTLS 1.2 encrypted application records have content type 23.
 			if len(data) > 0 && data[0] == 23 {
+				if dropClientControl {
+					dropClientControl = false
+					droppedControlFrames.Add(1)
+					continue
+				}
 				writes.Add(1)
 				if drop.Swap(false) {
 					captured <- data
@@ -103,11 +130,18 @@ func TestUDPDataLossIsNotRetransmittedAndReplayIsRejected(t *testing.T) {
 	}()
 	t.Cleanup(func() { relay.Close(); <-relayDone })
 	c.Address = relay.LocalAddr().String()
+	c.UDPSendInterval = time.Millisecond
 	local, _, _ := startClient(t, c)
-	await(t, "UDP authenticated through relay", func() bool { return c.Stats.Snapshot().Active == 1 })
+	await(t, "UDP authenticated after lost handshake flights", func() bool { return c.Stats.Snapshot().Active == 1 })
+	if got := droppedHandshakeFlights.Load(); got != 2 {
+		t.Fatalf("dropped %d handshake flights, want 2", got)
+	}
+	if got := droppedControlFrames.Load(); got != 2 {
+		t.Fatalf("dropped %d control frames, want 2", got)
+	}
 	before := writes.Load()
 	drop.Store(true)
-	first := ipPacket(c.ClientIP.String(), "8.8.8.8", 100)
+	first := ipPacket(c.ClientIP.String(), "8.8.8.8", 600)
 	local.out <- first
 	var wire []byte
 	select {
@@ -171,6 +205,32 @@ func TestUDPWrongKeyCannotReserveAddress(t *testing.T) {
 	}
 	if len(s.Clients()) != 0 {
 		t.Fatal("unauthenticated UDP peer acquired a lease")
+	}
+}
+
+func TestUDPSendIntervalAppliesToConnectedPeer(t *testing.T) {
+	server, config, remote := fixtureWire(t, 4, NoiseConfig{}, "udp")
+	local, _, _ := startClient(t, config)
+	await(t, "UDP authenticated", func() bool { return config.Stats.Snapshot().Active == 1 })
+
+	live := server.cfg.Live.Snapshot()
+	live.UDPSendInterval = 10 * time.Millisecond
+	if err := server.cfg.Live.Update(live); err != nil {
+		t.Fatal(err)
+	}
+	packet := ipPacket("8.8.8.8", config.ClientIP.String(), 600)
+	start := time.Now()
+	for range 3 {
+		remote.out <- packet
+	}
+	for range 3 {
+		receivePacket(t, local, packet)
+	}
+	if elapsed := time.Since(start); elapsed < 18*time.Millisecond {
+		t.Fatalf("three bulk packets arrived in %s after enabling 10ms spacing", elapsed)
+	}
+	if got := config.Stats.Snapshot().Connections; got != 1 {
+		t.Fatalf("live update reconnected UDP, connections=%d", got)
 	}
 }
 

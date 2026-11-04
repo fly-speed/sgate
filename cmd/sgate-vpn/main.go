@@ -30,8 +30,9 @@ type options struct {
 	udpListen                                                                                             string
 	role, listen, server, keyFile, cert, key, ca, network, clientIP, tun, routes, dns, dnsService, egress string
 	noise                                                                                                 vpn.NoiseConfig
-	queueMaxAge                                                                                           time.Duration
+	queueMaxAge, udpSendInterval                                                                          time.Duration
 	mtu, maxClients                                                                                       int
+	tcpNotSentLowat                                                                                       int
 	manage, private, block6                                                                               bool
 }
 
@@ -42,6 +43,7 @@ func parse(args []string) (options, error) {
 	fs.StringVar(&o.listen, "listen", ":8444", "server QUIC UDP listen address")
 	fs.StringVar(&o.udpListen, "udp-listen", "", "optional encrypted raw UDP listener; separate from QUIC UDP port")
 	fs.StringVar(&o.tcpListen, "tcp-listen", "", "optional shared TLS/TCP and WSS server listener; empty disables")
+	cli.ByteSizeVar(fs, &o.tcpNotSentLowat, "tcp-notsent-lowat", 0, "Linux TCP/WSS unsent-data low-water mark; 0 uses system default, maximum 1M")
 	fs.StringVar(&o.server, "server", "", "client udp://, quic://, tcp:// or wss://hostname:port/vpn URL (TCP always uses TLS)")
 	fs.StringVar(&o.keyFile, "key-file", "", "32-byte shared key file (same format as sgate)")
 	fs.StringVar(&o.cert, "tls-cert", "", "server certificate PEM")
@@ -62,6 +64,7 @@ func parse(args []string) (options, error) {
 	fs.BoolVar(&o.noise.Traffic, "noise-traffic", true, "allow VPN padding during IP traffic; business packets have priority")
 	fs.BoolVar(&o.noise.Idle, "noise-idle", true, "allow VPN padding while no business IP data flows")
 	fs.DurationVar(&o.queueMaxAge, "queue-max-age", 0, "queued IP packet expiry, 0 disables (recommended for weak-link TCP), maximum 1m")
+	fs.DurationVar(&o.udpSendInterval, "udp-send-interval", 0, "minimum gap between bulk UDP VPN packets, 0 disables, maximum 10ms")
 	fs.DurationVar(&o.noise.IdleAfter, "noise-idle-after", time.Second, "VPN IP inactivity threshold, 0 uses 1s")
 	fs.StringVar(&o.egress, "egress-interface", "", "Linux server physical egress interface; empty detects current route")
 	if err := cli.Parse(fs, args); err != nil {
@@ -96,7 +99,7 @@ func run(args []string) error {
 		return err
 	}
 	stats := &vpn.Stats{}
-	config := vpn.Config{QueueMaxAge: o.queueMaxAge, Noise: o.noise, Key: key, Network: network, ClientIP: clientIP, MTU: o.mtu, MaxClients: o.maxClients, AllowPrivate: o.private, Stats: stats, Logf: log.Printf}
+	config := vpn.Config{QueueMaxAge: o.queueMaxAge, UDPSendInterval: o.udpSendInterval, Noise: o.noise, Key: key, Network: network, ClientIP: clientIP, MTU: o.mtu, MaxClients: o.maxClients, AllowPrivate: o.private, Stats: stats, Logf: log.Printf}
 	netOptions := vpn.NetworkOptions{Server: o.role == "server", Network: network, ClientIP: clientIP, MTU: o.mtu, DNSService: o.dnsService, Egress: o.egress, BlockIPv6: o.block6, Logf: log.Printf}
 	if !network.Addr().Is4() || network != network.Masked() || network.Bits() < 16 || network.Bits() > 30 || o.mtu < 576 || o.mtu > 1500 {
 		return errors.New("invalid IPv4 VPN subnet or MTU")
@@ -104,6 +107,7 @@ func run(args []string) error {
 	if o.role == "server" {
 		config.Address = o.listen
 		config.TCPListen = o.tcpListen
+		config.TCPNotSentLowat = o.tcpNotSentLowat
 		config.UDPListen = o.udpListen
 		config.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
 		if o.listen != "" || o.tcpListen != "" {

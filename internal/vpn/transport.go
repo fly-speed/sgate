@@ -48,6 +48,8 @@ func (p *peer) run(ctx context.Context, c Config, receive func([]byte) error) er
 		var tick <-chan time.Time
 		var previous LiveConfig
 		var unsupported bool
+		_, udp := p.conn.(*udpConnection)
+		var lastBulk time.Time
 		pacer := noisePacer{last: time.Now()}
 		defer func() {
 			if ticker != nil {
@@ -126,6 +128,21 @@ func (p *peer) run(ctx context.Context, c Config, receive func([]byte) error) er
 				}
 			}
 			if packet := p.queue.pop(time.Now(), c.Stats); packet != nil {
+				// Space out bulk UDP writes without pacing short packets or
+				// adding acknowledgements to the business data path.
+				if udp && len(packet) >= 500 && live.UDPSendInterval > 0 {
+					if wait := time.Until(lastBulk.Add(live.UDPSendInterval)); wait > 0 {
+						timer := time.NewTimer(wait)
+						select {
+						case <-timer.C:
+						case <-ctx.Done():
+							timer.Stop()
+							done <- ctx.Err()
+							return
+						}
+					}
+					lastBulk = time.Now()
+				}
 				began := time.Now()
 				err := send(packet)
 				storeMax(&c.Stats.sendWaitMax, uint64(time.Since(began)))

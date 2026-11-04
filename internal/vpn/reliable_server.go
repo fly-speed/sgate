@@ -45,6 +45,7 @@ func (s *Server) listenReliable() error {
 		}
 		defer admitted.Add(-1)
 		var raw net.Conn
+		var socket net.Conn
 		if websocket.IsWebSocketUpgrade(r) {
 			found := false
 			for _, p := range websocket.Subprotocols(r) {
@@ -62,6 +63,7 @@ func (s *Server) listenReliable() error {
 				return
 			}
 			ws.SetReadLimit(8192)
+			socket = ws.UnderlyingConn()
 			raw = &websocketConn{Conn: ws}
 		} else {
 			if !strings.EqualFold(r.Header.Get("Upgrade"), Protocol) || !headerToken(r.Header.Get("Connection"), "upgrade") || r.ContentLength > 0 || len(r.TransferEncoding) > 0 || r.Header.Get("Origin") != "" {
@@ -81,7 +83,13 @@ func (s *Server) listenReliable() error {
 				return
 			}
 			conn.SetDeadline(time.Time{})
+			socket = conn
 			raw = &bufferedConnection{Conn: conn, reader: buffer.Reader}
+		}
+		if s.cfg.TCPNotSentLowat > 0 {
+			if err := setTCPNotSentLowat(socket, s.cfg.TCPNotSentLowat); err != nil && s.cfg.Logf != nil {
+				s.cfg.Logf("VPN TCP unsent low-water mark unavailable: %v", err)
+			}
 		}
 		conn := newRecordConnection(raw)
 		s.reliableConns.Store(conn, true)

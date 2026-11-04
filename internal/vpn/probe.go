@@ -125,7 +125,7 @@ func Probe(parent context.Context, config Config) (result ProbeResult) {
 	packet := []byte(probeDatagramPrefix + result.TestID)
 	// DATAGRAM is intentionally unreliable. Retry the tiny echo within the total
 	// deadline so a single lost packet does not turn into a ten-second timeout.
-	for {
+	for attempt := 1; ; attempt++ {
 		if err = conn.SendDatagram(packet); err != nil {
 			return fail(err)
 		}
@@ -135,7 +135,7 @@ func Probe(parent context.Context, config Config) (result ProbeResult) {
 		if e == nil && bytes.Equal(echo, packet) {
 			break
 		}
-		if c.Transport == "udp" {
+		if c.Transport == "udp" && (attempt == 3 || e == nil) {
 			if e == nil {
 				e = errors.New("UDP VPN echo mismatch")
 			}
@@ -148,8 +148,10 @@ func Probe(parent context.Context, config Config) (result ProbeResult) {
 			return fail(e)
 		}
 	}
-	if _, err = control.Write([]byte{0}); err != nil {
-		return fail(err)
+	if c.Transport != "udp" {
+		if _, err = control.Write([]byte{0}); err != nil {
+			return fail(err)
+		}
 	}
 	result.OK = true
 	result.AddressInUse = reply.AddressInUse
