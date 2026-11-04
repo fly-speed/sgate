@@ -5,9 +5,11 @@ import (
 	"crypto/tls"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"sgate/internal/admin"
 	"sgate/internal/cli"
 	"sgate/internal/vpn"
 )
@@ -70,5 +72,46 @@ func TestVPNProbeReadsDormantSettingsAndDraftsWithoutApplying(t *testing.T) {
 	after, _ := os.ReadFile(c.path)
 	if string(before) != string(after) {
 		t.Fatal("probe saved config")
+	}
+}
+
+func TestVPNProbeUsesCredentialsSavedFromManagement(t *testing.T) {
+	c := newController(t, "client", "server = ws://127.0.0.1:1/tunnel\n")
+	key, err := cli.LoadKey(c.original.Lookup("key-file").Value.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	accountPath := filepath.Join(t.TempDir(), "vpn-accounts.json")
+	if err := os.WriteFile(accountPath, []byte(`{"version":1,"accounts":[{"username":"alice","password":"test-secret"}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	config := vpn.Config{UDPListen: "127.0.0.1:0", Key: key, Network: netip.MustParsePrefix("10.77.0.0/24"), MTU: 1280}
+	if err := config.LoadAccountFile(accountPath, true); err != nil {
+		t.Fatal(err)
+	}
+	server, err := vpn.ListenServer(config, &vpnTestDevice{done: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		server.Close()
+		<-done
+	})
+	setConfig(t, c, "vpn-mode", "disabled")
+	setConfig(t, c, "vpn-server", "udp://"+server.UDPAddr().String()+"/vpn")
+	view, err := c.manageVPNAccounts(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.manageVPNAccounts(&admin.VPNAccountChange{Revision: view.Revision, Action: "save", Username: "alice", Password: "test-secret"}); err != nil {
+		t.Fatal(err)
+	}
+	probe, err := c.testVPN(context.Background(), nil)
+	if err != nil || !probe.OK || len(server.Clients()) != 0 || c.current.vpn != nil {
+		t.Fatal("saved credentials did not support a non-disruptive VPN probe", probe, err)
 	}
 }

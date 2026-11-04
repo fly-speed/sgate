@@ -106,6 +106,9 @@ func (h *Handler) configValidationProblem(w http.ResponseWriter, err error, cont
 				foreign[s.Key] = true
 			}
 		}
+		if other == "client" {
+			foreign["vpn-client-ip"] = true
+		}
 		if foreign[unsupported.OptionName()] {
 			fields, _ := configFields(content)
 			keys := []string{}

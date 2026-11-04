@@ -132,6 +132,8 @@ func (h *Handler) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/api/tunnel-accounts" && (r.Method == "GET" || r.Method == "PUT"):
 		h.tunnelAccounts(w, r)
+	case r.URL.Path == "/api/vpn-accounts" && (r.Method == "GET" || r.Method == "PUT"):
+		h.vpnAccounts(w, r)
 	case r.URL.Path == "/api/stats" && r.Method == "GET":
 		reply(w, 200, struct {
 			tunnel.TrafficSnapshot
@@ -897,10 +899,5 @@ func exclusiveFile(path string, data []byte) error {
 	if e = os.Link(f.Name(), path); e != nil {
 		return e
 	}
-	dir, e := os.Open(filepath.Dir(path))
-	if e != nil {
-		return e
-	}
-	defer dir.Close()
-	return dir.Sync()
+	return syncDirectory(filepath.Dir(path))
 }

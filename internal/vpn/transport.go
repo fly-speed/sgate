@@ -3,6 +3,7 @@ package vpn
 import (
 	"context"
 	"crypto/hmac"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -461,7 +462,11 @@ func (s *Server) accept(ctx context.Context, conn connection) {
 	if err != nil {
 		return
 	}
-	challenge = assignmentChallengePrefix + challenge
+	if s.cfg.RequireAccount {
+		challenge = accountChallengePrefix + challenge
+	} else {
+		challenge = assignmentChallengePrefix + challenge
+	}
 	if writeJSON(control, challenge) != nil {
 		return
 	}
@@ -481,6 +486,16 @@ func (s *Server) accept(ctx context.Context, conn connection) {
 		}
 		conn.CloseWithError(authKeyMismatchCode, "VPN shared key mismatch")
 		return
+	}
+	identity := h.ID
+	if s.cfg.RequireAccount {
+		accountProof, err := hex.DecodeString(h.AccountProof)
+		if err != nil || h.Username == "" || !s.cfg.VerifyAccount(h.Username, []byte(h.Proof), accountProof) {
+			s.cfg.Stats.auth.Add(1)
+			reject(control, "VPN account authentication failed; check username and password")
+			return
+		}
+		identity = h.Username + ":" + h.ID
 	}
 	ip, err := netip.ParseAddr(h.IP)
 	reason := ""
@@ -507,7 +522,7 @@ func (s *Server) accept(ctx context.Context, conn connection) {
 	if h.Probe {
 		if h.IP == "" {
 			s.mu.Lock()
-			ip = s.allocateIPLocked(h.ID)
+			ip = s.allocateIPLocked(identity)
 			s.mu.Unlock()
 			if !ip.IsValid() {
 				ip = s.cfg.Network.Addr().Next().Next()
@@ -518,7 +533,7 @@ func (s *Server) accept(ctx context.Context, conn connection) {
 	}
 	s.mu.Lock()
 	if h.IP == "" {
-		ip = s.allocateIPLocked(h.ID)
+		ip = s.allocateIPLocked(identity)
 	}
 	if !ip.IsValid() {
 		s.mu.Unlock()
@@ -526,9 +541,9 @@ func (s *Server) accept(ctx context.Context, conn connection) {
 		return
 	}
 	flow, _ := conn.Context().Value(flowContextKey{}).(*datagramFlow)
-	p := &peer{conn: conn, control: control, id: h.ID, ip: ip, queue: newPacketQueue(s.cfg.QueueMaxAge, s.cfg.Live), padding: h.Padding, flow: flow}
+	p := &peer{conn: conn, control: control, id: identity, ip: ip, queue: newPacketQueue(s.cfg.QueueMaxAge, s.cfg.Live), padding: h.Padding, flow: flow}
 	old := s.peers[ip]
-	if (old != nil && old.id != h.ID) || (old == nil && len(s.peers) >= s.cfg.Live.Snapshot().MaxClients) {
+	if (old != nil && old.id != identity) || (old == nil && len(s.peers) >= s.cfg.Live.Snapshot().MaxClients) {
 		s.mu.Unlock()
 		reject(control, "VPN address in use or client limit reached")
 		return
@@ -692,7 +707,9 @@ func clientConnection(ctx context.Context, c Config, id string, active *atomic.P
 		return errors.New("VPN server does not support automatic address assignment; update the server")
 	}
 	h := hello{Padding: strings.HasPrefix(challenge, paddingChallengePrefix), ID: id, IP: requestedIP(c.ClientIP), Network: c.Network.String(), MTU: c.MTU}
-	h.Proof = proof(c.Key, challenge, h)
+	if err = signHello(c, challenge, &h); err != nil {
+		return err
+	}
 	if err = writeJSON(control, h); err != nil {
 		return err
 	}

@@ -68,6 +68,7 @@
           ><button data-tab="overview" class="selected">◉ <span><span data-i18n="实时概览">实时概览</span></span></button
           ><button data-tab="configuration">☷ <span><span data-i18n="代理配置">代理配置</span></span></button
           ><button id="tunnel-accounts-nav" data-tab="tunnel-accounts" hidden>♧ <span data-i18n="客户端账号">客户端账号</span></button
+          ><button data-tab="vpn-accounts">♧ <span data-i18n="VPN 账号">VPN 账号</span></button
           ><button data-tab="account">◇ <span><span data-i18n="账号与会话">账号与会话</span></span></button></nav
         ><div class="aside-bottom"
           ><span class="pulse"></span><span id="side-role"><span data-i18n="代理管理">代理管理</span></span
@@ -216,6 +217,24 @@
           </form>
           <p class="muted" data-i18n="监听 0.0.0.0 或 [::] 会向网络接口开放端口，请按需配置防火墙和目标服务认证。">监听 0.0.0.0 或 [::] 会向网络接口开放端口，请按需配置防火墙和目标服务认证。</p>
           <div id="tunnel-account-list" class="info-card"></div>
+        </section>
+        <section id="vpn-accounts" class="tab" hidden>
+          <div class="section-heading"><div><h2 data-i18n="VPN 账号">VPN 账号</h2>
+            <p class="muted" data-i18n="VPN 凭据保存到专用文件。重启 VPN 后加载已保存的账号。">VPN 凭据保存到专用文件。重启 VPN 后加载已保存的账号。</p></div>
+            <button id="vpn-accounts-refresh" class="secondary" type="button" data-i18n="刷新列表">刷新列表</button>
+          </div>
+          <p id="vpn-accounts-path" class="muted" aria-live="polite"></p>
+          <form id="vpn-account-form" class="info-card tunnel-account-create" hidden>
+            <label><span data-i18n="用户名">用户名</span><input id="vpn-account-name" maxlength="128" autocomplete="off" required></label>
+            <label><span data-i18n="密码">密码</span><input id="vpn-account-password" type="password" maxlength="1024" autocomplete="new-password"></label>
+            <button id="vpn-account-save" class="primary" type="submit" data-i18n="保存 VPN 凭据">保存 VPN 凭据</button>
+          </form>
+          <div id="vpn-account-list" class="info-card" hidden></div>
+          <div id="vpn-account-test-panel" hidden>
+            <button id="vpn-account-test" class="secondary" type="button" data-i18n="测试 VPN 连接">测试 VPN 连接</button>
+            <small class="muted" data-i18n="测试使用已保存的客户端 VPN 配置和凭据。">测试使用已保存的客户端 VPN 配置和凭据。</small>
+            <p id="vpn-account-test-result" class="vpn-test-result" role="status" aria-live="polite" hidden></p>
+          </div>
         </section>
         <section id="account" class="tab" hidden
           ><div class="section-heading"

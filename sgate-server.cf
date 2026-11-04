@@ -159,6 +159,10 @@ service sgate-server {
 # Stop other full-tunnel VPNs before enabling. These settings can also be edited through Web management.
     # VPN mode: disabled turns VPN off; both runs proxy and VPN; only runs VPN while retaining framework and management listeners. Applying VPN changes interrupts VPN and restores/rebuilds its network configuration. Other VPN options are ignored while disabled and validated when enabled.
     vpn-mode = disabled
+    # Dedicated VPN server accounts JSON. Setting the path enables account authentication.
+    vpn-accounts-file = ''
+    # Require an accounts file even when its path is empty.
+    vpn-require-account = false
     # IPv4 VPN subnet; must match on both ends and must not overlap existing networks.
     vpn-network = 10.77.0.0/24
     # TUN MTU in bytes, from 576 to 1500.

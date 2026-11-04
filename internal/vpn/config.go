@@ -36,6 +36,10 @@ type Config struct {
 	TCPNotSentLowat            int
 	TLS                        *tls.Config
 	Key                        []byte
+	Username, Password         string
+	RequireAccount             bool
+	VerifyAccount              func(string, []byte, []byte) bool
+	accountRevision            [32]byte
 	Network                    netip.Prefix
 	ClientIP                   netip.Addr
 	MTU                        int
@@ -55,6 +59,13 @@ type Config struct {
 }
 
 func (c Config) normalized(server bool) (Config, error) {
+	if server && c.RequireAccount && c.VerifyAccount == nil {
+		return c, errors.New("VPN account authentication requires an account verifier")
+	}
+	if !server && c.RequireAccount && (c.Username == "" || c.Password == "") {
+		return c, errors.New("VPN account authentication requires client credentials")
+	}
+
 	if c.TCPNotSentLowat < 0 || c.TCPNotSentLowat > 1<<20 {
 		return c, errors.New("VPN TCP unsent low-water mark must be 0..1MiB")
 	}

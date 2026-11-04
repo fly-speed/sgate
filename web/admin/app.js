@@ -17,6 +17,7 @@ let tunnelAccountCreateMappings = null;
 let configRole = "";
 let vpnConfigSupport = null;
 let vpnProbeState = null;
+let vpnAccountsView = null, vpnAccountsBusy = false;
 let vpnRestartButtons = [];
 // Keep each role's expanded sections across saves and language changes.
 const configGroupOpen = new Map();
@@ -955,18 +956,135 @@ async function testVPNConnection() {
   try{
     const result=await api("vpn-test",{method:"POST",body:JSON.stringify({fields})});
     if(p!==vpnProbeState||p.version!==version)return;
-    const stages={config:"客户端配置",resolve:"地址解析",udp:"UDP/DTLS 连接",quic:"QUIC/TLS 连接",tls:"TCP/TLS 连接",auth:"VPN 认证",datagram:"VPN 数据帧回显"};
     p.result.classList.toggle("bad",!result.ok);
-    localText(p.result,()=> (result.ok?t("VPN 测试成功"):t("VPN 测试失败"))+" · "+t(stages[result.stage]||result.stage)+
-      (result.detail?" · "+t(result.detail):"")+(result.error?" · "+t(result.error):"")+
-      (result.target?" · "+t("目标：")+result.target:"")+" · "+result.elapsed_ms+" ms"+
-      (result.address_in_use?" · "+t("虚拟 IP 已有在线连接；本次测试不会中断它。") : "")+
-      (result.client_limit_reached?" · "+t("服务端客户端数量已达上限，新连接可能被拒绝。") : ""));
+    localText(p.result,()=>vpnTestText(result));
   }catch(error){
     if(p!==vpnProbeState||p.version!==version)return;
     p.result.classList.toggle("bad",true);localText(p.result,()=>t("VPN 测试失败")+" · "+errorText(error));
   }finally{p.busy=false;if(p===vpnProbeState)updateVPNProbeButton();}
 }
+function vpnTestText(result) {
+  const stages={config:"客户端配置",resolve:"地址解析",udp:"UDP/DTLS 连接",quic:"QUIC/TLS 连接",tls:"TCP/TLS 连接",auth:"VPN 认证",datagram:"VPN 数据帧回显"};
+  return (result.ok?t("VPN 测试成功"):t("VPN 测试失败"))+" · "+t(stages[result.stage]||result.stage)+
+    (result.detail?" · "+t(result.detail):"")+(result.error?" · "+t(result.error):"")+
+    (result.target?" · "+t("目标：")+result.target:"")+" · "+result.elapsed_ms+" ms"+
+    (result.address_in_use?" · "+t("虚拟 IP 已有在线连接；本次测试不会中断它。") : "")+
+    (result.client_limit_reached?" · "+t("服务端客户端数量已达上限，新连接可能被拒绝。") : "");
+}
+function renderVPNAccounts(view) {
+  vpnAccountsView = view;
+  const server = state.role === "server";
+  localText($("vpn-accounts-path"), () => view.path + (view.blocked ? " · " + t(view.blocked) : ""));
+  $("vpn-account-test-panel").hidden = server;
+  const list = $("vpn-account-list");
+  list.hidden = !server || !view.accounts.length;
+  list.replaceChildren();
+  const name = $("vpn-account-name"), password = $("vpn-account-password");
+  name.value = server ? "" : view.accounts[0]?.username || "";
+  password.value = "";
+  password.required = server || !view.accounts.length;
+  localAttr(password, "placeholder", () => password.required ? "" : t("留空保留原密码"));
+  localText($("vpn-account-save"), () => server ? t("新增 VPN 账号") : t("保存 VPN 凭据"));
+  $("vpn-account-form").hidden = !!view.blocked;
+  if (!server) return;
+  for (const account of view.accounts) {
+    const row = document.createElement("form");
+    row.className = "tunnel-account-row vpn-account-row";
+    const field = (label, type, value) => {
+      const wrapper = document.createElement("label"), title = document.createElement("span"), input = document.createElement("input");
+      localText(title, () => t(label));input.type = type;
+      if (type === "checkbox") input.checked = value;
+      else {input.value = value;input.maxLength = type === "password" ? 1024 : 128;input.autocomplete = type === "password" ? "new-password" : "off";}
+      wrapper.append(title,input);row.append(wrapper);
+      return input;
+    };
+    const username = field("用户名","text",account.username);
+    username.required = true;
+    const secret = field("密码","password","");
+    localAttr(secret, "placeholder", () => t("留空保留原密码"));
+    const disabled = field("禁用","checkbox",account.disabled);
+    const actions = document.createElement("div");
+    actions.className = "tunnel-account-actions";
+    const save = document.createElement("button"), remove = document.createElement("button");
+    save.type = "submit";remove.type = "button";
+    save.className = remove.className = "secondary";
+    localText(save, () => t("保存"));localText(remove, () => t("删除"));
+    actions.append(save,remove);row.append(actions);list.append(row);
+    row.addEventListener("submit", (event) => {
+      event.preventDefault();
+      runVPNAccountAction("save", {action:"update",username:account.username,new_username:username.value,password:secret.value,disabled:disabled.checked});
+    });
+    remove.addEventListener("click", () => {
+      if (window.confirm(t("确认删除 VPN 账号？") + " " + account.username)) runVPNAccountAction("save", {action:"delete",username:account.username});
+    });
+  }
+}
+
+async function runVPNAccountAction(action, change) {
+  if (vpnAccountsBusy || !state.authenticated || serviceRestarting || configSaving) return;
+  if (action === "save" && (!vpnAccountsView || vpnAccountsView.blocked)) return;
+  if (change && (configByteLength(change.password || "") > 1024 || configByteLength(change.new_username || change.username) > 128)) {
+    notice(() => t("VPN 用户名或密码超过允许长度"), true);
+    return;
+  }
+  const run = epoch, result = $("vpn-account-test-result");
+  if (action === "load") $("vpn-account-test-panel").hidden = state.role !== "client";
+  const buttons = ["vpn-accounts-refresh","vpn-account-save","vpn-account-test"].map($);
+  vpnAccountsBusy = true;
+  buttons.forEach(button => button.disabled = true);
+  result.hidden = action !== "test";
+  if (action === "test") {
+    result.classList.toggle("bad",false);
+    localText(result, () => t("正在测试 VPN 连接、认证和数据报回显…"));
+  }
+  try {
+    const data = action === "test"
+      ? await api("vpn-test", {method:"POST",body:JSON.stringify({fields:{}})})
+      : await api("vpn-accounts", action === "save"
+        ? {method:"PUT",body:JSON.stringify({...change,revision:vpnAccountsView.revision})}
+        : {});
+    if (run !== epoch || !state.authenticated) return;
+    if (action === "test") {
+      result.classList.toggle("bad",!data.ok);
+      localText(result, () => vpnTestText(data));
+      return;
+    }
+    renderVPNAccounts(data);
+    if (data.config_changed && data.previous_config_revision === revision && data.config_revision) {
+      revision = data.config_revision;
+      const entry = configInputs.find(e => e.key === (state.role === "server" ? "vpn-accounts-file" : "vpn-credentials-file"));
+      if (entry) {
+        if (!entry.dirty) entry.input.value = data.config_value;
+        entry.original = data.config_value;
+        entry.dirty = entry.input.value !== entry.original;
+        updateConfigSaveButton(entry);
+      }
+      localText($("pending-label"), () => Object.keys(configEdits()).length ? t("有未保存修改") : t("已保存 · 待应用"));
+    }
+    if (action === "save") {
+      invalidateVPNProbe();
+      notice(() => t("VPN 账号已保存，重启 VPN 后生效"));
+    }
+  } catch (error) {
+    if (run !== epoch || !state.authenticated) return;
+    if (action === "test") {
+      result.classList.toggle("bad",true);
+      localText(result, () => t("VPN 测试失败") + " · " + errorText(error));
+    } else notice(() => errorText(error),true);
+  } finally {
+    if (run === epoch) {
+      vpnAccountsBusy = false;
+      buttons.forEach(button => button.disabled = false);
+    }
+  }
+}
+$("vpn-accounts-refresh").addEventListener("click", () => runVPNAccountAction("load"));
+$("vpn-account-test").addEventListener("click", () => runVPNAccountAction("test"));
+$("vpn-account-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  runVPNAccountAction("save", {action:state.role === "server" ? "create" : "save",
+    username:$("vpn-account-name").value,password:$("vpn-account-password").value});
+});
 function showConfigSaveError(error, selected = null) {
   const errors = {...(error.fieldErrors || {})};
   const mode = configInputs.find(row => row.key === "vpn-mode");
@@ -1069,6 +1187,13 @@ async function refreshAuth() {
 
 function renderSignedOut() {
  vpnProbeState=null;
+  vpnAccountsView = null;
+  vpnAccountsBusy = false;
+  $("vpn-account-name").value = $("vpn-account-password").value = "";
+  $("vpn-account-list").replaceChildren();
+  $("vpn-account-form").hidden = true;
+  $("vpn-account-test-result").hidden = true;
+  localText($("vpn-accounts-path"), () => "");
   tunnelAccountsLoad++;
   tunnelAccountsRevision = "";
   tunnelAccountRows = [];
@@ -1738,8 +1863,10 @@ document.querySelectorAll("[data-tab]").forEach((b) =>
       configuration: t("代理配置"),
       account: t("账号与会话"),
       "tunnel-accounts":t("客户端账号"),
+      "vpn-accounts":t("VPN 账号"),
     }[b.dataset.tab]));
     if (b.dataset.tab === "tunnel-accounts") loadTunnelAccounts().catch((e) => notice(() => errorText(e), true));
+    if (b.dataset.tab === "vpn-accounts") runVPNAccountAction("load");
     drawChart();
   }),
 );

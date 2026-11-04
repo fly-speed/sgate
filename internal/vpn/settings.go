@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -33,6 +34,7 @@ func Settings(role string) []Setting {
 		{"vpn-tun-name", "", "新建设备名；Linux 默认 sgate0，macOS 自动分配 utunN。"},
 		{"vpn-manage-network", "true", "自动配置路由、DNS 或服务端 NAT；需要管理员权限。"},
 		{"vpn-key-file", "", "VPN 共享密钥文件；留空复用 key-file；不是代理或 Web 账号认证。"},
+		{"vpn-require-account", "false", "要求配置 VPN 专用账号文件并启用账号认证；配置文件路径后自动启用。"},
 		{"vpn-noise-rate", "0", "本端每条 VPN 连接的白噪音负载字节/秒，支持 K/M，0 关闭，上限 10M；与代理 noise-* 参数独立。"},
 		{"vpn-noise-traffic", "true", "业务 IP 数据传输期间允许白噪音；拥塞或有待发送业务时优先业务。"},
 		{"vpn-noise-idle", "true", "VPN 已连接但无业务 IP 数据时允许白噪音；不要求存在业务连接。"},
@@ -40,6 +42,7 @@ func Settings(role string) []Setting {
 	}
 	if role == "server" {
 		return append(s,
+			Setting{"vpn-accounts-file", "", "VPN 服务端专用账号 JSON 文件，相对路径按本配置目录解析；填写后启用账号认证。"},
 			Setting{"vpn-listen", "0.0.0.0:8444", "独立 QUIC UDP 监听，不能与 quic-listen 共用 UDP 端口；配置 TCP 监听后可留空以关闭 UDP。"},
 			Setting{"vpn-udp-listen", "", "纯 UDP VPN 监听，例如 0.0.0.0:8445；与 QUIC 分开 UDP 端口，业务包不确认或重传，使用共享密钥加密认证。"},
 			Setting{"vpn-tcp-listen", "", "可选 TLS/TCP 与 WSS 共用监听，例如 0.0.0.0:8444；可与 VPN UDP 使用相同数字端口，不能与其他 TCP 服务共用。"},
@@ -51,6 +54,7 @@ func Settings(role string) []Setting {
 			Setting{"vpn-allow-private", "false", "允许访问服务器侧私网；始终禁止客户端互访。"})
 	}
 	return append(s,
+		Setting{"vpn-credentials-file", "", "VPN 客户端专用凭据 JSON 文件，包含一个账号；相对路径按本配置目录解析。"},
 		Setting{"vpn-server", "", "VPN 服务端 udp://、quic://、tcp:// 或 wss://主机:端口/vpn；UDP 使用共享密钥加密，业务包不重传，其余方式使用 TLS。保存后自动重连，已停止的 VPN 不会自动启动。"},
 		Setting{"vpn-tls-ca", "", "附加信任 CA；留空复用 tls-ca。自签名证书需要显式信任。"},
 		Setting{"vpn-routes", "0.0.0.0/1,128.0.0.0/1", "逗号分隔 IPv4 路由；服务端外层地址保留物理出口。"},
@@ -64,7 +68,7 @@ func RegisterFlags(fs *flag.FlagSet, role string) {
 	}
 	for _, s := range Settings(role) {
 		switch s.Key {
-		case "vpn-manage-network", "vpn-allow-private", "vpn-block-ipv6", "vpn-noise-traffic", "vpn-noise-idle":
+		case "vpn-require-account", "vpn-manage-network", "vpn-allow-private", "vpn-block-ipv6", "vpn-noise-traffic", "vpn-noise-idle":
 			fs.Bool(s.Key, s.Default == "true", s.Description)
 		case "vpn-noise-rate", "vpn-tcp-notsent-lowat":
 			cli.ByteSizeVar(fs, new(int), s.Key, 0, s.Description)
@@ -144,6 +148,19 @@ func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Pref
 	p.Config.UDPSendInterval = fs.Lookup("vpn-udp-send-interval").Value.(flag.Getter).Get().(time.Duration)
 	p.Config.Noise = NoiseConfig{Rate: noiseRate, Traffic: get("vpn-noise-traffic") == "true", Idle: get("vpn-noise-idle") == "true", IdleAfter: idleAfter}
 	p.Config.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
+	p.Config.RequireAccount = get("vpn-require-account") == "true"
+	accountField := "vpn-credentials-file"
+	if p.Role == "server" {
+		accountField = "vpn-accounts-file"
+	}
+	accountPath := get(accountField)
+	if accountPath != "" && !filepath.IsAbs(accountPath) && get("config") != "" {
+		accountPath = filepath.Join(filepath.Dir(get("config")), accountPath)
+	}
+	if err := p.Config.LoadAccountFile(accountPath, p.Role == "server"); err != nil {
+		return nil, invalidFields("无法加载 VPN 专用账号文件："+err.Error(), accountField, "vpn-require-account")
+	}
+
 	if p.Role == "server" {
 		p.Config.TCPNotSentLowat, noiseErr = cli.ParseByteSize(get("vpn-tcp-notsent-lowat"))
 		if noiseErr != nil {
@@ -256,6 +273,7 @@ func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Pref
 	h := sha256.New()
 	h.Write(b)
 	h.Write(key)
+	h.Write(p.Config.accountRevision[:])
 	for _, cert := range p.Config.TLS.Certificates {
 		for _, der := range cert.Certificate {
 			h.Write(der)

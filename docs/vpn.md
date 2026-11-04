@@ -86,6 +86,27 @@ VPN 参数统一以 `vpn-` 开头，不使用独立 CLI 示例中的 `role`、`s
 
 命令行覆盖仍优先，界面会显示“命令行已覆盖”；修改磁盘值不会取代显式启动参数。VPN 停止或关闭时，保存在线项不会自动启动 VPN，后续启动使用已应用定义中的在线值。直接编辑配置文件不触发自动监视，以上在线更新指通过管理网页保存；独立 `sgate-vpn` CLI 没有网页配置热更新入口。旧客户端未协商白噪音能力时仍需升级，在线更新不会绕过协议能力检查。
 
+## VPN 专用账号认证
+
+TCP、WSS、UDP 和 QUIC 共用 VPN 账号认证流程。两端仍需匹配的 VPN 共享密钥。服务端在分配虚拟 IP 或处理测试回显前校验用户名和密码证明。每次连接使用新的认证挑战，控制消息中携带密码证明。
+
+在服务端 `sgate-server.cf` 中设置 `vpn-accounts-file = vpn-server-accounts.json`，在客户端 `sgate-client.cf` 中设置 `vpn-credentials-file = vpn-client-credentials.json`。相对路径按各自配置文件所在目录解析。服务端文件可列出多个账号，客户端文件包含一个启用的账号，用户名和密码与服务端条目匹配。两个文件采用以下格式。
+
+```json
+{
+  "version": 1,
+  "accounts": [
+    {"username": "alice", "password": "<换成你的 VPN 密码>"}
+  ]
+}
+```
+
+服务端可为某个条目设置 `"disabled": true`。文件以明文保存密码，请限制文件权限，Unix 下可用 `chmod 600`。管理界面配置文件路径，“测试 VPN 连接”读取客户端文件中的凭据。更改文件内容或路径后重启 VPN 加载新配置。
+
+两端管理界面的“VPN 账号”页可直接保存凭据。服务端可新增账号、修改用户名或密码、禁用及删除账号。客户端保存单组凭据，留空密码可保留原值，也可用该页的“测试 VPN 连接”检查已保存的配置和凭据。首次保存且未指定路径时，页面会在配置目录创建本端专用文件并登记路径。保存后，可在配置页重启 VPN 应用账号变更。
+
+填写文件路径即启用账号认证。`vpn-require-account = true` 可以在文件路径误删时阻止 VPN 启动。旧配置默认只使用共享密钥。启用账号认证的两端需支持新版认证。独立 CLI 对应服务端 `accounts-file`、客户端 `credentials-file` 和可选的 `require-account`。
+
 ## TCP / WSS 备用传输
 
 Linux 服务端可设置 `vpn-tcp-notsent-lowat`，对新建 TCP/WSS VPN 套接字应用 `TCP_NOTSENT_LOWAT`，减少大下载提前写入内核的未发送字节。默认 `0` 使用系统默认，最大 `1M`，重启 VPN 生效。独立 CLI 参数为 `tcp-notsent-lowat`。外层 TCP 在途数据的顺序和重传仍由 TCP 处理。

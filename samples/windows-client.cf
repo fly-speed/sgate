@@ -13,6 +13,10 @@ service sgate-client {
     admin_session_dir = admin-client-sessions
     admin_setup_token_file = admin-client-setup.token
     vpn-mode = disabled
+    # Dedicated VPN client credentials JSON. Setting the path enables account authentication.
+    vpn-credentials-file = ''
+    # Require a credentials file even when its path is empty.
+    vpn-require-account = false
     vpn-server = ''
     vpn-network = 10.77.0.0/24
     vpn-mtu = 1280

@@ -972,6 +972,7 @@ html[lang="en"] nav button span {
   margin-bottom: 16px;
 }
 .tunnel-account-create { grid-template-columns: minmax(120px, 1fr) minmax(160px, 1fr) auto; }
+.vpn-account-row { grid-template-columns: minmax(120px, 1fr) minmax(160px, 1fr) auto auto; }
 .tunnel-account-row { padding: 12px 0; border-bottom: 1px solid var(--border); }
 .tunnel-account-row strong { overflow-wrap: anywhere; }
 .tunnel-account-row label { display: flex; align-items: center; gap: 6px; margin: 0; }

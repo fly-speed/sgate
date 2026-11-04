@@ -2099,3 +2099,49 @@ test("UDP VPN overview reports datagrams without QUIC congestion metrics", async
  assert.match(text,/业务数据无隧道重传/);
  assert.doesNotMatch(text,/QUIC RTT/);
 });
+
+test("VPN account page saves dedicated client credentials and probes saved settings", async () => {
+  const { context, elements } = await page();
+  context.vpnAccounts = {path:"/private/vpn-client-credentials.json",revision:"v1",accounts:[]};
+  vm.runInContext('state={authenticated:true,role:"client"}; renderVPNAccounts(vpnAccounts)', context);
+  const calls=[];
+  context.api = async (path,options) => {
+    calls.push([path,JSON.parse(options.body)]);
+    if (path === "vpn-test") return {ok:true,stage:"auth",elapsed_ms:10};
+    return {...context.vpnAccounts,revision:"v2",accounts:[{username:"alice",disabled:false}]};
+  };
+  elements.get("vpn-account-password").value = "new-private";
+  await vm.runInContext('runVPNAccountAction("save",{action:"save",username:"alice",password:"new-private"})', context);
+  assert.deepEqual(calls[0],["vpn-accounts",{action:"save",username:"alice",password:"new-private",revision:"v1"}]);
+  assert.equal(elements.get("vpn-account-name").value,"alice");
+  assert.equal(elements.get("vpn-account-password").value,"");
+  assert.equal(elements.get("vpn-account-test-panel").hidden,false);
+  await vm.runInContext('runVPNAccountAction("test")', context);
+  assert.deepEqual(calls[1],["vpn-test",{fields:{}}]);
+  assert.match(elements.get("vpn-account-test-result").textContent,/VPN 测试成功/);
+});
+
+test("server VPN account rows expose rename, disable and delete without revealing passwords", async () => {
+  const { context, elements } = await page();
+  context.vpnAccounts = {path:"/private/vpn-server-accounts.json",revision:"v1",accounts:[{username:"alice",disabled:false}]};
+  vm.runInContext('state={authenticated:true,role:"server"}; renderVPNAccounts(vpnAccounts)', context);
+  const row = elements.get("vpn-account-list").children[0];
+  assert.equal(row.children[1].children[1].value,"");
+  assert.equal(elements.get("vpn-account-test-panel").hidden,true);
+  row.children[0].children[1].value = "bob";
+  row.children[2].children[1].checked = true;
+  const calls = [];
+  context.api = async (path,options) => {
+    assert.equal(path,"vpn-accounts");
+    calls.push(JSON.parse(options.body));
+    return {...context.vpnAccounts,revision:"v2",accounts:calls.length === 1 ? [{username:"bob",disabled:true}] : []};
+  };
+  row.listeners.submit({preventDefault(){}});
+  await new Promise(setImmediate);
+  assert.deepEqual(calls[0],{action:"update",username:"alice",new_username:"bob",password:"",disabled:true,revision:"v1"});
+  context.window.confirm = () => true;
+  elements.get("vpn-account-list").children[0].children[3].children[1].listeners.click();
+  await new Promise(setImmediate);
+  assert.deepEqual(calls[1],{action:"delete",username:"bob",revision:"v2"});
+  assert.equal(elements.get("vpn-account-list").children.length,0);
+});

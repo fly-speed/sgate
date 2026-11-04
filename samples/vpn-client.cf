@@ -178,6 +178,8 @@ service vpn-client {
     # VPN mode: disabled turns VPN off; both runs proxy and VPN; only runs VPN while retaining framework and management listeners. Applying VPN changes interrupts VPN and restores/rebuilds its network configuration. Other VPN options are ignored while disabled and validated when enabled.
     # The integrated client VPN must be started manually from the Web overview.
 vpn-mode = disabled
+# Dedicated VPN client credentials JSON. Setting the path enables account authentication.
+vpn-credentials-file = ''
     # IPv4 VPN subnet; must match on both ends and must not overlap existing networks.
     vpn-network = 10.77.0.0/24
     # TUN MTU in bytes, from 576 to 1500.

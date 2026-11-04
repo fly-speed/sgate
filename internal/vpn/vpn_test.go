@@ -97,7 +97,7 @@ func fixture(t *testing.T, maxClients int) (*Server, Config, *memoryDevice) {
 func fixtureNoise(t *testing.T, maxClients int, noise NoiseConfig) (*Server, Config, *memoryDevice) {
 	return fixtureWire(t, maxClients, noise, "quic")
 }
-func fixtureWire(t *testing.T, maxClients int, noise NoiseConfig, transport string) (*Server, Config, *memoryDevice) {
+func fixtureWire(t *testing.T, maxClients int, noise NoiseConfig, transport string, configure ...func(*Config)) (*Server, Config, *memoryDevice) {
 	t.Helper()
 	seed := httptest.NewTLSServer(nil)
 	defer seed.Close()
@@ -117,6 +117,9 @@ func fixtureWire(t *testing.T, maxClients int, noise NoiseConfig, transport stri
 		}
 		// Keep UDP enabled for mixed-listener compatibility tests.
 		cfg.TCPListen = "127.0.0.1:0"
+	}
+	for _, apply := range configure {
+		apply(&cfg)
 	}
 	server, err := ListenServer(cfg, dev)
 	if err != nil {

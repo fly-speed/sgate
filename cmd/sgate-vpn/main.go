@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -26,6 +27,8 @@ import (
 )
 
 type options struct {
+	accountsFile, credentialsFile                                                                         string
+	requireAccount                                                                                        bool
 	tcpListen                                                                                             string
 	udpListen                                                                                             string
 	role, listen, server, keyFile, cert, key, ca, network, clientIP, tun, routes, dns, dnsService, egress string
@@ -39,6 +42,9 @@ type options struct {
 func parse(args []string) (options, error) {
 	o := options{}
 	fs := flag.NewFlagSet("sgate-vpn", flag.ContinueOnError)
+	fs.BoolVar(&o.requireAccount, "require-account", false, "require VPN account authentication")
+	fs.StringVar(&o.accountsFile, "accounts-file", "", "dedicated VPN server accounts JSON")
+	fs.StringVar(&o.credentialsFile, "credentials-file", "", "dedicated VPN client credentials JSON")
 	fs.StringVar(&o.role, "role", "client", "client or server")
 	fs.StringVar(&o.listen, "listen", ":8444", "server QUIC UDP listen address")
 	fs.StringVar(&o.udpListen, "udp-listen", "", "optional encrypted raw UDP listener; separate from QUIC UDP port")
@@ -73,6 +79,13 @@ func parse(args []string) (options, error) {
 	if o.role != "client" && o.role != "server" {
 		return o, errors.New("role must be client or server")
 	}
+	if configPath := fs.Lookup("config").Value.String(); configPath != "" {
+		for _, path := range []*string{&o.accountsFile, &o.credentialsFile} {
+			if *path != "" && !filepath.IsAbs(*path) {
+				*path = filepath.Join(filepath.Dir(configPath), *path)
+			}
+		}
+	}
 	return o, nil
 }
 func main() {
@@ -99,7 +112,17 @@ func run(args []string) error {
 		return err
 	}
 	stats := &vpn.Stats{}
-	config := vpn.Config{QueueMaxAge: o.queueMaxAge, UDPSendInterval: o.udpSendInterval, Noise: o.noise, Key: key, Network: network, ClientIP: clientIP, MTU: o.mtu, MaxClients: o.maxClients, AllowPrivate: o.private, Stats: stats, Logf: log.Printf}
+	config := vpn.Config{RequireAccount: o.requireAccount, QueueMaxAge: o.queueMaxAge, UDPSendInterval: o.udpSendInterval, Noise: o.noise, Key: key, Network: network, ClientIP: clientIP, MTU: o.mtu, MaxClients: o.maxClients, AllowPrivate: o.private, Stats: stats, Logf: log.Printf}
+	accountPath := o.credentialsFile
+	if o.role == "server" {
+		accountPath = o.accountsFile
+	}
+	if (o.role == "server" && o.credentialsFile != "") || (o.role == "client" && o.accountsFile != "") {
+		return errors.New("use accounts-file for a VPN server and credentials-file for a VPN client")
+	}
+	if err := config.LoadAccountFile(accountPath, o.role == "server"); err != nil {
+		return err
+	}
 	netOptions := vpn.NetworkOptions{Server: o.role == "server", Network: network, ClientIP: clientIP, MTU: o.mtu, DNSService: o.dnsService, Egress: o.egress, BlockIPv6: o.block6, Logf: log.Printf}
 	if !network.Addr().Is4() || network != network.Masked() || network.Bits() < 16 || network.Bits() > 30 || o.mtu < 576 || o.mtu > 1500 {
 		return errors.New("invalid IPv4 VPN subnet or MTU")

@@ -118,6 +118,22 @@ func accountVerifiers(accounts []Account) (map[string]accountVerifier, error) {
 	return verifiers, nil
 }
 
+// NewAccountProofVerifier snapshots the supplied accounts for a separate
+// challenge-response protocol. Disabled and unknown users both fail closed.
+func NewAccountProofVerifier(accounts []Account) (func(string, []byte, []byte) bool, error) {
+	verifiers, err := accountVerifiers(accounts)
+	if err != nil {
+		return nil, err
+	}
+	return func(username string, message, proof []byte) bool {
+		account, exists := verifiers[username]
+		mac := hmac.New(sha256.New, account.digest[:])
+		mac.Write(message)
+		matched := hmac.Equal(mac.Sum(nil), proof)
+		return exists && !account.disabled && matched
+	}, nil
+}
+
 // v2 encrypts both identity and password, while v1 remains byte-for-byte
 // compatible with existing unnamed clients and servers. The token is already
 // bound to the request URI, session, nonce, timestamp and handshake HMAC.

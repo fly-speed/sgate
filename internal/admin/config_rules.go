@@ -52,7 +52,7 @@ func configurationRules() map[string]configRule {
 	add("app_use_limit", configRule{Type: "integer", Min: "0", Max: "2147483647", Hint: "填写非负整数；app_use_limit 单位为次，app_threads 单位为线程数；0 保留框架默认行为。"})
 	add("app_threads", configRule{Type: "integer", Min: "-1", Max: "2147483647", Hint: "单位为线程数；-1 或 0 保持当前运行设置。"})
 	add("app_idle_limit app_wait_limit", configRule{Type: "integer", Min: "0", Max: "2147483647", Hint: "单位为秒，只填非负整数，不带 s 后缀。"})
-	add("vpn-noise-traffic vpn-noise-idle vpn-manage-network vpn-block-ipv6 vpn-allow-private admin_enabled admin-enabled send-addr allow-reverse noise-traffic noise-idle noise-empty", configRule{Type: "boolean", Choices: []string{"true", "false", "1", "0", "t", "f", "T", "F", "TRUE", "FALSE", "True", "False"}, Hint: "布尔值：true 开启，false 关闭。"})
+	add("vpn-require-account vpn-noise-traffic vpn-noise-idle vpn-manage-network vpn-block-ipv6 vpn-allow-private admin_enabled admin-enabled send-addr allow-reverse noise-traffic noise-idle noise-empty", configRule{Type: "boolean", Choices: []string{"true", "false", "1", "0", "t", "f", "T", "F", "TRUE", "FALSE", "True", "False"}, Hint: "布尔值：true 开启，false 关闭。"})
 	add("master_disable master_reuseport master_status_notify master_unpriv master_chroot master_stop_kill master_stop_wait master_private master_check_fds master_check_mem master_check_cpu master_check_io master_check_limit app_quick_abort app_reuseport", configRule{Type: "boolean", Choices: []string{"yes", "no", "true", "false", "y", "n", "1", "0"}, Hint: "布尔值：yes/true/y/1 开启，no/false/n/0 关闭。"})
 	for _, key := range strings.Fields("master_reuseport master_status_notify master_unpriv master_chroot") {
 		rules[key] = configRule{Type: "boolean", Choices: []string{"no", "false", "n", "0"}, Hint: "sgate 托管模式要求关闭：no/false/n/0。"}
@@ -71,6 +71,7 @@ func configurationRules() map[string]configRule {
 	add("vpn-tcp-notsent-lowat", configRule{Type: "bytes", Min: "0", Max: "1048576", Hint: "Linux VPN TCP/WSS 套接字未发送数据水位，支持 K/M，0 使用系统默认，最大 1M。"})
 	add("vpn-server", configRule{Type: "vpn-url", Hint: "udp://、quic://、tcp:// 或 wss://主机:端口/vpn；UDP 对应 vpn-udp-listen，TCP/WSS 对应 vpn-tcp-listen。"})
 	add("vpn-network vpn-client-ip vpn-routes vpn-dns vpn-tun-name vpn-dns-service vpn-egress-interface", configRule{Type: "text", Hint: "由 VPN 配置校验器检查；保存不创建网络设备，应用后生效。"})
+	add("vpn-accounts-file vpn-credentials-file", configRule{Type: "file", Hint: "VPN 专用账号 JSON 文件；相对路径按配置文件目录解析，配置路径后启用账号认证。"})
 	add("vpn-key-file vpn-tls-cert vpn-tls-key vpn-tls-ca", configRule{Type: "file", Hint: "VPN 文件路径；留空复用同用途的代理密钥或 TLS 配置。"})
 	add("quic-mode", configRule{Type: "enum", Choices: []string{"native", "legacy"}, Hint: "QUIC 原生多流或旧版单流协议；修改后重启代理。"})
 	add("master_type", configRule{Type: "enum", Choices: []string{"sock", "inet", "unix"}, Hint: "服务套接字类型：sock、inet 或 unix。"})
@@ -248,8 +249,8 @@ func validateFormAddress(value string, listen bool) error {
 // 只发布参数类型，不包含命令行的真实取值或密码。
 func argumentOptions(role string) map[string]configRule {
 	options := map[string]configRule{}
-	clientOnly := " vpn-server vpn-client-ip vpn-tls-ca vpn-routes vpn-dns vpn-dns-service vpn-block-ipv6 quic-mode username proxies proxies-file server addr send-addr allow-reverse tls-ca reconnect-min reconnect-max offline-timeout "
-	serverOnly := " vpn-listen vpn-udp-listen vpn-tcp-listen vpn-tls-cert vpn-tls-key vpn-max-clients vpn-egress-interface vpn-allow-private quic-listen accounts-file target allowed-targets path tls-cert tls-key session-ttl max-sessions "
+	clientOnly := " vpn-credentials-file vpn-server vpn-client-ip vpn-tls-ca vpn-routes vpn-dns vpn-dns-service vpn-block-ipv6 quic-mode username proxies proxies-file server addr send-addr allow-reverse tls-ca reconnect-min reconnect-max offline-timeout "
+	serverOnly := " vpn-accounts-file vpn-listen vpn-udp-listen vpn-tcp-listen vpn-tls-cert vpn-tls-key vpn-max-clients vpn-egress-interface vpn-allow-private quic-listen accounts-file target allowed-targets path tls-cert tls-key session-ttl max-sessions "
 	for key, rule := range configRules {
 		if strings.Contains(key, "_") || key == "master_args" || strings.HasPrefix(key, "app_") {
 			continue

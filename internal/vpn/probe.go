@@ -100,7 +100,9 @@ func Probe(parent context.Context, config Config) (result ProbeResult) {
 		return fail(errors.New("VPN server does not support automatic address assignment; update the server"))
 	}
 	h := hello{Probe: true, ID: result.TestID, IP: requestedIP(c.ClientIP), Network: c.Network.String(), MTU: c.MTU}
-	h.Proof = proof(c.Key, challenge, h)
+	if err = signHello(c, challenge, &h); err != nil {
+		return fail(err)
+	}
 	if err = writeJSON(control, h); err != nil {
 		return fail(err)
 	}
@@ -109,7 +111,7 @@ func Probe(parent context.Context, config Config) (result ProbeResult) {
 		return fail(err)
 	}
 	if reply.Error != "" {
-		result.Detail = "服务端已通过密钥校验，但拒绝了 VPN 参数；请按错误中的期望值修正。"
+		result.Detail = "服务端拒绝 VPN 认证或连接参数；请查看错误详情。"
 		return fail(errors.New(reply.Error))
 	}
 	if !reply.Probe || !hmac.Equal([]byte(reply.Proof), []byte(welcomeProof(c.Key, challenge, h, reply))) {
@@ -162,6 +164,9 @@ func Probe(parent context.Context, config Config) (result ProbeResult) {
 	}
 	if c.Transport == "udp" {
 		result.Detail = "UDP、DTLS-PSK、共享密钥认证及数据报回显通过；未测试 TUN、NAT 或互联网转发。"
+	}
+	if h.Username != "" {
+		result.Detail = strings.Replace(result.Detail, "共享密钥认证", "共享密钥及账号认证", 1)
 	}
 	return result
 }
