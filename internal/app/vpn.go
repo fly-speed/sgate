@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/netip"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,30 +16,33 @@ import (
 )
 
 type vpnHealth struct {
-	Generation   string       `json:"generation,omitempty"`
-	Enabled      bool         `json:"enabled"`
-	Healthy      bool         `json:"healthy"`
-	State        string       `json:"state"`
-	Role         string       `json:"role,omitempty"`
-	Mode         string       `json:"mode,omitempty"`
-	Device       string       `json:"device,omitempty"`
-	Address      string       `json:"address,omitempty"`
-	Transport    string       `json:"transport,omitempty"`
-	TCPAddress   string       `json:"tcp_address,omitempty"`
-	Network      string       `json:"network,omitempty"`
-	ClientIP     string       `json:"client_ip,omitempty"`
-	LastError    string       `json:"last_error,omitempty"`
-	QueueMaxAge  string       `json:"queue_max_age"`
-	NoiseRate    int          `json:"noise_rate"`
-	NoiseTraffic bool         `json:"noise_traffic"`
-	NoiseIdle    bool         `json:"noise_idle"`
-	Stats        vpn.Snapshot `json:"stats"`
+	Clients      []vpn.ClientSnapshot `json:"clients,omitempty"`
+	Generation   string               `json:"generation,omitempty"`
+	Enabled      bool                 `json:"enabled"`
+	Healthy      bool                 `json:"healthy"`
+	State        string               `json:"state"`
+	Role         string               `json:"role,omitempty"`
+	Mode         string               `json:"mode,omitempty"`
+	Device       string               `json:"device,omitempty"`
+	Address      string               `json:"address,omitempty"`
+	Transport    string               `json:"transport,omitempty"`
+	UDPAddress   string               `json:"udp_address,omitempty"`
+	TCPAddress   string               `json:"tcp_address,omitempty"`
+	Network      string               `json:"network,omitempty"`
+	ClientIP     string               `json:"client_ip,omitempty"`
+	LastError    string               `json:"last_error,omitempty"`
+	QueueMaxAge  string               `json:"queue_max_age"`
+	NoiseRate    int                  `json:"noise_rate"`
+	NoiseTraffic bool                 `json:"noise_traffic"`
+	NoiseIdle    bool                 `json:"noise_idle"`
+	Stats        vpn.Snapshot         `json:"stats"`
 }
 type vpnDevice interface {
 	vpn.Device
 	Name() string
 }
 type vpnWorker struct {
+	server *vpn.Server
 	mu     sync.Mutex
 	health vpnHealth
 	stats  *vpn.Stats
@@ -55,6 +60,9 @@ func (v *vpnWorker) snapshot() vpnHealth {
 	defer v.mu.Unlock()
 	h := v.health
 	h.Stats = v.stats.Snapshot()
+	if v.server != nil {
+		h.Clients = v.server.Clients()
+	}
 	if v.live != nil {
 		live := v.live.Snapshot()
 		h.NoiseRate = live.Noise.Rate
@@ -145,12 +153,19 @@ func (v *vpnWorker) run(ctx context.Context, p *vpn.Prepared, open func(string) 
 	if v.health.Transport == "" {
 		v.health.Transport = "quic"
 	}
-	if p.Role == "server" && config.TCPListen != "" {
-		if config.Address == "" {
-			v.health.Transport = "tcp,wss"
-		} else {
-			v.health.Transport = "quic,tcp,wss"
+	if p.Role == "server" {
+		transports := []string{}
+		if config.Address != "" {
+			transports = append(transports, "quic")
 		}
+		if config.UDPListen != "" {
+			transports = append(transports, "udp")
+			v.health.UDPAddress = config.UDPListen
+		}
+		if config.TCPListen != "" {
+			transports = append(transports, "tcp", "wss")
+		}
+		v.health.Transport = strings.Join(transports, ",")
 	}
 	v.mu.Unlock()
 	config.Logf = func(format string, args ...any) {
@@ -174,7 +189,9 @@ func (v *vpnWorker) run(ctx context.Context, p *vpn.Prepared, open func(string) 
 	v.health.Device = device.Name()
 	v.health.Address = config.Address
 	if p.Role == "client" {
-		v.health.ClientIP = config.ClientIP.String()
+		if config.ClientIP.IsValid() {
+			v.health.ClientIP = config.ClientIP.String()
+		}
 	}
 	v.mu.Unlock()
 	if p.Role == "server" {
@@ -191,6 +208,10 @@ func (v *vpnWorker) run(ctx context.Context, p *vpn.Prepared, open func(string) 
 		}
 		defer server.Close()
 		v.mu.Lock()
+		v.server = server
+		if server.UDPAddr() != nil {
+			v.health.UDPAddress = server.UDPAddr().String()
+		}
 		v.health.Address = server.Addr().String()
 		if server.TCPAddr() != nil {
 			v.health.TCPAddress = server.TCPAddr().String()
@@ -199,6 +220,12 @@ func (v *vpnWorker) run(ctx context.Context, p *vpn.Prepared, open func(string) 
 		v.health.Healthy = true
 		v.mu.Unlock()
 		return server.Serve(ctx)
+	}
+	config.Assigned = func(ip netip.Addr) {
+		network.ClientIP = ip
+		v.mu.Lock()
+		v.health.ClientIP = ip.String()
+		v.mu.Unlock()
 	}
 	if p.Manage {
 		config.Connected = func() (func(), error) { return vpn.ApplyNetwork(network) }

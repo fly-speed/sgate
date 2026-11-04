@@ -65,8 +65,9 @@ func configurationRules() map[string]configRule {
 	add("vpn-mtu", configRule{Type: "integer", Min: "576", Max: "1500", Hint: "IPv4 TUN MTU，默认 1280 字节。"})
 	add("vpn-max-clients", configRule{Type: "integer", Min: "1", Max: "254", Hint: "同时认证客户端数，1～254；在线调整仅限制新接入，不踢现有客户端。"})
 	add("vpn-listen", configRule{Type: "listen", Hint: "VPN 独立 UDP 地址；启用 TCP 监听后可留空，不能与 quic-listen 共用 UDP 端口。"})
+	add("vpn-udp-listen", configRule{Type: "listen", Hint: "纯 UDP VPN 监听，与 QUIC 分开 UDP 端口；业务包不重传，使用共享密钥加密。"})
 	add("vpn-tcp-listen", configRule{Type: "listen", Hint: "可选 TLS/TCP 与 WSS 共用监听，可与 VPN UDP 使用同一数字端口；两种监听至少填写一个。"})
-	add("vpn-server", configRule{Type: "vpn-url", Hint: "quic://、tcp:// 或 wss://证书域名:8444/vpn；tcp 也使用 TLS，TCP/WSS 需服务端启用 vpn-tcp-listen。"})
+	add("vpn-server", configRule{Type: "vpn-url", Hint: "udp://、quic://、tcp:// 或 wss://主机:端口/vpn；UDP 对应 vpn-udp-listen，TCP/WSS 对应 vpn-tcp-listen。"})
 	add("vpn-network vpn-client-ip vpn-routes vpn-dns vpn-tun-name vpn-dns-service vpn-egress-interface", configRule{Type: "text", Hint: "由 VPN 配置校验器检查；保存不创建网络设备，应用后生效。"})
 	add("vpn-key-file vpn-tls-cert vpn-tls-key vpn-tls-ca", configRule{Type: "file", Hint: "VPN 文件路径；留空复用同用途的代理密钥或 TLS 配置。"})
 	add("quic-mode", configRule{Type: "enum", Choices: []string{"native", "legacy"}, Hint: "QUIC 原生多流或旧版单流协议；修改后重启代理。"})
@@ -180,8 +181,8 @@ func validateConfigEdit(key, value string) error {
 		return nil
 	case "vpn-url":
 		u, e := url.Parse(value)
-		if e != nil || (u.Scheme != "quic" && u.Scheme != "tcp" && u.Scheme != "wss") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/vpn") || u.Hostname() == "" || u.Port() == "" {
-			return errors.New("需要 quic://、tcp:// 或 wss://主机:端口/vpn 地址")
+		if e != nil || (u.Scheme != "quic" && u.Scheme != "tcp" && u.Scheme != "wss" && u.Scheme != "udp") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/vpn") || u.Hostname() == "" || u.Port() == "" {
+			return errors.New("需要 udp://、quic://、tcp:// 或 wss://主机:端口/vpn 地址")
 		}
 		return validateFormAddress(u.Host, false)
 	case "url":
@@ -246,7 +247,7 @@ func validateFormAddress(value string, listen bool) error {
 func argumentOptions(role string) map[string]configRule {
 	options := map[string]configRule{}
 	clientOnly := " vpn-server vpn-client-ip vpn-tls-ca vpn-routes vpn-dns vpn-dns-service vpn-block-ipv6 quic-mode username proxies proxies-file server addr send-addr allow-reverse tls-ca reconnect-min reconnect-max offline-timeout "
-	serverOnly := " vpn-listen vpn-tcp-listen vpn-tls-cert vpn-tls-key vpn-max-clients vpn-egress-interface vpn-allow-private quic-listen accounts-file target allowed-targets path tls-cert tls-key session-ttl max-sessions "
+	serverOnly := " vpn-listen vpn-udp-listen vpn-tcp-listen vpn-tls-cert vpn-tls-key vpn-max-clients vpn-egress-interface vpn-allow-private quic-listen accounts-file target allowed-targets path tls-cert tls-key session-ttl max-sessions "
 	for key, rule := range configRules {
 		if strings.Contains(key, "_") || key == "master_args" || strings.HasPrefix(key, "app_") {
 			continue

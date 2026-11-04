@@ -105,7 +105,13 @@ func fixtureWire(t *testing.T, maxClients int, noise NoiseConfig, transport stri
 	roots.AddCert(seed.Certificate())
 	dev := newMemoryDevice()
 	cfg := Config{Noise: noise, Address: "127.0.0.1:0", TLS: seed.TLS, Key: bytes.Repeat([]byte{23}, 32), Network: netip.MustParsePrefix("10.77.0.0/24"), MTU: 1280, MaxClients: maxClients, Stats: &Stats{}}
-	if transport != "quic" {
+	if transport == "mixed" {
+		cfg.UDPListen = "127.0.0.1:0"
+	}
+	if transport == "udp" {
+		cfg.Address = ""
+		cfg.UDPListen = "127.0.0.1:0"
+	} else if transport != "quic" {
 		if transport != "mixed" {
 			cfg.Address = ""
 		}

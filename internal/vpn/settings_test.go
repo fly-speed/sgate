@@ -41,7 +41,7 @@ func TestIntegratedVPNPrepareIsOfflineAndValidatesBeforeTUN(t *testing.T) {
 	if e != nil || first == p.Fingerprint {
 		t.Fatal("change not detected", e)
 	}
-	for _, change := range [][2]string{{"vpn-server", "ws://example.com:443/vpn"}, {"vpn-server", "quic://user:password@example.com:443/vpn"}, {"vpn-server", "quic://example.com:0/vpn"}, {"vpn-network", "10.77.0.2/24"}, {"vpn-client-ip", "10.77.0.1"}, {"vpn-mtu", "1501"}, {"vpn-dns", "::1"}, {"vpn-routes", "::/0"}} {
+	for _, change := range [][2]string{{"vpn-server", "ws://example.com:443/vpn"}, {"vpn-server", "quic://user:password@example.com:443/vpn"}, {"vpn-server", "quic://example.com:0/vpn"}, {"vpn-network", "10.77.0.2/24"}, {"vpn-mtu", "1501"}, {"vpn-dns", "::1"}, {"vpn-routes", "::/0"}} {
 		f := integratedSettings(t)
 		f.Set("vpn-mode", "both")
 		f.Set(change[0], change[1])

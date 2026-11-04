@@ -1,8 +1,37 @@
 # 独立 IPv4 VPN：sgate-vpn
 
-`sgate-vpn` 是 sgate 新增的独立 VPN 入口，不依赖 OpenVPN。原有 `sgate-client` / `sgate-server` TCP 代理继续保留。VPN 默认使用独立 QUIC UDP 监听及 ALPN `sgate-vpn-v1`，IP 数据通过 DATAGRAM 发送。另支持 TLS/TCP 和 WSS 可靠传输，可同时监听并由客户端手动选择，均使用相同的共享密钥、证书校验和虚拟网络配置。
+`sgate-vpn` 是 sgate 新增的独立 VPN 入口，不依赖 OpenVPN。原有 `sgate-client` / `sgate-server` TCP 代理继续保留。新增无业务包重传的纯 UDP 传输 `udp://`，详见 [UDP VPN 配置、协议和验证](vpn-udp.md)。VPN 默认使用独立 QUIC UDP 监听及 ALPN `sgate-vpn-v1`，IP 数据通过 DATAGRAM 发送。另支持 TLS/TCP 和 WSS 可靠传输，可同时监听并由客户端手动选择，均使用相同的共享密钥、证书校验和虚拟网络配置。
 
-首版支持 macOS/Linux 服务端及客户端、IPv4、固定客户端虚拟地址、多客户端、自动 TUN/路由/DNS、Linux 转发/NAT、macOS PF NAT、退出清理和重连。除独立 CLI 外，现已集成至 `sgate-client` / `sgate-server`，可通过现有管理网页配置并随服务进程运行。Windows、IPv6 转发、按账号授权和在线配置不在此版本内。
+客户端的代理与独立 VPN 支持 macOS、Linux 和 Windows；VPN 服务端支持 macOS/Linux。支持 IPv4、服务端自动分配虚拟地址、多客户端、自动 TUN/路由/DNS、Linux 转发/NAT、macOS PF NAT、退出清理和重连。除独立 CLI 外，已集成至 `sgate-client` / `sgate-server`，可通过管理网页配置。IPv6 转发和按账号授权尚未提供。
+
+服务端实时概览的“在线 VPN 客户端”表格显示已认证客户端的公网 IP（服务端观察到的连接源地址）、VPN IP 和 QUIC/TCP/WSS 协议。局域网或运营商 NAT 后的客户端显示其出口地址；经中继时显示中继地址，不信任客户端自报或 HTTP 转发头。连通测试不计入在线列表，连接关闭后自动移除。
+
+## Windows 客户端
+
+Windows 10/11 的客户端使用 [Wintun 官方签名驱动](https://www.wintun.net/)，需要匹配 CPU 架构的 `wintun.dll` 与 `sgate-client.exe` 放在同一 `bin` 目录。普通代理不加载该驱动；启用 VPN 需要以管理员身份启动程序。服务端仍运行在 Linux/macOS。
+
+Windows 包还包含独立窗口程序 `bin/sgate-control.exe`，与 `sgate-client.exe` 是两个可执行程序。双击控制 APP，确认 Windows 管理员授权提示后，可点击“启动客户端”“停止客户端”，并查看进程 PID、停止进度及错误；“打开管理页面”进入原有代理/VPN 配置界面，“编辑配置”打开配置文件，“查看日志”打开 `logs/sgate-client.log`。客户端在后台运行，没有额外控制台窗口。控制 APP 本身不自动启动客户端，VPN 仍须在网页手动启动。
+
+控制 APP 仅管理由本窗口启动的子进程，不接管其他窗口、脚本或服务启动的客户端。同一安装目录只允许一个控制窗口。停止或关闭窗口通过私有继承管道通知客户端正常退出，等待原有退出流程完成 VPN 清理后才显示“已停止”或关闭窗口；不会用强制终止冒充清理完成。控制 APP 意外退出时，管道关闭也会通知子进程退出。若客户端正在清理，窗口保留“正在停止”的状态。强制结束客户端或系统关机仍无法保证完成清理。新版控制 APP 与客户端应配套更新；旧客户端会因不支持控制参数而拒绝启动，避免启动一个无法正常停止的旧进程。
+
+在已安装 Go 1.24 或更新版本的 Windows PowerShell 中执行：
+
+```powershell
+.\scripts\build-windows.ps1 -Architecture amd64
+# ARM64 Windows uses -Architecture arm64.
+```
+
+脚本在 `dist/windows-client/` 生成客户端、独立控制 APP、管理页面、Windows 示例配置和 PowerShell 启动器，并下载固定版本 Wintun、校验官方 SHA256、附带驱动许可。已有配置和密钥保留；首次生成的本地随机密钥须替换成与服务器相同的共享密钥。构建需要联网获取 Go 依赖和 Wintun。
+
+编辑包内 `conf/sgate-client.cf`，设置代理 `server`、认证参数、VPN `vpn-server` 和 CA；也可先启动后通过 `http://127.0.0.1:9081/` 管理。启动器将工作目录设置为包内 `conf`，确保共享密钥相对路径一致：
+
+```powershell
+.\dist\windows-client\scripts\start-windows-client.ps1
+```
+
+VPN 默认不自动启动，在网页配置启用模式后手动启动。Windows 创建独立 Wintun 网卡；认证分配地址后，先保留服务器外层 IP 的物理出口路由，再安装虚拟地址、隧道路由及 DNS。IPv6 阻断使用隧道黑洞路由。停止、重启或配置失败会逆序清理本次创建的设置，保留已有外层主机路由，物理网卡地址和 DNS 不作修改。`vpn-dns-service` 仅用于 macOS，Windows 自动使用新建的 Wintun 网卡。正常退出请先停止 VPN，再使用 Ctrl+C；强制终止无法保证执行清理。
+
+验证情况：已在 macOS 进行 Windows amd64/arm64 交叉编译，以及 Windows 路由计划、出口保留、已有路由保护、DNS 失败回滚、命令参数编码和 IPv6 阻断测试。控制进程的启动、正常停止、等待清理、重复启动保护、重启、控制管道 EOF 和取消流程有进程级测试。没有 Windows 实机，原生窗口交互、管理员提升、Wintun 驱动加载和系统网络转发尚未实测。原有 macOS/Linux 客户端继续支持独立启动。
 
 ## 在原客户端、服务端及网页中使用（推荐）
 
@@ -10,7 +39,7 @@
 
 `vpn-mode` 有三个值：`disabled` 默认关闭，忽略配置文件中其余 `vpn-*` 参数（包括另一端的参数和未使用的无效值）；`both` 同时运行原代理和独立 VPN；`only` 仅 VPN。启用 VPN 时仍严格校验本端适用的配置项；非 VPN 参数、重复项和配置结构错误始终会报错。`only` 不要求代理目标、上游地址或代理账号密码，忽略代理映射/账号文件，客户端界面不加载或编辑代理映射；保留框架的 TCP/HTTP 管理监听，客户端业务 TCP 立即关闭，服务端代理 HTTP 返回 404。服务端管理仍位于 `/admin/`。管理端口与 VPN 的 UDP 端口是不同入口。
 
-在**服务端**填写 `vpn-listen = 0.0.0.0:8444`、`vpn-network = 10.77.0.0/24`、`vpn-mtu = 1280`，选择所需模式。`vpn-tls-cert` / `vpn-tls-key` 可分别指定 VPN 证书，留空复用 `tls-cert` / `tls-key`。**客户端**填写 `vpn-server = quic://你的证书域名:8444/vpn`、`vpn-client-ip = 10.77.0.2`，配置相同子网/MTU、`vpn-dns` 和正确的 `vpn-dns-service`。自签名证书用 `vpn-tls-ca`（留空复用 `tls-ca`）。两端 `vpn-key-file` 必须指向相同密钥，留空复用 `key-file`。
+在**服务端**填写 `vpn-listen = 0.0.0.0:8444`、`vpn-network = 10.77.0.0/24`、`vpn-mtu = 1280`，选择所需模式。`vpn-tls-cert` / `vpn-tls-key` 可分别指定 VPN 证书，留空复用 `tls-cert` / `tls-key`。**客户端**填写 `vpn-server = quic://你的证书域名:8444/vpn`，配置相同子网/MTU、`vpn-dns` 和正确的 `vpn-dns-service`。虚拟 IPv4 地址由服务端认证后自动分配，客户端实时概览显示“虚拟 IP”。客户端表单和示例不再提供 `vpn-client-ip`；旧文件中的该项兼容读取但忽略。自签名证书用 `vpn-tls-ca`（留空复用 `tls-ca`）。两端 `vpn-key-file` 必须指向相同密钥，留空复用 `key-file`。
 
 VPN 参数统一以 `vpn-` 开头，不使用独立 CLI 示例中的 `role`、`server`、`listen` 等同名项来管理 VPN。`vpn-listen` 不能占用 `quic-listen` 的 UDP 端口。旧 `vpn-client.cf` / `vpn-server.cf` 仍是 OpenVPN 的 TCP 代理示例。
 
@@ -46,7 +75,7 @@ VPN 参数统一以 `vpn-` 开头，不使用独立 CLI 示例中的 `role`、`s
 
 客户端 `vpn-server` 单独标注“保存后自动重连”：运行中的 VPN 会先结束旧会话、完成旧路由和 DNS 清理，再连接新地址或协议；代理进程和管理界面保留，原 VPN 中的业务连接会中断。只更新地址与协议，不顺带应用其他待生效的 MTU、CA、密钥或路由设置。VPN 已停止时只更新下次启动的地址，不自动启动。切换复用客户端身份，避免旧 QUIC 会话尚未清理时发生虚拟 IP 占用冲突。连接失败会显示连接或重试错误，保存成功不代表连接已经成功。
 
-其余 VPN 参数标注“应用后生效”，包括模式、监听地址、证书/密钥、子网、虚拟地址、MTU、TUN、自动网络管理、出口网卡、路由、DNS 和 IPv6 阻断。“独立 VPN”分组新增“重启 VPN 使配置生效”按钮，只应用已保存的 VPN 配置并重建 VPN，保留管理登录、其他未保存草稿及待应用的代理配置。客户端点击该按钮属于显式启动或重启操作。`only` 与其他模式切换涉及代理运行方式，仍需使用全局“保存并应用”；专属重启按钮会明确提示原因。重启接口校验登录、CSRF 及配置版本。
+其余 VPN 参数标注“应用后生效”，包括模式、监听地址、证书/密钥、子网、MTU、TUN、自动网络管理、出口网卡、路由、DNS 和 IPv6 阻断。“独立 VPN”分组新增“重启 VPN 使配置生效”按钮，只应用已保存的 VPN 配置并重建 VPN，保留管理登录、其他未保存草稿及待应用的代理配置。客户端点击该按钮属于显式启动或重启操作。`only` 与其他模式切换涉及代理运行方式，仍需使用全局“保存并应用”；专属重启按钮会明确提示原因。重启接口校验登录、CSRF 及配置版本。
 
 普通在线参数保存不应用其他静态修改。重启表示已按保存配置发起重建，最终连接结果以实时概览为准。
 
@@ -147,7 +176,7 @@ server = quic://你的证书域名:8444/vpn
 key-file = /opt/soft/sgate/conf/vpn.key
 tls-ca = ''
 vpn-network = 10.77.0.0/24
-client-ip = 10.77.0.2
+# Virtual IPv4 address is assigned by the server after authentication.
 mtu = 1280
 tun-name = ''
 manage-network = true
@@ -173,7 +202,8 @@ Linux 客户端使用新 `sgate0`，自动 DNS 需要 `resolvectl` / systemd-res
 
 ## 连接、报文与权限边界
 
-- 每个同时在线客户端需要唯一 `client-ip`，如 `.2`、`.3`。虚拟地址和 MTU 在两端校验，不能使用网络/广播/服务器地址。
+- 服务端在 `vpn-network` 的可用主机地址中自动分配唯一虚拟 IPv4，跳过网络、网关和广播地址；认证与分配在同一临界区完成，断开后释放。在线重连复用同一身份的现存地址，会话已释放后可能分配不同地址；客户端在安装新地址前先清理旧网络设置。地址池或客户端数达到上限时明确拒绝接入。连通测试不占用地址、不替换在线会话。MTU、子网仍需两端一致。
+- 自动分配适用于 QUIC、TCP/TLS 和 WSS。新客户端要求服务端支持地址分配，请先升级服务端；旧服务端会明确提示需要更新。新服务端仍接受旧客户端显式申请空闲地址，方便逐端升级。
 - TLS 1.3 验证服务器证书；控制流使用随机挑战和共享密钥 HMAC 进行双向确认。未认证报文不会写入 TUN。不使用 0-RTT 发送 IP 包。
 - 当前是一个共享密钥信任域，持有密钥即获 VPN 准入；不是既有 Web 管理账号或 TCP 账号 ACL，也没有单用户撤销功能。
 - 服务端校验每个报文的源地址必须等于该连接绑定地址，禁止客户端互访；客户端校验目的地址必须为自己的虚拟地址。

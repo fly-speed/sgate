@@ -12,38 +12,40 @@ import (
 
 // clientOptions 集中保存命令行/配置文件合并后的值，main 只负责选择运行方式。
 type clientOptions struct {
-	adminEnabled     bool
-	vpnDiagnose      bool
-	adminConfig      string
-	listen           string
-	server           string
-	proxies          string
-	proxiesFile      string
-	addr             string
-	sendAddr         bool
-	allowReverse     bool
-	keyFile          string
-	password         string
-	username         string
-	ca               string
-	minRetry         time.Duration
-	maxRetry         time.Duration
-	offlineTimeout   time.Duration
-	maxStreams       int
-	buffer           int
-	heartbeat        time.Duration
-	heartbeatTimeout time.Duration
-	noiseInterval    time.Duration
-	noiseIntervalMin time.Duration
-	noiseIntervalMax time.Duration
-	noiseMin         int
-	noiseMax         int
+	desktopControlled bool
+	adminEnabled      bool
+	vpnDiagnose       bool
+	adminConfig       string
+	listen            string
+	server            string
+	proxies           string
+	proxiesFile       string
+	addr              string
+	sendAddr          bool
+	allowReverse      bool
+	keyFile           string
+	password          string
+	username          string
+	ca                string
+	minRetry          time.Duration
+	maxRetry          time.Duration
+	offlineTimeout    time.Duration
+	maxStreams        int
+	buffer            int
+	heartbeat         time.Duration
+	heartbeatTimeout  time.Duration
+	noiseInterval     time.Duration
+	noiseIntervalMin  time.Duration
+	noiseIntervalMax  time.Duration
+	noiseMin          int
+	noiseMax          int
 }
 
 func parseClientOptions() (clientOptions, error) {
 	cli.ResourceFlags(flag.CommandLine)
 	vpn.RegisterFlags(flag.CommandLine, "client")
 	var options clientOptions
+	flag.BoolVar(&options.desktopControlled, "desktop-controlled", false, "internal: require the inherited desktop control channel")
 	flag.BoolVar(&options.vpnDiagnose, "vpn-diagnose", false, "run isolated VPN HTTPS diagnostics and exit; no default route or DNS changes")
 	flag.BoolVar(
 		&options.adminEnabled,

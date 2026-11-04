@@ -9,6 +9,7 @@ import (
 )
 
 type TUN struct {
+	backend         io.ReadWriteCloser
 	file            *os.File
 	name            string
 	framed          bool
@@ -17,8 +18,16 @@ type TUN struct {
 }
 
 func (d *TUN) Name() string { return d.name }
-func (d *TUN) Close() error { return d.file.Close() }
+func (d *TUN) Close() error {
+	if d.backend != nil {
+		return d.backend.Close()
+	}
+	return d.file.Close()
+}
 func (d *TUN) Read(p []byte) (int, error) {
+	if d.backend != nil {
+		return d.backend.Read(p)
+	}
 	if !d.framed {
 		return d.file.Read(p)
 	}
@@ -41,6 +50,9 @@ func (d *TUN) Read(p []byte) (int, error) {
 	return n - 4, nil
 }
 func (d *TUN) Write(p []byte) (int, error) {
+	if d.backend != nil {
+		return d.backend.Write(p)
+	}
 	if !d.framed {
 		return d.file.Write(p)
 	}

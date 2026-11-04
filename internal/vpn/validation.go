@@ -25,9 +25,9 @@ func PlatformSupport(role string) Support {
 		s.Supported = false
 		s.Reason = "独立 VPN 服务端仅支持 macOS 和 Linux，当前系统无法启用。"
 	}
-	if role == "client" && runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+	if role == "client" && runtime.GOOS != "linux" && runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
 		s.Supported = false
-		s.Reason = "独立 VPN 客户端仅支持 macOS 和 Linux，当前系统无法启用。"
+		s.Reason = "独立 VPN 客户端仅支持 macOS、Linux 和 Windows，当前系统无法启用。"
 	}
 	return s
 }

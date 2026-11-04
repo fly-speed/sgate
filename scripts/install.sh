@@ -71,6 +71,8 @@ for name in $configs $scripts LICENSE; do require_file "$source_dir/$name"; done
 for name in $sample_configs $sample_scripts README.md; do require_file "$source_dir/samples/$name"; done
 for name in tls-cert.pem tls-key.pem README.md; do require_file "$source_dir/samples/test-tls/$name"; done
 require_file "$source_dir/docs/vpn.md"
+require_file "$source_dir/docs/vpn-udp.md"
+for name in pion-dtls pion-logging pion-transport; do require_file "$source_dir/third_party/licenses/$name.LICENSE"; done
 require_file "$source_dir/scripts/test-vpn-linux.py"
 for name in $assets; do require_file "$source_dir/web/admin/$name"; done
 for name in $licenses; do require_file "$source_dir/third_party/$name/LICENSE"; done
@@ -115,6 +117,8 @@ else
 fi
 # Integrated client/server builds also include VPN, so ship its guide and Linux verifier in every role.
 replace_file "$source_dir/docs/vpn.md" "$destination/docs/vpn.md" 0644
+replace_file "$source_dir/docs/vpn-udp.md" "$destination/docs/vpn-udp.md" 0644
+for name in pion-dtls pion-logging pion-transport; do replace_file "$source_dir/third_party/licenses/$name.LICENSE" "$destination/share/licenses/$name.LICENSE" 0644; done
 replace_file "$source_dir/scripts/test-vpn-linux.py" "$destination/bin/test-vpn-linux.py" 0755
 for name in $assets; do replace_file "$source_dir/web/admin/$name" "$destination/web/admin/$name" 0644; done
 replace_file "$source_dir/LICENSE" "$destination/LICENSE" 0644

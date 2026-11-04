@@ -130,6 +130,8 @@ func Diagnose(parent context.Context, p *Prepared) (report Diagnostic) {
 	c.Noise = NoiseConfig{}
 	var setupMu sync.Mutex
 	var setupError error
+	assignedIP := c.ClientIP
+	c.Assigned = func(ip netip.Addr) { setupMu.Lock(); assignedIP = ip; n.ClientIP = ip; setupMu.Unlock() }
 	c.Connected = func() (func(), error) {
 		undo, e := ApplyNetwork(n)
 		setupMu.Lock()
@@ -172,6 +174,9 @@ func Diagnose(parent context.Context, p *Prepared) (report Diagnostic) {
 		case <-ticker.C:
 		}
 	}
+	setupMu.Lock()
+	c.ClientIP = assignedIP
+	setupMu.Unlock()
 	report.Stage = "https"
 	dialer := &net.Dialer{Timeout: 8 * time.Second, LocalAddr: &net.TCPAddr{IP: c.ClientIP.AsSlice()}}
 	if err := bindDiagnosticInterface(dialer, dev.Name()); err != nil {

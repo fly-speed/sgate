@@ -230,9 +230,9 @@ func TestPublicCommandLineOptionsHaveFormRules(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			// One-shot operational diagnostics exit before starting the service;
-			// they are CLI actions rather than editable configuration settings.
-			if name == "vpn-diagnose" {
+			// Operational diagnostics and the private inherited desktop channel
+			// are CLI actions, not editable public configuration settings.
+			if name == "vpn-diagnose" || name == "desktop-controlled" {
 				return true
 			}
 			if _, exists := configRules[name]; !exists {

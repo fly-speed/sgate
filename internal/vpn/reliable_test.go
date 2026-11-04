@@ -172,10 +172,14 @@ func TestStableClientIdentityReplacesStaleSessionAcrossTransports(t *testing.T) 
 		t.Fatal(err)
 	}
 	cfg.ClientID = id
+	cfg.ClientIP = netip.Addr{}
+	assigned := make(chan netip.Addr, 2)
+	cfg.Assigned = func(ip netip.Addr) { assigned <- ip }
 	cfg.RetryMin = 5 * time.Second
 	cfg.RetryMax = 5 * time.Second
 	_, stopOld, _ := startClient(t, cfg)
 	await(t, "old QUIC client", func() bool { return cfg.Stats.Snapshot().Active == 1 })
+	oldIP := waitAssignment(t, assigned)
 	next := cfg
 	next.Transport = "wss"
 	next.Address = server.TCPAddr().String()
@@ -183,9 +187,13 @@ func TestStableClientIdentityReplacesStaleSessionAcrossTransports(t *testing.T) 
 	next.Stats = &Stats{}
 	local, _, _ := startClient(t, next)
 	await(t, "WSS replaces stale lease", func() bool { return next.Stats.Snapshot().Active == 1 })
+	newIP := waitAssignment(t, assigned)
+	if newIP != oldIP {
+		t.Fatal("protocol switch lost automatic assignment", oldIP, newIP)
+	}
 	stopOld()
 	await(t, "one current lease", func() bool { return server.cfg.Stats.Snapshot().Active == 1 })
-	packet := ipPacket(next.ClientIP.String(), "8.8.8.8", 1280)
+	packet := ipPacket(newIP.String(), "8.8.8.8", 1280)
 	local.out <- packet
 	receivePacket(t, remote, packet)
 }

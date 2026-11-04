@@ -3,6 +3,21 @@
 // UI translations only: editable values and protocol/configuration keys are never translated.
 const sgateI18n = (() => {
   const messages = {
+ "UDP、DTLS-PSK、共享密钥认证及数据报回显通过；未测试 TUN、NAT 或互联网转发。": "UDP, DTLS-PSK authentication and datagram echo passed; TUN, NAT and Internet forwarding were not tested.",
+ "需要 udp://、quic://、tcp:// 或 wss://主机:端口/vpn 地址": "Use udp://, quic://, tcp:// or wss://host:port/vpn",
+ "UDP/DTLS 连接": "UDP/DTLS connection",
+ "UDP 数据报发送/接收：": "UDP datagrams sent/received: ",
+ "UDP 接收队列丢弃：": "UDP receive queue drops: ",
+ "业务数据无隧道重传": "No tunnel retransmission of IP data",
+ "VPN 服务端 udp://、quic://、tcp:// 或 wss://主机:端口/vpn；UDP 使用共享密钥加密，业务包不重传，其余方式使用 TLS。保存后自动重连，已停止的 VPN 不会自动启动。": "VPN endpoint udp://, quic://, tcp:// or wss://host:port/vpn. UDP uses shared-key encryption without IP data retransmission; the other transports use TLS. Saving reconnects a running VPN; a stopped VPN stays stopped.",
+ "在线 VPN 客户端": "Online VPN clients",
+ "暂无在线 VPN 客户端": "No online VPN clients",
+ "公网 IP（服务端所见）": "Public IP (observed by server)",
+ "VPN IP": "VPN IP",
+ "传输协议": "Transport",
+ "虚拟 IP：": "Virtual IP: ",
+ "等待服务端分配": "Awaiting server assignment",
+ "VPN server does not support automatic address assignment; update the server": "VPN server does not support automatic address assignment; update the server",
  "队列过期丢弃：关闭": "Queue age expiry: disabled",
  "队列过期时间：": "Queue expiry: ",
  "发送队列过期时间，0 关闭过期丢弃（默认）；最多 1m。弱网 TCP 建议保持 0，队列容量仍有上限。": "Send queue expiry: 0 disables age drops (default), up to 1m. Keep 0 for weak-link TCP; queue capacity remains bounded.",

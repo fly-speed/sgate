@@ -48,6 +48,9 @@ func (c quicConnection) AcceptStream(ctx context.Context) (controlChannel, error
 }
 
 func dialConnection(ctx context.Context, c Config) (connection, error) {
+	if c.Transport == "udp" {
+		return dialUDP(ctx, c)
+	}
 	if c.Transport == "" || c.Transport == "quic" {
 		q, err := quic.DialAddr(ctx, c.Address, c.TLS, quicConfig(c.Stats))
 		if err != nil {

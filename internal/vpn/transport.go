@@ -219,6 +219,8 @@ func (p *peer) run(ctx context.Context, c Config, receive func([]byte) error) er
 }
 
 type Server struct {
+	udp            net.Listener
+	udpConns       sync.Map
 	cfg            Config
 	dev            Device
 	listener       *quic.Listener
@@ -248,16 +250,33 @@ func ListenServer(config Config, dev Device) (*Server, error) {
 	if dev == nil {
 		return nil, errors.New("VPN packet device required")
 	}
-	if len(c.TLS.Certificates) == 0 && c.TLS.GetCertificate == nil {
+	if (c.Address != "" || c.TCPListen != "") && len(c.TLS.Certificates) == 0 && c.TLS.GetCertificate == nil {
 		return nil, errors.New("VPN server certificate required")
 	}
 	s := &Server{cfg: c, dev: dev, peers: make(map[netip.Addr]*peer), incoming: make(chan connection), acceptErr: make(chan error, 2), closed: make(chan struct{})}
+	ok := false
+	defer func() {
+		if !ok {
+			if s.udp != nil {
+				s.udp.Close()
+			}
+			if s.tcp != nil {
+				s.tcp.Close()
+			}
+		}
+	}()
 	if c.TCPListen != "" {
 		if err := s.listenReliable(); err != nil {
 			return nil, err
 		}
 	}
+	if c.UDPListen != "" {
+		if err := s.listenUDP(); err != nil {
+			return nil, err
+		}
+	}
 	if c.Address == "" {
+		ok = true
 		return s, nil
 	}
 	udp, err := net.ListenPacket("udp", c.Address)
@@ -286,13 +305,23 @@ func ListenServer(config Config, dev Device) (*Server, error) {
 		return nil, err
 	}
 	s.listener, s.transport, s.packet = listener, tr, udp
+	ok = true
 	return s, nil
 }
 func (s *Server) Addr() net.Addr {
 	if s.listener != nil {
 		return s.listener.Addr()
 	}
+	if s.tcp == nil {
+		return s.udp.Addr()
+	}
 	return s.tcp.Addr()
+}
+func (s *Server) UDPAddr() net.Addr {
+	if s.udp != nil {
+		return s.udp.Addr()
+	}
+	return nil
 }
 func (s *Server) TCPAddr() net.Addr {
 	if s.tcp != nil {
@@ -306,6 +335,10 @@ func (s *Server) Close() error {
 		s.handlersClosed = true
 		s.handlerMu.Unlock()
 		close(s.closed)
+		if s.udp != nil {
+			s.udp.Close()
+		}
+		s.udpConns.Range(func(k, v any) bool { k.(net.Conn).Close(); return true })
 		if s.listener != nil {
 			s.listener.Close()
 		}
@@ -411,7 +444,7 @@ func (s *Server) accept(ctx context.Context, conn connection) {
 	if err != nil {
 		return
 	}
-	challenge = paddingChallengePrefix + challenge
+	challenge = assignmentChallengePrefix + challenge
 	if writeJSON(control, challenge) != nil {
 		return
 	}
@@ -439,7 +472,7 @@ func (s *Server) accept(ctx context.Context, conn connection) {
 		reason = "VPN network mismatch; expected vpn-network=" + s.cfg.Network.String()
 	case h.MTU != s.cfg.MTU:
 		reason = fmt.Sprintf("VPN MTU mismatch; expected vpn-mtu=%d", s.cfg.MTU)
-	case err != nil || !validClientIP(s.cfg.Network, ip):
+	case h.IP != "" && (err != nil || !validClientIP(s.cfg.Network, ip)):
 		reason = "invalid vpn-client-ip; choose an unused client host in " + s.cfg.Network.String()
 	case len(h.ID) != 64:
 		reason = "invalid VPN client identity"
@@ -455,12 +488,28 @@ func (s *Server) accept(ctx context.Context, conn connection) {
 		return
 	}
 	if h.Probe {
+		if h.IP == "" {
+			s.mu.Lock()
+			ip = s.allocateIPLocked(h.ID)
+			s.mu.Unlock()
+			if !ip.IsValid() {
+				ip = s.cfg.Network.Addr().Next().Next()
+			}
+		}
 		s.serveProbe(authCtx, conn, control, challenge, h, ip)
+		return
+	}
+	s.mu.Lock()
+	if h.IP == "" {
+		ip = s.allocateIPLocked(h.ID)
+	}
+	if !ip.IsValid() {
+		s.mu.Unlock()
+		reject(control, "VPN address pool exhausted")
 		return
 	}
 	flow, _ := conn.Context().Value(flowContextKey{}).(*datagramFlow)
 	p := &peer{conn: conn, control: control, id: h.ID, ip: ip, queue: newPacketQueue(s.cfg.QueueMaxAge, s.cfg.Live), padding: h.Padding, flow: flow}
-	s.mu.Lock()
 	old := s.peers[ip]
 	if (old != nil && old.id != h.ID) || (old == nil && len(s.peers) >= s.cfg.Live.Snapshot().MaxClients) {
 		s.mu.Unlock()
@@ -551,7 +600,7 @@ func RunClient(parent context.Context, config Config, dev Device) error {
 			}
 			src, _, ok := ipv4(buffer[:n], c.MTU)
 			p := active.Load()
-			if !ok || src != c.ClientIP || p == nil {
+			if !ok || p == nil || src != p.ip {
 				c.Stats.drops.Add(1)
 				continue
 			}
@@ -622,7 +671,10 @@ func clientConnection(ctx context.Context, c Config, id string, active *atomic.P
 	if err = readJSON(control, &challenge); err != nil {
 		return err
 	}
-	h := hello{Padding: strings.HasPrefix(challenge, paddingChallengePrefix), ID: id, IP: c.ClientIP.String(), Network: c.Network.String(), MTU: c.MTU}
+	if !c.ClientIP.IsValid() && !strings.HasPrefix(challenge, assignmentChallengePrefix) {
+		return errors.New("VPN server does not support automatic address assignment; update the server")
+	}
+	h := hello{Padding: strings.HasPrefix(challenge, paddingChallengePrefix), ID: id, IP: requestedIP(c.ClientIP), Network: c.Network.String(), MTU: c.MTU}
 	h.Proof = proof(c.Key, challenge, h)
 	if err = writeJSON(control, h); err != nil {
 		return err
@@ -637,8 +689,19 @@ func clientConnection(ctx context.Context, c Config, id string, active *atomic.P
 	if !hmac.Equal([]byte(reply.Proof), []byte(welcomeProof(c.Key, challenge, h, reply))) {
 		return errors.New("invalid VPN server authentication proof")
 	}
-	if reply.IP != c.ClientIP.String() || reply.Network != c.Network.String() || reply.Gateway != c.Network.Addr().Next().String() || reply.MTU != c.MTU {
+	assigned, assignErr := netip.ParseAddr(reply.IP)
+	if assignErr != nil || !validClientIP(c.Network, assigned) || (c.ClientIP.IsValid() && assigned != c.ClientIP) || reply.Network != c.Network.String() || reply.Gateway != c.Network.Addr().Next().String() || reply.MTU != c.MTU {
 		return errors.New("invalid VPN server assignment")
+	}
+	// Dynamic assignments may change after reconnect or a server restart.
+	// Remove the previous address and routes before installing the new assignment.
+	if !c.ClientIP.IsValid() && *cleanup != nil {
+		(*cleanup)()
+		*cleanup = nil
+	}
+	c.ClientIP = assigned
+	if c.Assigned != nil {
+		c.Assigned(assigned)
 	}
 	control.SetDeadline(time.Time{})
 	p := &peer{conn: conn, control: control, id: id, ip: c.ClientIP, queue: newPacketQueue(c.QueueMaxAge, c.Live), padding: h.Padding && reply.Padding, flow: flow}

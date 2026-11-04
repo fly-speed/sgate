@@ -40,6 +40,7 @@ func Settings(role string) []Setting {
 	if role == "server" {
 		return append(s,
 			Setting{"vpn-listen", "0.0.0.0:8444", "独立 QUIC UDP 监听，不能与 quic-listen 共用 UDP 端口；配置 TCP 监听后可留空以关闭 UDP。"},
+			Setting{"vpn-udp-listen", "", "纯 UDP VPN 监听，例如 0.0.0.0:8445；与 QUIC 分开 UDP 端口，业务包不确认或重传，使用共享密钥加密认证。"},
 			Setting{"vpn-tcp-listen", "", "可选 TLS/TCP 与 WSS 共用监听，例如 0.0.0.0:8444；可与 VPN UDP 使用相同数字端口，不能与其他 TCP 服务共用。"},
 			Setting{"vpn-tls-cert", "", "VPN 服务器证书；留空复用 tls-cert。"},
 			Setting{"vpn-tls-key", "", "VPN 证书私钥；留空复用 tls-key。"},
@@ -48,8 +49,7 @@ func Settings(role string) []Setting {
 			Setting{"vpn-allow-private", "false", "允许访问服务器侧私网；始终禁止客户端互访。"})
 	}
 	return append(s,
-		Setting{"vpn-server", "", "VPN 服务端 quic://、tcp:// 或 wss://证书域名:8444/vpn；tcp 也强制 TLS 加密。保存后自动重连，已停止的 VPN 不会自动启动。"},
-		Setting{"vpn-client-ip", "10.77.0.2", "该客户端固定虚拟 IPv4 地址，不能与其他客户端重复。"},
+		Setting{"vpn-server", "", "VPN 服务端 udp://、quic://、tcp:// 或 wss://主机:端口/vpn；UDP 使用共享密钥加密，业务包不重传，其余方式使用 TLS。保存后自动重连，已停止的 VPN 不会自动启动。"},
 		Setting{"vpn-tls-ca", "", "附加信任 CA；留空复用 tls-ca。自签名证书需要显式信任。"},
 		Setting{"vpn-routes", "0.0.0.0/1,128.0.0.0/1", "逗号分隔 IPv4 路由；服务端外层地址保留物理出口。"},
 		Setting{"vpn-dns", "1.1.1.1", "VPN IPv4 DNS，逗号分隔；留空不改 DNS。"},
@@ -57,6 +57,9 @@ func Settings(role string) []Setting {
 		Setting{"vpn-block-ipv6", "true", "首版不转发 IPv6；将公网 IPv6 导入 TUN 后丢弃，避免绕过 VPN。"})
 }
 func RegisterFlags(fs *flag.FlagSet, role string) {
+	if role == "client" {
+		fs.String("vpn-client-ip", "", "deprecated; ignored, address is assigned by server")
+	}
 	for _, s := range Settings(role) {
 		switch s.Key {
 		case "vpn-manage-network", "vpn-allow-private", "vpn-block-ipv6", "vpn-noise-traffic", "vpn-noise-idle":
@@ -130,7 +133,7 @@ func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Pref
 	if noiseErr != nil {
 		return nil, noiseErr
 	}
-	p.Config = Config{Key: key, Network: network, MTU: mtu, ClientIP: netip.MustParseAddr("10.77.0.2"), Address: "127.0.0.1:8444", MaxClients: 64}
+	p.Config = Config{Key: key, Network: network, MTU: mtu, Address: "127.0.0.1:8444", MaxClients: 64}
 	p.Network = NetworkOptions{Server: p.Role == "server", Network: network, MTU: mtu, Egress: get("vpn-egress-interface"), BlockIPv6: get("vpn-block-ipv6") == "true", DNSService: get("vpn-dns-service")}
 	p.Config.QueueMaxAge, noiseErr = time.ParseDuration(get("vpn-queue-max-age"))
 	if noiseErr != nil {
@@ -139,25 +142,39 @@ func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Pref
 	p.Config.Noise = NoiseConfig{Rate: noiseRate, Traffic: get("vpn-noise-traffic") == "true", Idle: get("vpn-noise-idle") == "true", IdleAfter: idleAfter}
 	p.Config.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
 	if p.Role == "server" {
-		certPath, keyPath := get("vpn-tls-cert"), get("vpn-tls-key")
-		if certPath == "" {
-			certPath = get("tls-cert")
-		}
-		if keyPath == "" {
-			keyPath = get("tls-key")
-		}
-		if certPath == "" || keyPath == "" {
-			return nil, invalidFields("启用 VPN 需要服务器证书和私钥：填写 vpn-tls-cert / vpn-tls-key，或配置可复用的 tls-cert / tls-key。", "vpn-mode", "vpn-tls-cert", "vpn-tls-key")
-		}
-		cert, err := tls.LoadX509KeyPair(certPath, keyPath)
-		if err != nil {
-			return nil, invalidFields("VPN 证书或私钥无法加载："+err.Error(), "vpn-mode", "vpn-tls-cert", "vpn-tls-key")
-		}
-		p.Config.TLS.Certificates = []tls.Certificate{cert}
 		p.Config.Address = get("vpn-listen")
 		p.Config.TCPListen = get("vpn-tcp-listen")
-		if p.Config.Address == "" && p.Config.TCPListen == "" {
-			return nil, invalidFields("至少配置一个 VPN 监听：vpn-listen (QUIC/UDP) 或 vpn-tcp-listen (TLS/TCP、WSS)。", "vpn-listen", "vpn-tcp-listen")
+		p.Config.UDPListen = get("vpn-udp-listen")
+		if p.Config.Address != "" || p.Config.TCPListen != "" {
+			certPath, keyPath := get("vpn-tls-cert"), get("vpn-tls-key")
+			if certPath == "" {
+				certPath = get("tls-cert")
+			}
+			if keyPath == "" {
+				keyPath = get("tls-key")
+			}
+			if certPath == "" || keyPath == "" {
+				return nil, invalidFields("启用 VPN 需要服务器证书和私钥：填写 vpn-tls-cert / vpn-tls-key，或配置可复用的 tls-cert / tls-key。", "vpn-mode", "vpn-tls-cert", "vpn-tls-key")
+			}
+			cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+			if err != nil {
+				return nil, invalidFields("VPN 证书或私钥无法加载："+err.Error(), "vpn-mode", "vpn-tls-cert", "vpn-tls-key")
+			}
+			p.Config.TLS.Certificates = []tls.Certificate{cert}
+		}
+		p.Config.Address = get("vpn-listen")
+		p.Config.TCPListen = get("vpn-tcp-listen")
+		if p.Config.Address == "" && p.Config.TCPListen == "" && p.Config.UDPListen == "" {
+			return nil, invalidFields("至少配置一个 VPN 监听：vpn-listen（QUIC）、vpn-udp-listen（UDP）或 vpn-tcp-listen（TCP/WSS）。", "vpn-listen", "vpn-udp-listen", "vpn-tcp-listen")
+		}
+		if p.Config.UDPListen != "" {
+			for _, other := range []string{p.Config.Address, get("quic-listen")} {
+				_, a, e1 := net.SplitHostPort(other)
+				_, b, e2 := net.SplitHostPort(p.Config.UDPListen)
+				if e1 == nil && e2 == nil && a == b && a != "0" {
+					return nil, invalidFields("vpn-udp-listen 与 QUIC UDP 监听端口冲突，请使用不同 UDP 端口。", "vpn-udp-listen")
+				}
+			}
 		}
 		p.Config.MaxClients = fs.Lookup("vpn-max-clients").Value.(flag.Getter).Get().(int)
 		p.Config.AllowPrivate = get("vpn-allow-private") == "true"
@@ -172,30 +189,26 @@ func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Pref
 		if err := setServerURL(p, get("vpn-server")); err != nil {
 			return nil, err
 		}
-		roots, err := x509.SystemCertPool()
-		if err != nil {
-			roots = x509.NewCertPool()
-		}
-		ca := get("vpn-tls-ca")
-		if ca == "" {
-			ca = get("tls-ca")
-		}
-		if ca != "" {
-			b, e := os.ReadFile(ca)
-			if e != nil {
-				return nil, invalidFields("VPN CA 文件无法读取："+e.Error(), "vpn-mode", "vpn-tls-ca")
+		{
+			roots, err := x509.SystemCertPool()
+			if err != nil {
+				roots = x509.NewCertPool()
 			}
-			if !roots.AppendCertsFromPEM(b) {
-				return nil, invalidFields("VPN CA 文件中没有有效的 PEM 证书。", "vpn-mode", "vpn-tls-ca")
+			ca := get("vpn-tls-ca")
+			if ca == "" {
+				ca = get("tls-ca")
 			}
+			if ca != "" {
+				b, e := os.ReadFile(ca)
+				if e != nil && p.Config.Transport != "udp" {
+					return nil, invalidFields("VPN CA 文件无法读取："+e.Error(), "vpn-mode", "vpn-tls-ca")
+				}
+				if !roots.AppendCertsFromPEM(b) && p.Config.Transport != "udp" {
+					return nil, invalidFields("VPN CA 文件中没有有效的 PEM 证书。", "vpn-mode", "vpn-tls-ca")
+				}
+			}
+			p.Config.TLS.RootCAs = roots
 		}
-		p.Config.TLS.RootCAs = roots
-		ip, err := netip.ParseAddr(get("vpn-client-ip"))
-		if err != nil {
-			return nil, err
-		}
-		p.Config.ClientIP = ip
-		p.Network.ClientIP = ip
 		if raw := get("vpn-routes"); raw != "" {
 			for _, r := range strings.Split(raw, ",") {
 				prefix, e := netip.ParsePrefix(strings.TrimSpace(r))

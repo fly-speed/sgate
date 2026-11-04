@@ -1920,8 +1920,7 @@ async function vpnProbePage() {
   const p=await page();
   vm.runInContext(`renderConfigFields([
     {key:"vpn-mode",value:"disabled",group:"独立 VPN",validation:{type:"enum",choices:["disabled","both","only"]}},
-    {key:"vpn-server",value:"quic://vpn.example.com:8444/vpn",group:"独立 VPN",validation:{type:"url"}},
-    {key:"vpn-client-ip",value:"10.77.0.2",group:"独立 VPN"}
+    {key:"vpn-server",value:"quic://vpn.example.com:8444/vpn",group:"独立 VPN",validation:{type:"url"}}
   ],{},"client");var vpnModeRow=configInputs.find(row=>row.key==="vpn-mode"),vpnServerRow=configInputs.find(row=>row.key==="vpn-server")`,p.context);
   return p;
 }
@@ -2016,7 +2015,7 @@ test("VPN observations expose MSS and fragment eviction counters", async () => {
 
 test("VPN URL validation accepts secure transport alternatives and preserves proxy rules", async () => {
  const {context}=await page();
- for(const address of ["quic://vpn.example.com:8444/vpn","tcp://vpn.example.com:8444/vpn","wss://vpn.example.com:443/vpn"]){
+ for(const address of ["udp://vpn.example.com:8445/vpn","quic://vpn.example.com:8444/vpn","tcp://vpn.example.com:8444/vpn","wss://vpn.example.com:443/vpn"]){
   context.address=address;
   assert.equal(vm.runInContext('configValueError("vpn-server",address,{type:"vpn-url"})',context),"",address);
  }
@@ -2064,4 +2063,39 @@ test("VPN endpoint uses reconnect badge and scoped restart preserves unsaved dra
  assert.equal(vm.runInContext('vpnRestartButtons[0].disabled',context),false);
  assert.match(vm.runInContext('configSaveMessage({live_applied:["vpn-server"],runtime:{vpn:{enabled:true,state:"connecting"}}})',context),/重新连接/);
  assert.match(vm.runInContext('configSaveMessage({live_applied:["vpn-server"],runtime:{vpn:{enabled:true,state:"stopped"}}})',context),/下次启动/);
+});
+
+
+test("VPN overview shows the server-assigned IP and pending allocation", async () => {
+ const {context}=await page();
+ const pending=vm.runInContext('vpnObservationText({enabled:true,role:"client",state:"connecting",stats:{}})',context);
+ assert.match(pending,/等待服务端分配/);
+ const assigned=vm.runInContext('vpnObservationText({enabled:true,role:"client",state:"connected",client_ip:"10.77.0.19",stats:{}})',context);
+ assert.match(assigned,/IP.*10\.77\.0\.19/);
+ assert.doesNotMatch(assigned,/等待服务端分配/);
+});
+
+
+test("VPN server overview shows observed and virtual addresses and clears old sessions", async () => {
+ const {context,elements}=await page();
+ vm.runInContext('renderVPNClients({enabled:true,role:"server",clients:[{public_ip:"203.0.113.7",vpn_ip:"10.77.0.2",transport:"wss"}]})',context);
+ const container=elements.get("vpn-clients");
+ assert.equal(container.hidden,false);
+ let cells=container.children[1].children[1].children[0].children;
+ assert.deepEqual(cells.map(cell=>cell.textContent),["203.0.113.7","10.77.0.2","WSS"]);
+ vm.runInContext('renderVPNClients({enabled:true,role:"server",clients:[]})',context);
+ assert.equal(container.children.length,2);
+ assert.match(container.children[1].textContent,/暂无/);
+ vm.runInContext('renderVPNClients({enabled:true,role:"client",clients:[{public_ip:"malicious"}]})',context);
+ assert.equal(container.hidden,true);
+ assert.equal(container.children.length,0);
+});
+
+
+test("UDP VPN overview reports datagrams without QUIC congestion metrics", async () => {
+ const {context}=await page();
+ const text=vm.runInContext('vpnQueueObservationText({enabled:true,transport:"udp",stats:{send_queue_max_wait_ms:0,udp_tx_datagrams:12,udp_rx_datagrams:8,udp_receive_queue_drops:2}})',context);
+ assert.match(text,/12 \/ 8/);
+ assert.match(text,/业务数据无隧道重传/);
+ assert.doesNotMatch(text,/QUIC RTT/);
 });

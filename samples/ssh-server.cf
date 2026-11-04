@@ -200,9 +200,13 @@ service ssh-server {
     # Optional shared TLS/TCP and WSS listener; empty disables both transports.
     # To enable: set vpn-tcp-listen = 0.0.0.0:8444 and allow TCP 8444 in the firewall.
     # TCP and UDP may use the same numeric port; other TCP services cannot share it.
-    # Leave vpn-listen empty only when TCP/WSS-only operation is intended.
+    # Leave vpn-listen empty when only TCP/WSS or raw UDP is intended.
     # The listener reuses vpn-tls-cert/vpn-tls-key (or tls-cert/tls-key).
     vpn-tcp-listen = ''
+    # Optional raw UDP VPN listener. Use a different UDP port from vpn-listen and quic-listen.
+    # Uses the shared key for DTLS encryption/authentication; IP data has no tunnel ACK or retransmission.
+    vpn-udp-listen = ''
+
     # VPN server certificate PEM; empty reuses tls-cert.
     vpn-tls-cert = ''
     # VPN certificate private key PEM; empty reuses tls-key.

@@ -20,6 +20,7 @@
 #/tls-cert.pem
 #/tls-key.pem
 /artifacts/
+/dist/
 
 # Web management runtime credentials, cookies, initialization tokens and backups
 /conf/admin-*-users.json

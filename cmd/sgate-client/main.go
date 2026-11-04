@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"sgate/internal/clientcontrol"
 	"sgate/internal/vpn"
 	"syscall"
 
@@ -32,6 +33,12 @@ func run() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if options.desktopControlled {
+		if os.Getenv(clientcontrol.Environment) != "1" {
+			return fmt.Errorf("desktop control channel is missing; launch from sgate-control.exe")
+		}
+		defer clientcontrol.Watch(ctx, stop, os.Stdin)()
+	}
 	if options.vpnDiagnose {
 		prepared, err := vpn.Prepare("client", flag.CommandLine)
 		if err != nil {

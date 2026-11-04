@@ -54,6 +54,18 @@ func TestVPNFieldsUpgradeOldConfigThroughAuthenticatedAPI(t *testing.T) {
 		}
 	}
 }
+
+func TestVPNClientFixedAddressHiddenFromLegacyConfig(t *testing.T) {
+	fields, err := configFields("vpn-client-ip = 10.77.0.99\nvpn-server = tcp://vpn.example.com:8444/vpn\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range vpnConfigFields(fields, "client") {
+		if field.Key == "vpn-client-ip" {
+			t.Fatal("legacy fixed address remains editable")
+		}
+	}
+}
 func TestVPNFieldsRejectInjectionAndUnknownRoleKeys(t *testing.T) {
 	original := []byte("service demo {\n listen = 127.0.0.1:9000\n}\n")
 	for _, edits := range []map[string]string{{"vpn-mtu": "12"}, {"vpn-mode": "unexpected"}, {"vpn-dns": "x\nmaster_args = bad"}, {"vpn-listen": "0.0.0.0:8444"}} {
@@ -107,7 +119,7 @@ func TestVPNEnableFailureExplainsForeignOptionsAndPreservesConfig(t *testing.T) 
 	}
 	result := object(t, w)
 	reason := result["field_errors"].(map[string]any)["vpn-mode"].(string)
-	if !strings.Contains(reason, "vpn-server") || !strings.Contains(reason, "vpn-client-ip") || !strings.Contains(reason, "客户端") {
+	if !strings.Contains(reason, "vpn-server") || !strings.Contains(reason, "客户端") {
 		t.Fatal(reason)
 	}
 	actual, _ := os.ReadFile(h.view.AppConfigPath)

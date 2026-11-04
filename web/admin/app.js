@@ -340,8 +340,8 @@ function configValueError(key, value, rule = {}, values = {}) {
       for (const address of value.split(",")) configAddress(address.trim());
     else if (rule.type === "vpn-url") {
       const u=new URL(value);
-      if(!["quic:","tcp:","wss:"].includes(u.protocol) || u.username || u.password || u.search || u.hash || (u.pathname!=="" && u.pathname!=="/vpn") || !u.hostname)
-        throw new Error(t("需要 quic://、tcp:// 或 wss://主机:端口/vpn 地址"));
+      if(!["udp:","quic:","tcp:","wss:"].includes(u.protocol) || u.username || u.password || u.search || u.hash || (u.pathname!=="" && u.pathname!=="/vpn") || !u.hostname)
+        throw new Error(t("需要 udp://、quic://、tcp:// 或 wss://主机:端口/vpn 地址"));
       // URL omits default WSS port 443; validate the explicit authority instead.
       const authority=value.match(/^[a-z]+:\/\/([^/]+)(?:\/vpn)?$/)?.[1];
       if(!authority || !/:[0-9]+$/.test(authority)) throw new Error(t("VPN 地址必须显式指定端口"));
@@ -955,7 +955,7 @@ async function testVPNConnection() {
   try{
     const result=await api("vpn-test",{method:"POST",body:JSON.stringify({fields})});
     if(p!==vpnProbeState||p.version!==version)return;
-    const stages={config:"客户端配置",resolve:"地址解析",quic:"QUIC/TLS 连接",tls:"TCP/TLS 连接",auth:"VPN 认证",datagram:"VPN 数据帧回显"};
+    const stages={config:"客户端配置",resolve:"地址解析",udp:"UDP/DTLS 连接",quic:"QUIC/TLS 连接",tls:"TCP/TLS 连接",auth:"VPN 认证",datagram:"VPN 数据帧回显"};
     p.result.classList.toggle("bad",!result.ok);
     localText(p.result,()=> (result.ok?t("VPN 测试成功"):t("VPN 测试失败"))+" · "+t(stages[result.stage]||result.stage)+
       (result.detail?" · "+t(result.detail):"")+(result.error?" · "+t(result.error):"")+
@@ -1218,13 +1218,27 @@ function vpnObservationText(v) {
  if (!v?.enabled) return t("独立 VPN") + " · " + t("已关闭");
  const names = {starting:"启动中",connecting:"连接中",connected:"已连接",reconnecting:"重连中",listening:"监听中",failed:"启动失败",stopped:"已停止"};
  const q=v.stats||{};
- return t("独立 VPN")+" · "+t(names[v.state]||v.state)+" · "+(v.device||"—")+" · "+(v.address||"")+" · "+(v.transport||"quic").toUpperCase()+(v.tcp_address?" · TCP/WSS "+v.tcp_address:"")+" · "+(v.client_ip||v.network||"")+
+ return t("独立 VPN")+" · "+t(names[v.state]||v.state)+" · "+(v.device||"—")+" · "+(v.address||"")+" · "+(v.transport||"quic").toUpperCase()+(v.udp_address?" · UDP "+v.udp_address:"")+(v.tcp_address?" · TCP/WSS "+v.tcp_address:"")+" · "+(v.role==="client" ? t("虚拟 IP：")+(v.client_ip||t("等待服务端分配")) : (v.network||""))+
   " · "+t("活跃连接：")+(q.active_connections||0)+" · IP "+t("发送")+" "+units(q.tx_ip_bytes||0)+" / "+t("接收")+" "+units(q.rx_ip_bytes||0)+
   " · "+t("丢弃：")+(q.dropped_packets||0)+" · "+t("VPN 白噪音目标：")+units(v.noise_rate||0,true)+
   " · "+t("噪音累计发送/接收：")+units(q.noise_tx_bytes||0)+" / "+units(q.noise_rx_bytes||0)+
   " · "+t("传输中/空闲：")+(v.noise_traffic?t("发送"):t("不发"))+" / "+(v.noise_idle?t("发送"):t("不发"))+
   (q.noise_skipped_ticks?" · "+t("噪音暂停/让行采样：")+q.noise_skipped_ticks:"")+
   (q.noise_unsupported_connections?" · "+t("对端不支持白噪音，请更新两端程序：")+q.noise_unsupported_connections:"")+(v.last_error?" · "+v.last_error:"");
+}
+function renderVPNClients(v) {
+ const container=$("vpn-clients");if(!container)return;
+ container.replaceChildren();container.hidden=v?.role!=="server"||!v?.enabled;
+ if(container.hidden)return;
+ const title=document.createElement("h3");localText(title,()=>t("在线 VPN 客户端"));container.append(title);
+ const clients=Array.isArray(v.clients)?v.clients:[];
+ if(!clients.length){const empty=document.createElement("p");empty.className="muted";localText(empty,()=>t("暂无在线 VPN 客户端"));container.append(empty);return}
+ const table=document.createElement("table");const header=document.createElement("tr");
+ for(const key of ["公网 IP（服务端所见）","VPN IP","传输协议"]){const cell=document.createElement("th");localText(cell,()=>t(key));header.append(cell)}
+ const head=document.createElement("thead");head.append(header);table.append(head);
+ const body=document.createElement("tbody");
+ for(const client of clients){const row=document.createElement("tr");for(const value of [client.public_ip||"—",client.vpn_ip||"—",(client.transport||"quic").toUpperCase()]){const cell=document.createElement("td");cell.textContent=value;row.append(cell)}body.append(row)}
+ table.append(body);container.append(table);
 }
 async function poll(run) {
   if (run !== epoch || !state.authenticated) return;
@@ -1245,6 +1259,7 @@ async function poll(run) {
     renderVPNControls(data.health?.vpn);
     localText($("vpn-queue-summary"),()=>vpnQueueObservationText(data.health?.vpn));
     if($("vpn-summary")) localText($("vpn-summary"), () => vpnObservationText(data.health?.vpn));
+    renderVPNClients(data.health?.vpn);
     if($("quic-summary")) localText($("quic-summary"), () => quicObservationText(data));
     localText($("noise-observation"), () => noiseObservationText(data, rates));
     localText($("noise-activity"), () => noiseActivityText(data.noise_activity));
@@ -2331,6 +2346,7 @@ function vpnQueueObservationText(v) {
  return (v.transport && !v.transport.includes("quic") ? "" : t("QUIC RTT 最近采样：")+Number(q.last_smoothed_rtt_ms||0).toFixed(1)+" ms · "+
  t("拥塞窗口/在途：")+units(q.last_congestion_window_bytes||0)+" / "+units(q.last_bytes_in_flight||0)+" · "+
  t("QUIC 丢包判定/PTO：")+(q.quic_lost_packets||0)+" / "+(q.quic_pto_events||0)+" · ")+
+ (v.transport?.includes("udp") ? t("UDP 数据报发送/接收：")+(q.udp_tx_datagrams||0)+" / "+(q.udp_rx_datagrams||0)+" · "+t("UDP 接收队列丢弃：")+(q.udp_receive_queue_drops||0)+" · "+t("业务数据无隧道重传")+" · " : "")+
  t("VPN 发送队列峰值：")+(q.send_queue_peak_packets||0)+" / 64 · "+
  (v.queue_max_age ? (v.queue_max_age === "0s" ? t("队列过期丢弃：关闭") : t("队列过期时间：")+v.queue_max_age)+" · " : "")+
  t("最长排队：")+Number(q.send_queue_max_wait_ms||0).toFixed(1)+" ms · "+

@@ -27,6 +27,7 @@ import (
 
 type options struct {
 	tcpListen                                                                                             string
+	udpListen                                                                                             string
 	role, listen, server, keyFile, cert, key, ca, network, clientIP, tun, routes, dns, dnsService, egress string
 	noise                                                                                                 vpn.NoiseConfig
 	queueMaxAge                                                                                           time.Duration
@@ -39,14 +40,15 @@ func parse(args []string) (options, error) {
 	fs := flag.NewFlagSet("sgate-vpn", flag.ContinueOnError)
 	fs.StringVar(&o.role, "role", "client", "client or server")
 	fs.StringVar(&o.listen, "listen", ":8444", "server QUIC UDP listen address")
+	fs.StringVar(&o.udpListen, "udp-listen", "", "optional encrypted raw UDP listener; separate from QUIC UDP port")
 	fs.StringVar(&o.tcpListen, "tcp-listen", "", "optional shared TLS/TCP and WSS server listener; empty disables")
-	fs.StringVar(&o.server, "server", "", "client quic://, tcp:// or wss://hostname:port/vpn URL (TCP always uses TLS)")
+	fs.StringVar(&o.server, "server", "", "client udp://, quic://, tcp:// or wss://hostname:port/vpn URL (TCP always uses TLS)")
 	fs.StringVar(&o.keyFile, "key-file", "", "32-byte shared key file (same format as sgate)")
 	fs.StringVar(&o.cert, "tls-cert", "", "server certificate PEM")
 	fs.StringVar(&o.key, "tls-key", "", "server private key PEM")
 	fs.StringVar(&o.ca, "tls-ca", "", "client additional trusted CA PEM")
 	fs.StringVar(&o.network, "vpn-network", "10.77.0.0/24", "IPv4 VPN subnet, identical on both ends")
-	fs.StringVar(&o.clientIP, "client-ip", "10.77.0.2", "unique client VPN address; identical address retained across reconnects")
+	fs.StringVar(&o.clientIP, "client-ip", "", "deprecated; ignored, address is assigned by server")
 	fs.StringVar(&o.tun, "tun-name", "", "new TUN name (Linux: sgate0; macOS: auto utun)")
 	fs.IntVar(&o.mtu, "mtu", 1280, "IPv4 TUN MTU, 576..1500")
 	fs.IntVar(&o.maxClients, "max-clients", 64, "maximum authenticated clients (server)")
@@ -85,10 +87,7 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	clientIP, err := netip.ParseAddr(o.clientIP)
-	if err != nil {
-		return err
-	}
+	var clientIP netip.Addr
 	if o.role == "server" && runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		return errors.New("VPN server currently requires macOS or Linux")
 	}
@@ -103,17 +102,23 @@ func run(args []string) error {
 		return errors.New("invalid IPv4 VPN subnet or MTU")
 	}
 	if o.role == "server" {
-		cert, err := tls.LoadX509KeyPair(o.cert, o.key)
-		if err != nil {
-			return err
+		config.Address = o.listen
+		config.TCPListen = o.tcpListen
+		config.UDPListen = o.udpListen
+		config.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
+		if o.listen != "" || o.tcpListen != "" {
+			cert, err := tls.LoadX509KeyPair(o.cert, o.key)
+			if err != nil {
+				return err
+			}
+			config.TLS = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13}
 		}
-		config.TLS = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13}
 		config.Address = o.listen
 		config.TCPListen = o.tcpListen
 	} else {
 		u, err := url.Parse(o.server)
-		if err != nil || (u.Scheme != "quic" && u.Scheme != "tcp" && u.Scheme != "wss") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/vpn") {
-			return errors.New("server must be quic://, tcp:// or wss://hostname:port/vpn")
+		if err != nil || (u.Scheme != "quic" && u.Scheme != "tcp" && u.Scheme != "wss" && u.Scheme != "udp") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/vpn") {
+			return errors.New("server must be udp://, quic://, tcp:// or wss://hostname:port/vpn")
 		}
 		config.Transport, config.Host = u.Scheme, u.Host
 		host, port, err := net.SplitHostPort(u.Host)
@@ -140,7 +145,7 @@ func run(args []string) error {
 		if err != nil {
 			roots = x509.NewCertPool()
 		}
-		if o.ca != "" {
+		if o.ca != "" && config.Transport != "udp" {
 			data, err := os.ReadFile(o.ca)
 			if err != nil {
 				return err
@@ -215,6 +220,7 @@ func run(args []string) error {
 		log.Printf("VPN listening: %s", server.Addr())
 		return server.Serve(ctx)
 	}
+	config.Assigned = func(ip netip.Addr) { netOptions.ClientIP = ip }
 	if o.manage {
 		config.Connected = func() (func(), error) { return vpn.ApplyNetwork(netOptions) }
 	}

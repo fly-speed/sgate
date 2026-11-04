@@ -9,8 +9,8 @@ import (
 
 func setServerURL(p *Prepared, raw string) error {
 	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "quic" && u.Scheme != "tcp" && u.Scheme != "wss") || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || (u.Path != "" && u.Path != "/vpn") {
-		return invalidFields("需要 quic://、tcp:// 或 wss://主机:端口/vpn 地址。", "vpn-server")
+	if err != nil || (u.Scheme != "quic" && u.Scheme != "tcp" && u.Scheme != "wss" && u.Scheme != "udp") || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || (u.Path != "" && u.Path != "/vpn") {
+		return invalidFields("需要 udp://、quic://、tcp:// 或 wss://主机:端口/vpn 地址。", "vpn-server")
 	}
 	host, port, err := net.SplitHostPort(u.Host)
 	if err != nil || host == "" {

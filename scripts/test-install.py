@@ -16,7 +16,8 @@ class InstallTests(unittest.TestCase):
         self.root = pathlib.Path(self.tmp.name) / "source"
         self.dest = pathlib.Path(self.tmp.name) / "package"
         self.target = self.dest / "opt/soft/sgate"
-        names = ["Makefile", "LICENSE", "scripts/install.sh", "samples/README.md", "docs/vpn.md", "scripts/test-vpn-linux.py"]
+        names = ["Makefile", "LICENSE", "scripts/install.sh", "samples/README.md", "docs/vpn.md", "docs/vpn-udp.md", "scripts/test-vpn-linux.py"]
+        names += ["third_party/licenses/" + name + ".LICENSE" for name in ["pion-dtls", "pion-logging", "pion-transport"]]
         names += ["samples/test-tls/" + name for name in ["README.md", "tls-cert.pem", "tls-key.pem"]]
         names += [str(p.relative_to(ROOT)) for p in (ROOT / "web/admin").iterdir() if p.is_file()]
         names += [str(p.relative_to(ROOT)) for p in ROOT.glob("sgate-*.cf")]

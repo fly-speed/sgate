@@ -16,6 +16,7 @@ import (
 const probeDatagramPrefix = "sgate-vpn-probe-v1:"
 
 type ProbeResult struct {
+	ClientIP           string `json:"client_ip,omitempty"`
 	OK                 bool   `json:"ok"`
 	Stage              string `json:"stage"`
 	Detail             string `json:"detail"`
@@ -65,7 +66,9 @@ func Probe(parent context.Context, config Config) (result ProbeResult) {
 		return result
 	}
 	result.Stage = "quic"
-	if c.Transport != "quic" {
+	if c.Transport == "udp" {
+		result.Stage = "udp"
+	} else if c.Transport != "quic" {
 		result.Stage = "tls"
 	}
 	conn, err := dialConnection(ctx, c)
@@ -93,7 +96,10 @@ func Probe(parent context.Context, config Config) (result ProbeResult) {
 		return fail(err)
 	}
 	serverAdvertisedProbe = strings.HasPrefix(challenge, probeChallengePrefix)
-	h := hello{Probe: true, ID: result.TestID, IP: c.ClientIP.String(), Network: c.Network.String(), MTU: c.MTU}
+	if !c.ClientIP.IsValid() && !strings.HasPrefix(challenge, assignmentChallengePrefix) {
+		return fail(errors.New("VPN server does not support automatic address assignment; update the server"))
+	}
+	h := hello{Probe: true, ID: result.TestID, IP: requestedIP(c.ClientIP), Network: c.Network.String(), MTU: c.MTU}
 	h.Proof = proof(c.Key, challenge, h)
 	if err = writeJSON(control, h); err != nil {
 		return fail(err)
@@ -110,9 +116,11 @@ func Probe(parent context.Context, config Config) (result ProbeResult) {
 		result.Detail = "服务端测试身份校验失败；请核对共享密钥及测试协议版本。"
 		return fail(errors.New("server did not authenticate a non-disruptive VPN test; update server or check shared key"))
 	}
-	if reply.IP != h.IP || reply.Network != h.Network || reply.MTU != h.MTU || reply.Gateway != c.Network.Addr().Next().String() {
+	assigned, assignErr := netip.ParseAddr(reply.IP)
+	if assignErr != nil || !validClientIP(c.Network, assigned) || (h.IP != "" && reply.IP != h.IP) || reply.Network != h.Network || reply.MTU != h.MTU || reply.Gateway != c.Network.Addr().Next().String() {
 		return fail(errors.New("invalid VPN test assignment"))
 	}
+	result.ClientIP = assigned.String()
 	result.Stage = "datagram"
 	packet := []byte(probeDatagramPrefix + result.TestID)
 	// DATAGRAM is intentionally unreliable. Retry the tiny echo within the total
@@ -126,6 +134,12 @@ func Probe(parent context.Context, config Config) (result ProbeResult) {
 		receiveCancel()
 		if e == nil && bytes.Equal(echo, packet) {
 			break
+		}
+		if c.Transport == "udp" {
+			if e == nil {
+				e = errors.New("UDP VPN echo mismatch")
+			}
+			return fail(e)
 		}
 		if ctx.Err() != nil {
 			return fail(ctx.Err())
@@ -143,6 +157,9 @@ func Probe(parent context.Context, config Config) (result ProbeResult) {
 	result.Detail = "QUIC、证书、共享密钥认证及 DATAGRAM 回显通过；未测试 TUN、NAT 或互联网转发。"
 	if c.Transport != "quic" {
 		result.Detail = "TLS/TCP、共享密钥认证及 VPN 数据帧回显通过；未测试 TUN、NAT 或互联网转发。"
+	}
+	if c.Transport == "udp" {
+		result.Detail = "UDP、DTLS-PSK、共享密钥认证及数据报回显通过；未测试 TUN、NAT 或互联网转发。"
 	}
 	return result
 }

@@ -140,7 +140,7 @@ Framework and management settings require a full process restart: Web save-only 
 
 ## Build
 
-Requires Go 1.23 or newer and Make. Normal builds need neither Python, a C compiler nor acl_master; race tests require a C compiler.
+Requires Go 1.24 or newer and Make. Normal builds need neither Python, a C compiler nor acl_master; race tests require a C compiler.
 
 ```sh
 make build

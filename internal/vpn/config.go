@@ -27,6 +27,7 @@ type Device interface {
 	Close() error
 }
 type Config struct {
+	UDPListen                  string
 	ClientID                   string
 	Live                       *LiveSettings
 	server                     bool
@@ -42,16 +43,22 @@ type Config struct {
 	Noise                      NoiseConfig
 	QueueMaxAge                time.Duration
 	RetryMin, RetryMax         time.Duration
-	// Called after authentication, once per client process. Cleanup runs on exit.
+	// Called after authentication. Dynamic clients clean up and reinstall the
+	// network on each authenticated assignment; the final cleanup runs on exit.
 	Connected func() (func(), error)
-	Stats     *Stats
-	Logf      func(string, ...any)
+	// Assigned receives the authenticated server address before network setup.
+	Assigned func(netip.Addr)
+	Stats    *Stats
+	Logf     func(string, ...any)
 }
 
 func (c Config) normalized(server bool) (Config, error) {
 	address := c.Address
 	if server && address == "" {
 		address = c.TCPListen
+		if address == "" {
+			address = c.UDPListen
+		}
 	}
 	_, port, err := net.SplitHostPort(address)
 	if err != nil {
@@ -64,7 +71,7 @@ func (c Config) normalized(server bool) (Config, error) {
 	if c.Transport == "" {
 		c.Transport = "quic"
 	}
-	if c.Transport != "quic" && c.Transport != "tcp" && c.Transport != "wss" {
+	if c.Transport != "quic" && c.Transport != "tcp" && c.Transport != "wss" && c.Transport != "udp" {
 		return c, errors.New("invalid VPN transport")
 	}
 	if server && c.TCPListen != "" {
@@ -72,6 +79,16 @@ func (c Config) normalized(server bool) (Config, error) {
 		n, e := strconv.Atoi(port)
 		if err != nil || e != nil || n < 0 || n > 65535 {
 			return c, errors.New("invalid VPN TCP listen address")
+		}
+	}
+	if server && c.UDPListen != "" {
+		_, port, err := net.SplitHostPort(c.UDPListen)
+		n, e := strconv.Atoi(port)
+		if err != nil || e != nil || n < 0 || n > 65535 {
+			return c, errors.New("invalid VPN UDP listen address")
+		}
+		if n != 0 && c.Address != "" && c.Address == c.UDPListen {
+			return c, errors.New("VPN QUIC and UDP listeners must use separate UDP ports")
 		}
 	}
 	if c.ClientID != "" {
@@ -84,7 +101,11 @@ func (c Config) normalized(server bool) (Config, error) {
 		return c, errors.New("VPN requires a 32-byte shared key")
 	}
 	if c.TLS == nil {
-		return c, errors.New("VPN requires TLS configuration")
+		if (!server && c.Transport == "udp") || (server && c.Address == "" && c.TCPListen == "") {
+			c.TLS = &tls.Config{}
+		} else {
+			return c, errors.New("VPN requires TLS configuration")
+		}
 	}
 	if !c.Network.IsValid() {
 		c.Network = netip.MustParsePrefix("10.77.0.0/24")
@@ -104,7 +125,7 @@ func (c Config) normalized(server bool) (Config, error) {
 	if c.MaxClients < 1 || c.MaxClients > 254 {
 		return c, errors.New("VPN max-clients must be 1..254")
 	}
-	if !server && (!c.ClientIP.IsValid() || !validClientIP(c.Network, c.ClientIP)) {
+	if !server && (c.ClientIP.IsValid() && !validClientIP(c.Network, c.ClientIP)) {
 		return c, errors.New("client-ip must be a host in vpn-network, excluding network, server and broadcast addresses")
 	}
 	if c.RetryMin == 0 {
@@ -193,6 +214,7 @@ func quicConfig(stats ...*Stats) *quic.Config {
 }
 
 type Stats struct {
+	udpTX, udpRX, udpQueueDrops                               atomic.Uint64
 	mssClamped, fragmentExpired, fragmentEvicted              atomic.Uint64
 	cwnd, inflight                                            atomic.Int64
 	queuePeak, queueWaitMax, queueExpired, queueOverflow      atomic.Uint64
@@ -205,6 +227,9 @@ type Stats struct {
 	noiseUnsupported                                          atomic.Int64
 }
 type Snapshot struct {
+	UDPTX           uint64 `json:"udp_tx_datagrams"`
+	UDPRX           uint64 `json:"udp_rx_datagrams"`
+	UDPQueueDrops   uint64 `json:"udp_receive_queue_drops"`
 	MSSClamped      uint64 `json:"tcp_mss_clamped_packets"`
 	FragmentExpired uint64 `json:"fragment_reassembly_expired_packets"`
 	FragmentEvicted uint64 `json:"fragment_reassembly_evicted_packets"`
@@ -237,7 +262,7 @@ type Snapshot struct {
 }
 
 func (s *Stats) Snapshot() Snapshot {
-	return Snapshot{MSSClamped: s.mssClamped.Load(), FragmentExpired: s.fragmentExpired.Load(), FragmentEvicted: s.fragmentEvicted.Load(), CongestionWindow: s.cwnd.Load(), Inflight: s.inflight.Load(), TunWriteMaxMS: float64(s.tunWriteMax.Load()) / 1e6, AdmissionBlocked: s.admissionBlocked.Load(), QueuePeak: s.queuePeak.Load(), QueueWaitMaxMS: float64(s.queueWaitMax.Load()) / 1e6, QueueExpired: s.queueExpired.Load(), QueueOverflow: s.queueOverflow.Load(), SendWaitMaxMS: float64(s.sendWaitMax.Load()) / 1e6, AdmissionWaitMS: float64(s.admissionWait.Load()) / 1e6, NoiseTX: s.noiseTX.Load(), NoiseRX: s.noiseRX.Load(), NoiseSkipped: s.noiseSkipped.Load(), NoiseUnsupported: s.noiseUnsupported.Load(), RTT: float64(s.rtt.Load()) / 1e6, Lost: s.lost.Load(), PTO: s.pto.Load(), TX: s.tx.Load(), RX: s.rx.Load(), Drops: s.drops.Load(), AuthRejected: s.auth.Load(), Connections: s.connections.Load(), Active: s.active.Load()}
+	return Snapshot{UDPTX: s.udpTX.Load(), UDPRX: s.udpRX.Load(), UDPQueueDrops: s.udpQueueDrops.Load(), MSSClamped: s.mssClamped.Load(), FragmentExpired: s.fragmentExpired.Load(), FragmentEvicted: s.fragmentEvicted.Load(), CongestionWindow: s.cwnd.Load(), Inflight: s.inflight.Load(), TunWriteMaxMS: float64(s.tunWriteMax.Load()) / 1e6, AdmissionBlocked: s.admissionBlocked.Load(), QueuePeak: s.queuePeak.Load(), QueueWaitMaxMS: float64(s.queueWaitMax.Load()) / 1e6, QueueExpired: s.queueExpired.Load(), QueueOverflow: s.queueOverflow.Load(), SendWaitMaxMS: float64(s.sendWaitMax.Load()) / 1e6, AdmissionWaitMS: float64(s.admissionWait.Load()) / 1e6, NoiseTX: s.noiseTX.Load(), NoiseRX: s.noiseRX.Load(), NoiseSkipped: s.noiseSkipped.Load(), NoiseUnsupported: s.noiseUnsupported.Load(), RTT: float64(s.rtt.Load()) / 1e6, Lost: s.lost.Load(), PTO: s.pto.Load(), TX: s.tx.Load(), RX: s.rx.Load(), Drops: s.drops.Load(), AuthRejected: s.auth.Load(), Connections: s.connections.Load(), Active: s.active.Load()}
 }
 
 // ValidateConfig permits command entrypoints to reject unsafe input before TUN setup.

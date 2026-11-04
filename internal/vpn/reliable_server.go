@@ -108,6 +108,7 @@ func headerToken(value, token string) bool {
 	return false
 }
 func (s *Server) acceptConnections(ctx context.Context) {
+	s.acceptUDP(ctx)
 	if s.listener != nil {
 		s.wg.Add(1)
 		go func() {

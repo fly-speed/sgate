@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"net/http"
 	"sgate/internal/vpn"
+	"slices"
 	"strconv"
 	"strings"
 )
 
 func vpnConfigFields(fields []configField, role string) []configField {
+	fields = slices.DeleteFunc(fields, func(f configField) bool { return f.Key == "vpn-client-ip" })
 	known := map[string]bool{}
 	for _, f := range fields {
 		known[f.Key] = true

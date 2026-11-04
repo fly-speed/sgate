@@ -1,3 +1,4 @@
+//go:build windows
 // +build windows
 
 package master
@@ -26,9 +27,9 @@ var (
 	confPath      string
 	sockType      string
 	services      string
-	privilege   = false
-	verbose     = false
-	chrootOn    = false
+	privilege     = false
+	verbose       = false
+	chrootOn      = false
 )
 
 type PreJailFunc func()
@@ -48,14 +49,14 @@ var (
 
 // from command args
 var (
-	Configure     string
-	ServiceName   string
-	ServiceType   string
-	Verbose       bool
-	Unprivileged  bool
-	Chroot        bool
-	SocketCount = 1
-	Alone         bool
+	Configure    string
+	ServiceName  string
+	ServiceType  string
+	Verbose      bool
+	Unprivileged bool
+	Chroot       bool
+	SocketCount  = 1
+	Alone        bool
 )
 
 // set the max opened file handles for current process which let
@@ -212,7 +213,11 @@ func GetListeners() ([]net.Listener, error) {
 	return listeners, nil
 }
 
-func ServiceInit(addrs string, stopHandler func(bool)) ([]net.Listener, error) {
+func ServiceInit(addrs string, handlers ...func(bool)) ([]net.Listener, error) {
+	stopHandler := Stop
+	if len(handlers) > 0 && handlers[0] != nil {
+		stopHandler = handlers[0]
+	}
 	Prepare()
 
 	if preJailHandler != nil {
@@ -351,4 +356,17 @@ func OnInit(handler InitFunc) {
 
 func OnExit(handler ExitFunc) {
 	exitHandler = handler
+}
+
+// Keep the legacy standalone API compatible with the cancellable TCP lifecycle.
+func Stop(ok bool) {
+	if doneChan != nil {
+		doneChan <- ok
+	}
+}
+func Wait() bool {
+	if doneChan == nil {
+		return true
+	}
+	return <-doneChan
 }

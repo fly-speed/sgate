@@ -1,14 +1,21 @@
 module sgate
 
-go 1.23.0
+go 1.24.0
 
 require (
 	github.com/acl-dev/gin-service v1.0.2
 	github.com/acl-dev/go-service v1.1.2
 	github.com/gin-gonic/gin v1.11.0
 	github.com/gorilla/websocket v1.5.3
-	golang.org/x/crypto v0.40.0
-	golang.org/x/sys v0.35.0
+	github.com/pion/dtls/v3 v3.1.15
+	golang.org/x/crypto v0.48.0
+	golang.org/x/sys v0.41.0
+	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2
+)
+
+require (
+	github.com/pion/logging v0.2.4 // indirect
+	github.com/pion/transport/v5 v5.0.0 // indirect
 )
 
 require (
@@ -35,11 +42,11 @@ require (
 	github.com/ugorji/go/codec v1.3.0 // indirect
 	go.uber.org/mock v0.5.0 // indirect
 	golang.org/x/arch v0.20.0 // indirect
-	golang.org/x/mod v0.25.0 // indirect
-	golang.org/x/net v0.42.0 // indirect
-	golang.org/x/sync v0.16.0 // indirect
-	golang.org/x/text v0.27.0 // indirect
-	golang.org/x/tools v0.34.0 // indirect
+	golang.org/x/mod v0.32.0 // indirect
+	golang.org/x/net v0.49.0 // indirect
+	golang.org/x/sync v0.19.0 // indirect
+	golang.org/x/text v0.34.0 // indirect
+	golang.org/x/tools v0.41.0 // indirect
 	google.golang.org/protobuf v1.36.9 // indirect
 )
 

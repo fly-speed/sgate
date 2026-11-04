@@ -1,0 +1,31 @@
+# Windows standalone client. Start with scripts/start-windows-client.ps1.
+# Configure the proxy endpoint and VPN endpoint separately through the Web UI.
+service sgate-client {
+    listen = 127.0.0.1:9000
+    server = ws://127.0.0.1:8081/tunnel
+    key-file = sgate.key
+    password = 'replace-with-your-password'
+    tls-ca = ''
+    admin_enabled = true
+    admin_listen = 127.0.0.1:9081
+    admin_web_dir = ../web/admin
+    admin_users_file = admin-client-users.json
+    admin_session_dir = admin-client-sessions
+    admin_setup_token_file = admin-client-setup.token
+    vpn-mode = disabled
+    vpn-server = ''
+    vpn-network = 10.77.0.0/24
+    vpn-mtu = 1280
+    # Empty creates a new Wintun adapter named sgateVPN.
+    vpn-tun-name = ''
+    vpn-manage-network = true
+    vpn-tls-ca = ''
+    vpn-key-file = ''
+    vpn-routes = 0.0.0.0/1,128.0.0.0/1
+    vpn-dns = 1.1.1.1
+    vpn-block-ipv6 = true
+    vpn-queue-max-age = 0s
+    vpn-noise-rate = 0
+}
+
+# Raw UDP alternative: udp://vpn.example.com:8445/vpn (uses the same shared key).

@@ -214,7 +214,7 @@ make vendor-sync
 
 通过 Web 调用 master_ctl 的故障回归可在具备本机 acl_master 的环境运行 `scripts/test-acl-master.py`，在诊断二进制参数后加入 `--mode managed --merged --stress --management-stress --web-service-restart --restart-failure-checks --tls both --concurrency 128 --rounds 3 --output artifacts/web-restart-failures`。测试仅操作隔离实例，分别检查两端控制命令缺失、没有执行权限、私有管理套接字不可用、命令阻塞至真实 45 秒期限，以及每次 32 路并发点击和跨进程延迟请求；故障阶段保持 128 条业务流和管理探测，之后叠加传输断线、配置应用与连续重启。页面异步流程可使用 `node --test scripts/test-admin-restart.cjs` 验证。
 
-需要 Go 1.23 或以上版本和 Make。普通编译无需 Python、C 编译器或 acl_master；竞态测试需要 C 编译器。
+需要 Go 1.24 或以上版本和 Make。普通编译无需 Python、C 编译器或 acl_master；竞态测试需要 C 编译器。
 
 ```sh
 make build

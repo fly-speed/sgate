@@ -185,14 +185,14 @@ service sgate-client {
     # IP inactivity threshold; padding does not reset it. Zero uses 1s. LIVE: Web saves apply without VPN reconnection.
     vpn-noise-idle-after = 1s
     # VPN endpoint, separate from the proxy server setting; use one transport at a time.
+    # Raw UDP:  udp://vpn.example.com:8445/vpn (shared-key encryption, no IP data retransmission)
     # QUIC/UDP: quic://vpn.example.com:8444/vpn
     # TLS/TCP:  tcp://vpn.example.com:8444/vpn
     # WSS/TCP:  wss://vpn.example.com:8444/vpn
     # TCP is always TLS encrypted; the hostname must match the certificate SAN.
     # TCP/WSS requires vpn-tcp-listen on the server. Web saves reconnect a running VPN; a stopped VPN stays stopped.
     vpn-server = ''
-    # Fixed virtual IPv4 address for this client; must be unique among clients.
-    vpn-client-ip = 10.77.0.2
+    # The server assigns this client a virtual IPv4 address after authentication.
     # Additional trusted CA PEM; empty reuses tls-ca. Self-signed certificates require explicit trust.
     vpn-tls-ca = ''
     # Comma-separated IPv4 routes; the outer server endpoint retains its physical egress route.

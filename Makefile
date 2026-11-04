@@ -46,7 +46,7 @@ help:
 	  '可覆盖：GO、BINDIR、PREFIX、DESTDIR、BUILD_FLAGS、LDFLAGS、TEST_FLAGS、MOD；交叉编译使用 GOOS/GOARCH/CGO_ENABLED。'
 
 check:
-	@command -v "$(GO)" >/dev/null 2>&1 || { printf '%s\n' '错误：找不到 Go，请安装 Go 1.23 或以上版本，或设置 GO。' >&2; exit 1; }
+	@command -v "$(GO)" >/dev/null 2>&1 || { printf '%s\n' '错误：找不到 Go，请安装 Go 1.24 或以上版本，或设置 GO。' >&2; exit 1; }
 	@for module in gin-service go-service; do \
 	  if [ ! -f "$(ROOT)/third_party/$$module/go.mod" ]; then \
 	    printf '%s\n' "错误：缺少 third_party/$${module}，请完整拉取包含本地框架扩展的项目；不能用上游版本替代。" >&2; \

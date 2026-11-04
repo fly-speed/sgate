@@ -1028,3 +1028,7 @@ html[lang="en"] nav button span {
 .config-row .vpn-test-result { display: block; margin-top: 8px; overflow-wrap: anywhere; }
 .config-row .vpn-test-result[hidden] { display: none; }
 .vpn-test-result.bad { color: var(--red, #c53030); }
+#vpn-clients { overflow-x: auto; margin: 16px 0; }
+#vpn-clients table { width: 100%; border-collapse: collapse; text-align: left; }
+#vpn-clients th, #vpn-clients td { padding: 9px 12px; border-bottom: 1px solid var(--border, #dce3eb); }
+#vpn-clients td { overflow-wrap: anywhere; }
