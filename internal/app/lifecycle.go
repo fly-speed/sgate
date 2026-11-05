@@ -137,6 +137,7 @@ func (c *controller) managementView() admin.View {
 		VPNRestartPending:    c.vpnRestartPending,
 		ManageTunnelAccounts: c.manageTunnelAccounts,
 		ManageVPNAccounts:    c.manageVPNAccounts,
+		ClientKeyPath:        c.clientKeyPath,
 		ApplyLive:            c.applyLive,
 		LiveFields:           c.liveFields(),
 		Runtime:              c.status,

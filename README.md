@@ -62,6 +62,8 @@ curl --noproxy '*' http://127.0.0.1:9000/
 
 部署到两台机器时，客户端在「代理配置 → 代理映射」填写服务端地址，服务端填写后端目标，并只开放所需的监听。两端使用相同的共享密钥及匹配的代理凭据。若映射单独指定后端，将它加入服务端 `allowed-targets`。跨公网使用 WSS 或 QUIC 时，配置证书并校验服务端名称。 [部署参考与反向代理](docs/reference.md) · [配置示例](samples/README.md)
 
+客户端可在「代理配置 → 代理连接」的 `key-file` 项下修改共享密钥文件内容。保存新密钥后，使用「保存并应用」让运行中的配置读取它。
+
 ## 启用独立 VPN
 
 1. **服务端** 在「VPN 配置 → VPN 参数」把 `vpn-mode` 设为 `both`（代理与 VPN 共存）或 `only`（仅 VPN），选择监听地址并应用。TCP 和 WSS 共用 `vpn-tcp-listen`，QUIC 使用 `vpn-listen`，纯 UDP 使用 `vpn-udp-listen`。

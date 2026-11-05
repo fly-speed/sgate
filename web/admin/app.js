@@ -257,6 +257,7 @@ function renderConfigFields(fields, runtime, role) {
     updateConfigSaveButton(entry);
     saveButton.addEventListener("click", () => saveConfigField(entry));
     configInputs.push(entry);
+    if (configRole === "client" && field.key === "key-file") renderClientKeyEditor(editor);
     const probeMode = configRole === "client" && (field.key === "vpn-server" ||
       (field.key === "vpn-mode" && !fields.some(item => item.key === "vpn-server")))
       ? configInputs.find(item => item.key === "vpn-mode")
@@ -1105,6 +1106,73 @@ async function saveConfigField(entry) {
     setConfigBusy(serviceRestarting);
   }
 }
+function renderClientKeyEditor(editor) {
+  const open = document.createElement("button");
+  open.type = "button";
+  open.className = "secondary";
+  localText(open, () => t("修改共享密钥内容"));
+  const panel = document.createElement("div");
+  panel.hidden = true;
+  const path = document.createElement("small");
+  const input = document.createElement("input");
+  input.type = "password";
+  input.autocomplete = "new-password";
+  input.spellcheck = false;
+  localAttr(input, "aria-label", () => t("新的共享密钥"));
+  localAttr(input, "placeholder", () => t("输入 64 个十六进制字符"));
+  const save = document.createElement("button");
+  save.type = "button";
+  save.className = "secondary";
+  localText(save, () => t("保存共享密钥"));
+  const help = document.createElement("small");
+  localText(help, () => t("密钥保存到已配置的 key-file，应用配置后生效。请确保对端使用相同密钥。"));
+  panel.append(path, input, save, help);
+  editor.append(open, panel);
+  let keyRevision = "";
+  open.addEventListener("click", async () => {
+    if (!panel.hidden) {
+      panel.hidden = true;
+      input.value = "";
+      return;
+    }
+    const run = epoch;
+    open.disabled = true;
+    try {
+      const data = await api("client-key");
+      if (run !== epoch) return;
+      keyRevision = data.revision;
+      localText(path, () => data.path);
+      panel.hidden = false;
+      input.focus();
+    } catch (error) {
+      if (run === epoch) notice(() => errorText(error), true);
+    } finally {
+      open.disabled = false;
+    }
+  });
+  save.addEventListener("click", async () => {
+    const key = input.value.trim();
+    if (!/^[0-9a-f]{64}$/i.test(key)) {
+      notice(() => t("共享密钥必须是 64 个十六进制字符"), true);
+      return;
+    }
+    const run = epoch;
+    open.disabled = save.disabled = true;
+    try {
+      await api("client-key", {method: "PUT", body: JSON.stringify({revision: keyRevision, key})});
+      if (run !== epoch) return;
+      input.value = "";
+      panel.hidden = true;
+      invalidateVPNProbe();
+      notice(() => t("共享密钥已保存，请保存并应用配置使其生效。"));
+    } catch (error) {
+      if (run === epoch) notice(() => errorText(error), true);
+    } finally {
+      open.disabled = save.disabled = false;
+    }
+  });
+}
+
 function renderVPNProbe(editor,mode) {
   const button=document.createElement("button");button.type="button";button.className="secondary config-save";button.id="vpn-test-button";
   button.innerHTML =
@@ -1165,6 +1233,9 @@ function renderVPNAccounts(view) {
   const server = state.role === "server";
   localText($("vpn-accounts-path"), () => view.path + (view.blocked ? " · " + t(view.blocked) : ""));
   $("vpn-account-test-panel").hidden = server;
+  localText($("vpn-accounts-help"), () => t(server
+    ? "账号变更保存后立即生效。禁用、删除或更换凭据时，仅断开受影响账号的连接。"
+    : "VPN 凭据保存到专用文件。重启 VPN 后加载已保存的账号。"));
   const list = $("vpn-account-list");
   list.hidden = !server || !view.accounts.length;
   list.replaceChildren();
@@ -1249,11 +1320,13 @@ async function runVPNAccountAction(action, change) {
         entry.dirty = entry.input.value !== entry.original;
         updateConfigSaveButton(entry);
       }
-      localText($("pending-label"), () => Object.keys(configEdits()).length ? t("有未保存修改") : t("已保存 · 待应用"));
+      localText($("pending-label"), () => Object.keys(configEdits()).length ? t("有未保存修改") : t(data.live_applied ? "已保存" : "已保存 · 待应用"));
     }
     if (action === "save") {
       invalidateVPNProbe();
-      notice(() => t("VPN 账号已保存，重启 VPN 后生效"));
+      notice(() => t(data.live_applied ? "VPN 账号变更已立即生效。"
+        : state.role === "server" ? "VPN 账号已保存，下次启动 VPN 时生效。"
+        : "VPN 账号已保存，重启 VPN 后生效"));
     }
   } catch (error) {
     if (run !== epoch || !state.authenticated) return;

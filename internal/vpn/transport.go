@@ -23,6 +23,10 @@ type networkSetupError struct{ err error }
 func (e *networkSetupError) Error() string { return "configure VPN network: " + e.err.Error() }
 
 type peer struct {
+	account          string
+	accountMessage   string
+	accountProof     []byte
+	accountRevoked   atomic.Bool
 	conn             connection
 	control          controlChannel
 	id               string
@@ -249,7 +253,35 @@ func (p *peer) run(ctx context.Context, c Config, receive func([]byte) error) er
 	return result
 }
 
+type serverAccountPolicy struct {
+	required bool
+	verify   func(string, []byte, []byte) bool
+}
+
+func (p *serverAccountPolicy) accepts(username, message string, proof []byte) bool {
+	return p.required && p.verify != nil && username != "" && p.verify(username, []byte(message), proof)
+}
+
+func (s *Server) UpdateAccounts(config Config) {
+	policy := &serverAccountPolicy{required: config.RequireAccount, verify: config.VerifyAccount}
+	s.mu.Lock()
+	s.accounts.Store(policy)
+	var revoked []*peer
+	for ip, p := range s.peers {
+		if p.account != "" && !policy.accepts(p.account, p.accountMessage, p.accountProof) {
+			p.accountRevoked.Store(true)
+			delete(s.peers, ip)
+			revoked = append(revoked, p)
+		}
+	}
+	s.mu.Unlock()
+	for _, p := range revoked {
+		p.conn.CloseWithError(0, "VPN account changed or revoked")
+	}
+}
+
 type Server struct {
+	accounts       atomic.Pointer[serverAccountPolicy]
 	udp            net.Listener
 	udpConns       sync.Map
 	cfg            Config
@@ -285,6 +317,7 @@ func ListenServer(config Config, dev Device) (*Server, error) {
 		return nil, errors.New("VPN server certificate required")
 	}
 	s := &Server{cfg: c, dev: dev, peers: make(map[netip.Addr]*peer), incoming: make(chan connection), acceptErr: make(chan error, 2), closed: make(chan struct{})}
+	s.UpdateAccounts(c)
 	ok := false
 	defer func() {
 		if !ok {
@@ -475,7 +508,8 @@ func (s *Server) accept(ctx context.Context, conn connection) {
 	if err != nil {
 		return
 	}
-	if s.cfg.RequireAccount {
+	accounts := s.accounts.Load()
+	if accounts.required {
 		challenge = accountChallengePrefix + challenge
 	} else {
 		challenge = assignmentChallengePrefix + challenge
@@ -501,14 +535,17 @@ func (s *Server) accept(ctx context.Context, conn connection) {
 		return
 	}
 	identity := h.ID
-	if s.cfg.RequireAccount {
-		accountProof, err := hex.DecodeString(h.AccountProof)
-		if err != nil || h.Username == "" || !s.cfg.VerifyAccount(h.Username, []byte(h.Proof), accountProof) {
+	var account string
+	var accountProof []byte
+	if accounts.required {
+		accountProof, err = hex.DecodeString(h.AccountProof)
+		if err != nil || !accounts.accepts(h.Username, h.Proof, accountProof) {
 			s.cfg.Stats.auth.Add(1)
 			reject(control, "VPN account authentication failed; check username and password")
 			return
 		}
-		identity = h.Username + ":" + h.ID
+		account = h.Username
+		identity = account + ":" + h.ID
 	}
 	ip, err := netip.ParseAddr(h.IP)
 	reason := ""
@@ -532,19 +569,28 @@ func (s *Server) accept(ctx context.Context, conn connection) {
 		reject(control, reason)
 		return
 	}
+	s.mu.Lock()
+	// Account updates and peer registration share this lock. A handshake
+	// started with old credentials cannot attach after they are revoked.
+	current := s.accounts.Load()
+	if current != accounts && (current.required != accounts.required ||
+		(current.required && !current.accepts(account, h.Proof, accountProof))) {
+		s.mu.Unlock()
+		s.cfg.Stats.auth.Add(1)
+		reject(control, "VPN account authentication changed; reconnect with current credentials")
+		return
+	}
 	if h.Probe {
 		if h.IP == "" {
-			s.mu.Lock()
 			ip = s.allocateIPLocked(identity)
-			s.mu.Unlock()
 			if !ip.IsValid() {
 				ip = s.cfg.Network.Addr().Next().Next()
 			}
 		}
+		s.mu.Unlock()
 		s.serveProbe(authCtx, conn, control, challenge, h, ip)
 		return
 	}
-	s.mu.Lock()
 	if h.IP == "" {
 		ip = s.allocateIPLocked(identity)
 	}
@@ -554,7 +600,7 @@ func (s *Server) accept(ctx context.Context, conn connection) {
 		return
 	}
 	flow, _ := conn.Context().Value(flowContextKey{}).(*datagramFlow)
-	p := &peer{conn: conn, control: control, id: identity, ip: ip, queue: newPacketQueue(s.cfg.QueueMaxAge, s.cfg.Live), padding: h.Padding, flow: flow}
+	p := &peer{conn: conn, control: control, id: identity, ip: ip, account: account, accountMessage: h.Proof, accountProof: accountProof, queue: newPacketQueue(s.cfg.QueueMaxAge, s.cfg.Live), padding: h.Padding, flow: flow}
 	old := s.peers[ip]
 	if (old != nil && old.id != identity) || (old == nil && len(s.peers) >= s.cfg.Live.Snapshot().MaxClients) {
 		s.mu.Unlock()
@@ -597,6 +643,10 @@ func (s *Server) accept(ctx context.Context, conn connection) {
 			return nil
 		}
 		s.writeMu.Lock()
+		if p.accountRevoked.Load() {
+			s.writeMu.Unlock()
+			return net.ErrClosed
+		}
 		n, err := s.dev.Write(packet)
 		s.writeMu.Unlock()
 		if err == nil && n != len(packet) {

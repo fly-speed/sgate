@@ -133,6 +133,8 @@ func (h *Handler) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/api/tunnel-accounts" && (r.Method == "GET" || r.Method == "PUT"):
 		h.tunnelAccounts(w, r)
+	case r.URL.Path == "/api/client-key" && (r.Method == "GET" || r.Method == "PUT"):
+		h.clientKey(w, r)
 	case r.URL.Path == "/api/vpn-accounts" && (r.Method == "GET" || r.Method == "PUT"):
 		h.vpnAccounts(w, r)
 	case r.URL.Path == "/api/stats" && r.Method == "GET":
@@ -268,6 +270,7 @@ func (h *Handler) applyProxy(w http.ResponseWriter, r *http.Request) {
 		problem(w, 409, e.Error())
 		return
 	}
+	h.clientKeyPending = false
 	b, e := regularRead(h.view.AppConfigPath, 1<<20)
 	if e == nil {
 		h.startupRevision = h.restartDigest(b)
@@ -620,7 +623,7 @@ func (h *Handler) getConfig(w http.ResponseWriter) {
 		"fields":               fields,
 		"content":              redactConfig(b),
 		"revision":             configRevision,
-		"requires_restart":     h.restartDigest(b) != h.startupRevision || h.mappingRestartPending,
+		"requires_restart":     h.restartDigest(b) != h.startupRevision || h.mappingRestartPending || h.clientKeyPending,
 		"vpn_restart_pending":  len(vpnRestartFields) != 0,
 		"vpn_restart_fields":   vpnRestartFields,
 		"path":                 h.view.AppConfigPath,
@@ -835,7 +838,7 @@ func (h *Handler) commitConfig(
 	if mappingSave != nil && h.view.ApplyLive != nil && !slices.Contains(live, "proxies") {
 		live = append(live, "proxies")
 	}
-	requiresRestart := h.restartDigest([]byte(content)) != h.startupRevision || h.mappingRestartPending
+	requiresRestart := h.restartDigest([]byte(content)) != h.startupRevision || h.mappingRestartPending || h.clientKeyPending
 	// 有非热参数待应用时保持原重启流程，否则不触碰现有隧道和业务连接。
 	mappingLive := slices.Contains(live, "proxies-file") || slices.Contains(live, "proxies") || slices.Contains(live, "master_service")
 	restart := apply && (h.view.ApplyLive == nil || requiresRestart || len(live) == 0)
@@ -864,9 +867,10 @@ func (h *Handler) commitConfig(
 	}
 	if mappingLive {
 		h.mappingRestartPending = serviceRestart
-		requiresRestart = h.restartDigest([]byte(content)) != h.startupRevision || h.mappingRestartPending
+		requiresRestart = h.restartDigest([]byte(content)) != h.startupRevision || h.mappingRestartPending || h.clientKeyPending
 	}
 	if restart {
+		h.clientKeyPending = false
 		h.startupRevision = h.restartDigest([]byte(content))
 		h.startupContent = []byte(content)
 		h.vpnAccountRestartPending = false

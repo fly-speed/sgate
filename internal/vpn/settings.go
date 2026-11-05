@@ -277,7 +277,7 @@ func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Pref
 	// Include certificate material: reapplying after replacing a PEM also restarts VPN.
 	values := map[string]string{}
 	for _, s := range Settings(p.Role) {
-		if !slices.Contains(LiveFields(p.Role), s.Key) && s.Key != "vpn-server" {
+		if !slices.Contains(LiveFields(p.Role), s.Key) && s.Key != "vpn-server" && s.Key != "vpn-accounts-file" {
 			values[s.Key] = get(s.Key)
 		}
 	}
@@ -288,7 +288,9 @@ func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Pref
 	h := sha256.New()
 	h.Write(b)
 	h.Write(key)
-	h.Write(p.Config.accountRevision[:])
+	if p.Role == "client" {
+		h.Write(p.Config.accountRevision[:])
+	}
 	for _, cert := range p.Config.TLS.Certificates {
 		for _, der := range cert.Certificate {
 			h.Write(der)
@@ -303,6 +305,8 @@ func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Pref
 	p.Fingerprint = p.baseFingerprint
 	if p.Role == "client" {
 		p.Fingerprint = endpointFingerprint(p.baseFingerprint, get("vpn-server"))
+	} else {
+		p.Fingerprint = p.serverFingerprint()
 	}
 	return p, nil
 }
@@ -327,4 +331,12 @@ func (p *Prepared) Resolve(ctx context.Context) (Config, NetworkOptions, error) 
 		}
 	}
 	return c, n, nil
+}
+
+func (p *Prepared) serverFingerprint() string {
+	h := sha256.New()
+	h.Write([]byte(p.baseFingerprint))
+	h.Write(p.Config.accountRevision[:])
+	h.Write([]byte(p.Config.accountPath))
+	return hex.EncodeToString(h.Sum(nil))
 }

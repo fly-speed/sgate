@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 
 	"sgate/internal/tunnel"
 )
@@ -21,6 +22,11 @@ func (c *Config) LoadAccountFile(path string, server bool) error {
 	if err != nil {
 		return err
 	}
+	return c.setAccounts(path, accounts, server)
+}
+
+func (c *Config) setAccounts(path string, accounts []tunnel.Account, server bool) error {
+	var err error
 	for _, account := range accounts {
 		if len(account.ReverseMappings) != 0 {
 			return errors.New("VPN account files do not support reverse mappings")
@@ -37,6 +43,7 @@ func (c *Config) LoadAccountFile(path string, server bool) error {
 		}
 		c.Username, c.Password = accounts[0].Username, accounts[0].Password
 	}
+	c.accountPath = filepath.Clean(path)
 	c.RequireAccount = true
 	data, err := json.Marshal(accounts)
 	if err != nil {
@@ -45,4 +52,13 @@ func (c *Config) LoadAccountFile(path string, server bool) error {
 	c.accountRevision = sha256.Sum256(data)
 	clear(data)
 	return nil
+}
+
+func (p *Prepared) WithServerAccounts(path string, accounts []tunnel.Account) (*Prepared, error) {
+	next := *p
+	if err := next.Config.setAccounts(path, accounts, true); err != nil {
+		return nil, err
+	}
+	next.Fingerprint = next.serverFingerprint()
+	return &next, nil
 }

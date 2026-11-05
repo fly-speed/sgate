@@ -25,6 +25,8 @@ type VPNAccountInfo struct {
 }
 
 type VPNAccountsSnapshot struct {
+	LiveApplied            bool             `json:"live_applied,omitempty"`
+	ServerAccounts         []tunnel.Account `json:"-"`
 	Path                   string           `json:"path"`
 	Revision               string           `json:"revision"`
 	Accounts               []VPNAccountInfo `json:"accounts"`
@@ -80,7 +82,16 @@ func (h *Handler) vpnAccounts(w http.ResponseWriter, r *http.Request) {
 	}
 	if change != nil {
 		if current, err := regularRead(h.view.AppConfigPath, 1<<20); err == nil {
-			h.vpnAccountRestartPending = true
+			if view.LiveApplied && view.ConfigValue != "" {
+				edits := map[string]string{VPNAccountFileKey(h.view.Role): view.ConfigValue}
+				if baseline, err := prepareVPNConfigEdits(h.startupContent, edits, h.view.Role); err == nil {
+					if updated, err := updateConfigFields([]byte(baseline), edits); err == nil {
+						h.startupContent = []byte(updated)
+						h.startupRevision = h.restartDigest(h.startupContent)
+					}
+				}
+			}
+			h.vpnAccountRestartPending = !view.LiveApplied
 			fields := h.vpnRestartFields(current)
 			view.VPNRestartFields = &fields
 			if view.ConfigChanged {
@@ -215,6 +226,12 @@ func ManageVPNAccountFile(configPath, role, runningProxyAccounts string, overrid
 			config = []byte(nextConfig)
 			view.ConfigChanged = true
 			view.ConfigValue = path
+		}
+		if role == "server" {
+			view.ServerAccounts = accounts
+			if override == nil && !view.ConfigChanged {
+				view.ConfigValue = configured
+			}
 		}
 		raw = next
 	}

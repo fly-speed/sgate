@@ -127,6 +127,7 @@ type View struct {
 	TestVPN              func(context.Context, map[string]string) (vpn.ProbeResult, error)
 	ManageTunnelAccounts func(*TunnelAccountChange) (TunnelAccountsSnapshot, error)
 	ManageVPNAccounts    func(*VPNAccountChange) (VPNAccountsSnapshot, error)
+	ClientKeyPath        func() (string, error)
 	Apply                func() error
 	ApplyLive            func([]string) error
 	LiveFields           []string

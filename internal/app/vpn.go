@@ -45,6 +45,7 @@ type vpnDevice interface {
 type vpnWorker struct {
 	restartFromSaved bool // Protected by the controller mutex.
 	server           *vpn.Server
+	serverAccounts   *vpn.Config
 	mu               sync.Mutex
 	health           vpnHealth
 	stats            *vpn.Stats
@@ -210,6 +211,10 @@ func (v *vpnWorker) run(ctx context.Context, p *vpn.Prepared, open func(string) 
 		}
 		defer server.Close()
 		v.mu.Lock()
+		if v.serverAccounts != nil {
+			server.UpdateAccounts(*v.serverAccounts)
+			v.serverAccounts = nil
+		}
 		v.server = server
 		if server.UDPAddr() != nil {
 			v.health.UDPAddress = server.UDPAddr().String()

@@ -59,6 +59,7 @@ type Handler struct {
 	startupRevision          string
 	startupContent           []byte
 	mappingRestartPending    bool
+	clientKeyPending         bool
 	vpnRestartAttemptFields  []string
 	vpnAccountRestartPending bool
 	mu                       sync.Mutex

@@ -40,6 +40,7 @@ type Config struct {
 	RequireAccount             bool
 	VerifyAccount              func(string, []byte, []byte) bool
 	accountRevision            [32]byte
+	accountPath                string
 	Network                    netip.Prefix
 	ClientIP                   netip.Addr
 	MTU                        int

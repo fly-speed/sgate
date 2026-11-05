@@ -24,5 +24,26 @@ func (c *controller) manageVPNAccounts(change *admin.VPNAccountChange) (admin.VP
 		value := fs.Lookup(key).Value.String()
 		override = &value
 	}
-	return admin.ManageVPNAccountFile(c.path, c.role, c.current.accountsFile, override, change)
+	view, err := admin.ManageVPNAccountFile(c.path, c.role, c.current.accountsFile, override, change)
+	if err != nil || change == nil || c.role != "server" || c.current.vpn == nil || c.worker == nil || c.worker.vpn == nil {
+		return view, err
+	}
+	worker := c.worker.vpn
+	worker.mu.Lock()
+	defer worker.mu.Unlock()
+	if worker.health.State != "starting" && worker.health.State != "listening" {
+		return view, nil
+	}
+	prepared, err := c.current.vpn.WithServerAccounts(view.Path, view.ServerAccounts)
+	if err != nil {
+		return view, err
+	}
+	if worker.server == nil {
+		worker.serverAccounts = &prepared.Config
+	} else {
+		worker.server.UpdateAccounts(prepared.Config)
+	}
+	c.current.vpn = prepared
+	view.LiveApplied = true
+	return view, nil
 }
