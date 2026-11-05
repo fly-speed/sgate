@@ -8,6 +8,8 @@ import (
 )
 
 const noiseTick = 5 * time.Millisecond
+const noisePressureHold = time.Second
+const noiseSlowWrite = 10 * time.Millisecond
 const maxNoiseRate = 10 * 1024 * 1024
 const paddingChallengePrefix = probeChallengePrefix + "padding-v1:"
 
@@ -57,6 +59,24 @@ func (p *peer) noiseAllowed(now time.Time, c NoiseConfig) bool {
 	return active && c.Traffic || !active && c.Idle
 }
 
+// Transports without QUIC admission data use bulk traffic and slow writes as
+// local pressure signals. A hold covers gaps between bursts and TCP recovery.
+func (p *peer) noteNoisePressure(now time.Time) {
+	if p.flow == nil {
+		storeMax(&p.noisePausedUntil, uint64(now.Sub(p.started)+noisePressureHold))
+	}
+}
+
+func (p *peer) noiseCanSend(now time.Time) bool {
+	if p.queue.len() != 0 {
+		return false
+	}
+	if p.flow != nil {
+		return p.flow.allowNoise()
+	}
+	return now.Sub(p.started) >= time.Duration(p.noisePausedUntil.Load())
+}
+
 type noisePacer struct {
 	last   time.Time
 	credit int64
@@ -87,14 +107,14 @@ func (n *noisePacer) budget(now time.Time, rate int, allowed bool) int {
 	return budget
 }
 func (p *peer) sendNoise(now time.Time, c Config, pacer *noisePacer) error {
-	allowed := p.noiseAllowed(now, c.Noise) && p.queue.len() == 0 && (p.flow == nil || p.flow.allowNoise())
+	allowed := p.noiseAllowed(now, c.Noise) && p.noiseCanSend(now)
 	budget := pacer.budget(now, c.Noise.Rate, allowed)
 	if !allowed {
 		c.Stats.noiseSkipped.Add(1)
 		return nil
 	}
 	for budget > 0 {
-		if p.queue.len() > 0 || (p.flow != nil && !p.flow.allowNoise()) || (c.Live != nil && c.Live.Snapshot().Noise != c.Noise) {
+		if !p.noiseCanSend(now) || (c.Live != nil && c.Live.Snapshot().Noise != c.Noise) {
 			c.Stats.noiseSkipped.Add(1)
 			break
 		}
@@ -105,10 +125,15 @@ func (p *peer) sendNoise(now time.Time, c Config, pacer *noisePacer) error {
 		if _, err := rand.Read(data[2:]); err != nil {
 			return err
 		}
+		began := time.Now()
 		if err := p.sendDatagram(data); err != nil {
 			return err
 		}
 		c.Stats.noiseTX.Add(uint64(size))
+		if ended := time.Now(); ended.Sub(began) >= noiseSlowWrite {
+			p.noteNoisePressure(ended)
+			now = ended
+		}
 		budget -= size
 	}
 	return nil

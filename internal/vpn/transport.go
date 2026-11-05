@@ -23,15 +23,16 @@ type networkSetupError struct{ err error }
 func (e *networkSetupError) Error() string { return "configure VPN network: " + e.err.Error() }
 
 type peer struct {
-	conn         connection
-	control      controlChannel
-	id           string
-	ip           netip.Addr
-	queue        *packetQueue
-	padding      bool
-	flow         *datagramFlow
-	started      time.Time
-	lastBusiness atomic.Int64
+	conn             connection
+	control          controlChannel
+	id               string
+	ip               netip.Addr
+	queue            *packetQueue
+	padding          bool
+	flow             *datagramFlow
+	started          time.Time
+	lastBusiness     atomic.Int64
+	noisePausedUntil atomic.Uint64
 }
 
 func (p *peer) enqueue(packet []byte, stats *Stats) {
@@ -42,6 +43,7 @@ func (p *peer) run(ctx context.Context, c Config, receive func([]byte) error) er
 	defer cancel()
 	p.started = time.Now()
 
+	bulkSize := min(1000, c.MTU*3/4)
 	done := make(chan error, 3)
 	go func() {
 		var id uint64
@@ -145,8 +147,16 @@ func (p *peer) run(ctx context.Context, c Config, receive func([]byte) error) er
 					lastBulk = time.Now()
 				}
 				began := time.Now()
+				if len(packet) >= bulkSize {
+					p.noteNoisePressure(began)
+				}
 				err := send(packet)
-				storeMax(&c.Stats.sendWaitMax, uint64(time.Since(began)))
+				ended := time.Now()
+				waited := ended.Sub(began)
+				storeMax(&c.Stats.sendWaitMax, uint64(waited))
+				if waited >= noiseSlowWrite {
+					p.noteNoisePressure(ended)
+				}
 				if err != nil {
 					done <- err
 					return
@@ -203,6 +213,9 @@ func (p *peer) run(ctx context.Context, c Config, receive func([]byte) error) er
 			}
 			p.businessActivity()
 			began := time.Now()
+			if len(packet) >= bulkSize {
+				p.noteNoisePressure(began)
+			}
 			err = receive(packet)
 			storeMax(&c.Stats.tunWriteMax, uint64(time.Since(began)))
 			if err != nil {

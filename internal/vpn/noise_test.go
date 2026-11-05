@@ -90,6 +90,61 @@ func TestVPNNoisePolicyAndCongestionAdmission(t *testing.T) {
 		t.Fatal("noise ignores congestion window")
 	}
 }
+func TestVPNNoiseLocalPressureHoldAndRecovery(t *testing.T) {
+	now := time.Now()
+	p := &peer{started: now, queue: newPacketQueue(0, nil)}
+	if !p.noiseCanSend(now) {
+		t.Fatal("idle connection should allow noise")
+	}
+	p.noteNoisePressure(now)
+	p.noteNoisePressure(now.Add(500 * time.Millisecond))
+	p.noteNoisePressure(now.Add(100 * time.Millisecond))
+	if p.noiseCanSend(now.Add(time.Second)) {
+		t.Fatal("newer pressure must extend the hold")
+	}
+	if !p.noiseCanSend(now.Add(1500 * time.Millisecond)) {
+		t.Fatal("noise did not resume after pressure cleared")
+	}
+	p.flow = newDatagramFlow()
+	p.noteNoisePressure(now.Add(2 * time.Second))
+	if !p.noiseCanSend(now.Add(2 * time.Second)) {
+		t.Fatal("local heuristic overrode QUIC admission")
+	}
+}
+
+func TestVPNNoiseYieldsToBulkOnNonQUICTransports(t *testing.T) {
+	for _, transport := range []string{"udp", "tcp", "wss"} {
+		t.Run(transport, func(t *testing.T) {
+			t.Parallel()
+			noise := NoiseConfig{Rate: 4096, Traffic: true, Idle: true}
+			server, cfg, remote := fixtureWire(t, 4, noise, transport)
+			cfg.Noise = noise
+			local, _, _ := startClient(t, cfg)
+			counters := func() [2]uint64 {
+				return [2]uint64{cfg.Stats.Snapshot().NoiseTX, server.cfg.Stats.Snapshot().NoiseTX}
+			}
+			await(t, "idle padding on both ends", func() bool {
+				rates := counters()
+				return rates[0] > 0 && rates[1] > 0
+			})
+			packet := ipPacket("8.8.8.8", cfg.ClientIP.String(), 1280)
+			remote.out <- packet
+			receivePacket(t, local, packet)
+			// A padding write already in progress may finish after delivery.
+			time.Sleep(50 * time.Millisecond)
+			paused := counters()
+			time.Sleep(100 * time.Millisecond)
+			if got := counters(); got != paused {
+				t.Fatalf("padding continued during bulk pressure hold: %v → %v", paused, got)
+			}
+			await(t, "padding resumed on both ends", func() bool {
+				rates := counters()
+				return rates[0] > paused[0] && rates[1] > paused[1]
+			})
+		})
+	}
+}
+
 func TestVPNNoiseLegacyPeerKeepsBusinessConnection(t *testing.T) {
 	server, cfg, remote := fixtureNoise(t, 4, NoiseConfig{Rate: 24 * 1024, Traffic: true, Idle: true})
 	cfg, err := cfg.normalized(false)
