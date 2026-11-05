@@ -2,6 +2,7 @@
 package desktop
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"sgate/internal/admin"
 	"sgate/internal/clientcontrol"
@@ -33,6 +35,24 @@ type Client struct {
 func New(root string) *Client {
 	return &Client{Executable: filepath.Join(root, "bin", "sgate-client.exe"), Config: filepath.Join(root, "conf", "sgate-client.cf"), Log: filepath.Join(root, "logs", "sgate-client.log"), status: Status{State: "stopped"}}
 }
+
+// Version reads the version from the executable managed by this controller.
+func (c *Client) Version() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, c.Executable, "--version")
+	configureProcess(cmd)
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	fields := strings.Fields(string(output))
+	if len(fields) != 2 || fields[0] != "sgate-client" {
+		return ""
+	}
+	return fields[1]
+}
+
 func (c *Client) Snapshot() Status { c.mu.Lock(); defer c.mu.Unlock(); return c.status }
 func (c *Client) Start() error {
 	c.mu.Lock()

@@ -92,6 +92,7 @@ func control(class, text string, style uintptr, x, y, w, h, id int) uintptr {
 	return hwnd
 }
 func refresh() {
+	refreshClientVersion()
 	s := controller.Snapshot()
 	labels := map[string]string{"stopped": "客户端已停止", "running": "客户端正在运行", "stopping": "正在停止客户端，等待 VPN 路由与 DNS 清理…", "failed": "客户端未能正常运行"}
 	text := labels[s.State]
@@ -134,6 +135,10 @@ func procedure(hwnd, msg, wparam, lparam uintptr) uintptr {
 		return 1
 	case 0x0138: // WM_CTLCOLORSTATIC
 		return styleLabel(wparam, lparam)
+	case 0x002b: // WM_DRAWITEM
+		if lparam != 0 && drawButton((*buttonDrawItem)(unsafe.Pointer(lparam))) {
+			return 1
+		}
 	case 0x0112: // WM_SYSCOMMAND
 		if wparam&0xfff0 == 0xf020 { // SC_MINIMIZE
 			if !closing {
@@ -225,6 +230,8 @@ func run() error {
 		return err
 	}
 	defer windows.CloseHandle(mutex)
+	// Match the AppUserModelID in the installer's shortcuts.
+	windows.NewLazySystemDLL("shell32.dll").NewProc("SetCurrentProcessExplicitAppUserModelID").Call(address("FlySpeed.Sgate.Client"))
 	controller = desktop.New(root)
 	defer controller.Stop()
 	user32.NewProc("SetProcessDPIAware").Call()
@@ -249,6 +256,8 @@ func run() error {
 	if mainWindow == 0 {
 		return err
 	}
+	sendMessage.Call(mainWindow, 0x0080, 1, largeIcon) // WM_SETICON, ICON_BIG
+	sendMessage.Call(mainWindow, 0x0080, 0, smallIcon) // WM_SETICON, ICON_SMALL
 	buildDashboard(largeIcon)
 	buildSetupPanel()
 	initializeTray(smallIcon)

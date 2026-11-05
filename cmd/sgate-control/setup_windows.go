@@ -6,7 +6,7 @@ const (
 	idCopySetupToken = 114
 	setupTimer       = 2
 	windowWidth      = 692
-	windowHeight     = 436
+	windowHeight     = 396
 	setupHeight      = 104
 )
 
@@ -18,12 +18,12 @@ var (
 
 func buildSetupPanel() {
 	const readOnlyEdit = 0x10000 | 0x00800000 | 0x0800 | 0x0080 // WS_TABSTOP | WS_BORDER | ES_READONLY | ES_AUTOHSCROLL
-	setupField = control("EDIT", "", readOnlyEdit, 42, 441, 467, 30, 0)
+	setupField = control("EDIT", "", readOnlyEdit, 44, 405, 464, 30, 0)
 	sendMessage.Call(setupField, 0x30, setupFont, 1) // WM_SETFONT
 	setupControls = []uintptr{
-		label("首次设置 · 管理员初始化令牌", 42, 408, 590, 26, sectionFont, colorText, cardBrush, 0),
+		label("首次设置 · 管理员初始化令牌", 44, 366, 590, 26, sectionFont, colorText, cardBrush, 0),
 		setupField,
-		control("BUTTON", "复制令牌", 0x10000, 522, 440, 108, 32, idCopySetupToken),
+		button("复制令牌", 520, 401, 114, idCopySetupToken),
 	}
 }
 

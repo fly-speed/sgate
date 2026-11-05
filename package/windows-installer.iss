@@ -17,7 +17,10 @@ PrivilegesRequired=admin
 ArchitecturesAllowed={#NativeArchitecture}
 ArchitecturesInstallIn64BitMode={#NativeArchitecture}
 UninstallDisplayIcon={app}\bin\sgate-control.exe
+SetupIconFile=..\cmd\sgate-control\assets\sgate-taiji.ico
 WizardStyle=modern
+WizardSizePercent=100
+WizardImageFile=
 RestartApplications=no
 
 [Tasks]
@@ -25,6 +28,7 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
 
 [Files]
 Source: "{#Bundle}\bin\*"; DestDir: "{app}\bin"; Flags: ignoreversion
+Source: "..\cmd\sgate-control\assets\sgate-taiji.ico"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "{#Bundle}\web\admin\*"; DestDir: "{app}\web\admin"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#Bundle}\docs\*"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "{#Bundle}\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion
@@ -33,8 +37,8 @@ Source: "{#Bundle}\conf\sgate-client.cf"; DestDir: "{app}\conf"; Flags: onlyifdo
 Source: "{#Bundle}\conf\tls-cert.pem"; DestDir: "{app}\conf"; Flags: onlyifdoesntexist uninsneveruninstall
 
 [Icons]
-Name: "{commonprograms}\sgate Client"; Filename: "{app}\bin\sgate-control.exe"; WorkingDir: "{app}"
-Name: "{commondesktop}\sgate Client"; Filename: "{app}\bin\sgate-control.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{commonprograms}\sgate Client"; Filename: "{app}\bin\sgate-control.exe"; WorkingDir: "{app}"; IconFilename: "{app}\bin\sgate-taiji.ico"; AppUserModelID: "FlySpeed.Sgate.Client"
+Name: "{commondesktop}\sgate Client"; Filename: "{app}\bin\sgate-control.exe"; WorkingDir: "{app}"; IconFilename: "{app}\bin\sgate-taiji.ico"; AppUserModelID: "FlySpeed.Sgate.Client"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\bin\sgate-control.exe"; Description: "Open sgate Client"; Flags: postinstall skipifsilent nowait unchecked

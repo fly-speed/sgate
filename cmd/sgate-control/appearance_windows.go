@@ -35,6 +35,9 @@ var (
 	labels                              = make(map[uintptr]labelStyle)
 	dashboard, exitChoice               []uintptr
 	confirmMinimize                     uintptr
+	versionLabel                        uintptr
+	versionResult                       = make(chan string, 1)
+	buttonText                          = make(map[uint32]string)
 )
 
 func initializeAppearance() {
@@ -71,7 +74,55 @@ func label(text string, x, y, w, h int, face, foreground, background uintptr, st
 }
 
 func button(text string, x, y, w, id int) uintptr {
-	return control("BUTTON", text, 0x10000, x, y, w, 38, id) // WS_TABSTOP
+	buttonText[uint32(id)] = text
+	return control("BUTTON", text, 0x1000b, x, y, w, 38, id) // WS_TABSTOP | BS_OWNERDRAW
+}
+
+// DRAWITEMSTRUCT uses pointer-sized handles and a Win32 RECT.
+type buttonDrawItem struct {
+	controlType, controlID, itemID, action, state uint32
+	window, dc                                    uintptr
+	bounds                                        rectangle
+	data                                          uintptr
+}
+
+func drawButton(item *buttonDrawItem) bool {
+	text, ok := buttonText[item.controlID]
+	if item.controlType != 4 || !ok { // ODT_BUTTON
+		return false
+	}
+	foreground, background, border := uintptr(colorText), uintptr(0xf8f7f3), uintptr(0xe4ded4)
+	switch {
+	case item.state&0x4 != 0: // ODS_DISABLED
+		foreground, background, border = 0x766e65, 0xf5f3f0, 0xece9e4
+	case item.state&0x1 != 0: // ODS_SELECTED
+		foreground, background, border = colorSurface, colorHeader, colorHeader
+	case item.controlID == 101 || item.controlID == idKeepInTray:
+		foreground, background, border = colorSurface, 0x625817, 0x625817
+	}
+	brush, _, _ := gdi32.NewProc("CreateSolidBrush").Call(background)
+	pen, _, _ := gdi32.NewProc("CreatePen").Call(0, 1, border)
+	selectObject := gdi32.NewProc("SelectObject")
+	oldBrush, _, _ := selectObject.Call(item.dc, brush)
+	oldPen, _, _ := selectObject.Call(item.dc, pen)
+	r := item.bounds
+	gdi32.NewProc("RoundRect").Call(item.dc, uintptr(r.left), uintptr(r.top), uintptr(r.right), uintptr(r.bottom), px(12), px(12))
+	selectObject.Call(item.dc, oldPen)
+	selectObject.Call(item.dc, oldBrush)
+	deleteObject := gdi32.NewProc("DeleteObject")
+	deleteObject.Call(pen)
+	deleteObject.Call(brush)
+	oldFont, _, _ := selectObject.Call(item.dc, font)
+	gdi32.NewProc("SetBkMode").Call(item.dc, 1) // TRANSPARENT
+	gdi32.NewProc("SetTextColor").Call(item.dc, foreground)
+	user32.NewProc("DrawTextW").Call(item.dc, address(text), ^uintptr(0), uintptr(unsafe.Pointer(&r)), 0x825) // CENTER | VCENTER | SINGLELINE | NOPREFIX
+	selectObject.Call(item.dc, oldFont)
+	if item.state&0x210 == 0x10 { // ODS_FOCUS without ODS_NOFOCUSRECT
+		inset := int32(px(4))
+		r = rectangle{r.left + inset, r.top + inset, r.right - inset, r.bottom - inset}
+		user32.NewProc("DrawFocusRect").Call(item.dc, uintptr(unsafe.Pointer(&r)))
+	}
+	return true
 }
 
 func showControls(controls []uintptr, visible bool) {
@@ -85,24 +136,28 @@ func showControls(controls []uintptr, visible bool) {
 }
 
 func buildDashboard(icon uintptr) {
-	iconControl := control("STATIC", "", 3, 24, 25, 46, 46, 0) // SS_ICON
-	sendMessage.Call(iconControl, 0x0170, icon, 0)             // STM_SETICON
+	iconControl := control("STATIC", "", 3, 24, 25, 46, 46, 0)                                                // SS_ICON
+	sendMessage.Call(iconControl, 0x0170, icon, 0)                                                            // STM_SETICON
+	versionLabel = label("sgate-client  ·  正在读取版本…", 370, 28, 280, 26, detailFont, colorMint, headerBrush, 2) // SS_RIGHT
+	go func() { versionResult <- controller.Version() }()
 	showControls([]uintptr{
 		iconControl,
-		label("sgate", 80, 19, 565, 39, titleFont, colorSurface, headerBrush, 0),
+		label("sgate", 80, 19, 280, 39, titleFont, colorSurface, headerBrush, 0),
 		label("代理与 VPN  ·  Windows 客户端", 82, 60, 560, 26, font, colorMint, headerBrush, 0),
+		versionLabel,
 	}, true)
 
-	statusWindow = label("", 42, 154, 590, 86, font, colorMuted, cardBrush, 0)
-	startButton = button("启动客户端", 42, 255, 148, 101)
-	stopButton = button("停止客户端", 202, 255, 148, 102)
+	statusWindow = label("", 44, 152, 590, 72, font, colorMuted, cardBrush, 0)
+	startButton = button("启动客户端", 44, 264, 112, 101)
+	stopButton = button("停止客户端", 166, 264, 112, 102)
 	dashboard = []uintptr{
-		label("运行状态", 42, 120, 560, 29, sectionFont, colorText, cardBrush, 0),
+		label("运行状态", 44, 121, 560, 29, sectionFont, colorText, cardBrush, 0),
+		label("快捷操作", 44, 232, 560, 29, sectionFont, colorText, cardBrush, 0),
 		statusWindow, startButton, stopButton,
-		button("打开管理页面", 362, 255, 168, 103),
-		button("编辑配置", 42, 305, 148, 104),
-		button("查看日志", 202, 305, 148, 105),
-		label("配置  "+controller.Config, 24, 367, 630, 24, detailFont, colorMuted, canvasBrush, 0x8000), // SS_ENDELLIPSIS
+		button("打开管理页面", 288, 264, 138, 103),
+		button("编辑配置", 436, 264, 94, 104),
+		button("查看日志", 540, 264, 94, 105),
+		label("配置  "+controller.Config, 24, 326, 630, 24, detailFont, colorMuted, canvasBrush, 0x8000), // SS_ENDELLIPSIS
 	}
 	showControls(dashboard, true)
 
@@ -116,6 +171,17 @@ func buildDashboard(icon uintptr) {
 	}
 }
 
+func refreshClientVersion() {
+	select {
+	case version := <-versionResult:
+		if version == "" {
+			version = "版本未知"
+		}
+		setText.Call(versionLabel, address("sgate-client  ·  "+version))
+	default:
+	}
+}
+
 func showExitChoice(show bool) {
 	if choosingExit == show {
 		return
@@ -124,6 +190,7 @@ func showExitChoice(show bool) {
 	showControls(dashboard, !show)
 	showControls(exitChoice, show)
 	refreshSetupToken()
+	user32.NewProc("InvalidateRect").Call(mainWindow, 0, 1)
 	if show {
 		user32.NewProc("SetFocus").Call(confirmMinimize)
 	} else {
@@ -138,10 +205,14 @@ func paintBackground(hwnd, dc uintptr) {
 	fill.Call(dc, uintptr(unsafe.Pointer(&client)), canvasBrush)
 	header := rectangle{right: client.right, bottom: int32(px(96))}
 	fill.Call(dc, uintptr(unsafe.Pointer(&header)), headerBrush)
-	card := rectangle{left: int32(px(24)), top: int32(px(110)), right: client.right - int32(px(24)), bottom: int32(px(354))}
+	card := rectangle{left: int32(px(24)), top: int32(px(108)), right: client.right - int32(px(24)), bottom: int32(px(315))}
 	fill.Call(dc, uintptr(unsafe.Pointer(&card)), cardBrush)
+	if !choosingExit {
+		divider := rectangle{left: int32(px(44)), top: int32(px(225)), right: card.right - int32(px(20)), bottom: int32(px(226))}
+		fill.Call(dc, uintptr(unsafe.Pointer(&divider)), canvasBrush)
+	}
 	if shownToken != "" {
-		card.top, card.bottom = int32(px(397)), int32(px(488))
+		card.top, card.bottom = int32(px(352)), int32(px(452))
 		fill.Call(dc, uintptr(unsafe.Pointer(&card)), cardBrush)
 	}
 }
