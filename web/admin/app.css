@@ -355,6 +355,11 @@ header {
 header .eyebrow {
   margin-bottom: 8px;
 }
+.build-info {
+  margin: 6px 0 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
 header h1 {
   font-size: 26px;
   margin: 0;

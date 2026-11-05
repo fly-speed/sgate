@@ -247,6 +247,9 @@ go build -mod=mod -o bin/sgate-client ./cmd/sgate-client
 go test -mod=mod -race ./...
 ```
 
+客户端和服务端可单独运行 `-v` 或 `-version` 查询版本，使用 `-verbose` 同时显示 UTC 构建时间。Makefile 和 Windows 打包脚本会写入构建时间。手工使用 `go build` 时，可通过 `-ldflags "-X sgate/internal/buildinfo.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)"` 写入；省略该参数时，构建时间显示为 `unknown`。
+
+
 安装到默认目录 `/opt/soft/sgate`：
 
 ```sh

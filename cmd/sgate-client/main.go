@@ -16,9 +16,13 @@ import (
 	master "github.com/acl-dev/go-service"
 	"sgate/internal/aclservice"
 	"sgate/internal/app"
+	"sgate/internal/buildinfo"
 )
 
 func main() {
+	if buildinfo.PrintRequested(os.Stdout, "sgate-client", os.Args[1:]) {
+		return
+	}
 	if err := run(); err != nil {
 		log.Fatal(err)
 	}

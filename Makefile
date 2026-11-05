@@ -8,6 +8,8 @@ PYTHON ?= python3
 BINDIR ?= bin
 BUILD_FLAGS ?= -trimpath
 LDFLAGS ?=
+BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+SGATE_SERVICE_LDFLAGS := $(LDFLAGS) -X sgate/internal/buildinfo.BuildTime=$(BUILD_TIME)
 TEST_FLAGS ?=
 PREFIX ?= /opt/soft/sgate
 DESTDIR ?=
@@ -70,11 +72,11 @@ endif
 
 _build-client: check
 	mkdir -p "$(OUTPUT_DIR)"
-	$(GO_CMD) build -mod=$(MOD) $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -o "$(OUTPUT_DIR)/sgate-client" ./cmd/sgate-client
+	$(GO_CMD) build -mod=$(MOD) $(BUILD_FLAGS) -ldflags "$(SGATE_SERVICE_LDFLAGS)" -o "$(OUTPUT_DIR)/sgate-client" ./cmd/sgate-client
 
 _build-server: check
 	mkdir -p "$(OUTPUT_DIR)"
-	$(GO_CMD) build -mod=$(MOD) $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -o "$(OUTPUT_DIR)/sgate-server" ./cmd/sgate-server
+	$(GO_CMD) build -mod=$(MOD) $(BUILD_FLAGS) -ldflags "$(SGATE_SERVICE_LDFLAGS)" -o "$(OUTPUT_DIR)/sgate-server" ./cmd/sgate-server
 
 _build-vpn: check
 	mkdir -p "$(OUTPUT_DIR)"

@@ -16,7 +16,8 @@ $PreviousCGO = $env:CGO_ENABLED
 Push-Location $SourceRoot
 try {
     $env:GOOS='windows'; $env:GOARCH=$Architecture; $env:CGO_ENABLED='0'
-    & go build -mod=mod -trimpath -o (Join-Path $Destination 'bin/sgate-client.exe') ./cmd/sgate-client
+    $BuildTime = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ', [Globalization.CultureInfo]::InvariantCulture)
+    & go build -mod=mod -trimpath "-ldflags=-X sgate/internal/buildinfo.BuildTime=$BuildTime" -o (Join-Path $Destination 'bin/sgate-client.exe') ./cmd/sgate-client
     if ($LASTEXITCODE -ne 0) { throw 'Windows client build failed' }
     & go build -mod=mod -trimpath '-ldflags=-H=windowsgui' -o (Join-Path $Destination 'bin/sgate-control.exe') ./cmd/sgate-control
     if ($LASTEXITCODE -ne 0) { throw 'Windows controller build failed' }

@@ -13,9 +13,13 @@ import (
 	"github.com/gin-gonic/gin"
 	"sgate/internal/aclservice"
 	"sgate/internal/app"
+	"sgate/internal/buildinfo"
 )
 
 func main() {
+	if buildinfo.PrintRequested(os.Stdout, "sgate-server", os.Args[1:]) {
+		return
+	}
 	if err := run(); err != nil {
 		log.Fatal(err)
 	}

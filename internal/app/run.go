@@ -16,6 +16,7 @@ import (
 
 	"sgate/internal/aclservice"
 	"sgate/internal/admin"
+	"sgate/internal/buildinfo"
 	"sgate/internal/cli"
 	"sgate/internal/serviceconfig"
 	"sgate/internal/tunnel"
@@ -143,6 +144,7 @@ func (c *controller) status() any {
 	}
 	return map[string]any{
 		"healthy": healthy, "quic": quic, "vpn": vpnStatus, "vpn_mode": vpnStatus.Mode, "vpn_restart_supported": true,
+		"version": buildinfo.Version, "build_time": buildinfo.BuildTime,
 		"websocket_listeners":       websocketListeners,
 		"pending_listeners":         pending,
 		"noise":                     c.current.noiseStatus(),

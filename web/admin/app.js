@@ -1484,6 +1484,10 @@ async function loadConfig() {
   renderRuntime(data.runtime || {});
 }
 function renderRuntime(rt) {
+  const buildInfo = $("build-info");
+  buildInfo.hidden = !rt.version;
+  localText(buildInfo, () => t("版本") + " " + (rt.version || "") + " · " +
+    t("构建时间") + " " + (rt.build_time && rt.build_time !== "unknown" ? rt.build_time : t("未知")));
   if (typeof rt.vpn_mode === "string" && rt.vpn_mode !== appliedVPNMode) {
     appliedVPNMode = rt.vpn_mode;
     updateProxyMappingMode();
