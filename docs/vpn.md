@@ -14,12 +14,14 @@ Windows 包还包含独立窗口程序 `bin/sgate-control.exe`，与 `sgate-clie
 
 控制 APP 仅管理由本窗口启动的子进程，不接管其他窗口、脚本或服务启动的客户端。同一安装目录只允许一个控制窗口。停止或关闭窗口通过私有继承管道通知客户端正常退出，等待原有退出流程完成 VPN 清理后才显示“已停止”或关闭窗口；不会用强制终止冒充清理完成。控制 APP 意外退出时，管道关闭也会通知子进程退出。若客户端正在清理，窗口保留“正在停止”的状态。强制结束客户端或系统关机仍无法保证完成清理。新版控制 APP 与客户端应配套更新；旧客户端会因不支持控制参数而拒绝启动，避免启动一个无法正常停止的旧进程。
 
-在已安装 Go 1.24 或更新版本的 Windows PowerShell 中执行：
+在已安装 Go 1.24 或更新版本的 Windows 上，从项目根目录运行打包入口：
 
-```powershell
-.\scripts\build-windows.ps1 -Architecture amd64
-# ARM64 Windows uses -Architecture arm64.
+```bat
+package\build-windows.bat -Architecture amd64
+package\build-windows.bat -Architecture arm64 -Destination "D:\sgate builds\arm64"
 ```
+
+双击 `package\build-windows.bat` 会按默认参数打包 AMD64。批处理会调用同目录下的 `build-windows.ps1`，并传递参数和退出码。
 
 脚本在 `dist/windows-client/` 生成客户端、独立控制 APP、管理页面、Windows 示例配置和 PowerShell 启动器，并下载固定版本 Wintun、校验官方 SHA256、附带驱动许可。已有配置和密钥保留；首次生成的本地随机密钥须替换成与服务器相同的共享密钥。构建需要联网获取 Go 依赖和 Wintun。
 
