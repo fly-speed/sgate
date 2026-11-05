@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"log"
 	"net"
 	"net/http"
 
@@ -11,6 +12,7 @@ import (
 	"sgate/internal/admin"
 	"sgate/internal/cli"
 	"sgate/internal/tunnel"
+	"sgate/internal/vpn"
 )
 
 // runtimeHooks 区分框架接入方式，避免调用处传入多个含义不明的 nil。
@@ -53,6 +55,9 @@ func run(
 		return err
 	}
 	c.generation = 1
+	if vpn.ClientRecoveryPending(c.vpnRecoveryPath()) {
+		log.Print(vpn.ErrClientRecoveryPending)
+	}
 	stopAdmin, err := admin.Start(c.ctx, adminPath, view)
 	if err != nil {
 		_ = c.worker.stop()

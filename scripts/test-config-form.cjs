@@ -1932,17 +1932,29 @@ async function vpnProbePage() {
   const p=await page();
   vm.runInContext(`renderConfigFields([
     {key:"vpn-mode",value:"disabled",group:"独立 VPN",validation:{type:"enum",choices:["disabled","both","only"]}},
+    {key:"vpn-mtu",value:"1280",group:"独立 VPN",validation:{type:"integer"}},
     {key:"vpn-server",value:"quic://vpn.example.com:8444/vpn",group:"独立 VPN",validation:{type:"url"}}
   ],{},"client");var vpnModeRow=configInputs.find(row=>row.key==="vpn-mode"),vpnServerRow=configInputs.find(row=>row.key==="vpn-server")`,p.context);
   return p;
 }
 test("VPN connection button tests unsaved values and displays results without saving", async () => {
-  const {context}=await vpnProbePage();
+  const {context,elements}=await vpnProbePage();
+  const vpnGroup = elements.get("config-fields").children.find(group => group.configSection === "vpn");
+  const [,modeRow,serverRow] = vpnGroup.children;
+  assert.equal(modeRow.children[1].children[0],vm.runInContext('vpnModeRow.input',context));
+  assert.equal(serverRow.children[1].children[0],vm.runInContext('vpnServerRow.input',context));
+  const [save, probe] = serverRow.children[2].children;
+  assert.equal(save,vm.runInContext('vpnServerRow.saveButton',context));
+  assert.equal(probe,vm.runInContext('vpnProbeState.button',context));
+  assert.match(probe.innerHTML,/<svg/);
+  assert.equal(probe.title,"测试 VPN 连接");
+  assert.ok(serverRow.children[1].children.some(child => child.className?.includes("vpn-test-help")));
+  assert.ok(serverRow.children[1].children.includes(vm.runInContext('vpnProbeState.result',context)));
   assert.equal(vm.runInContext('vpnProbeState.button.disabled',context),true);
   vm.runInContext('vpnModeRow.input.value="only";vpnModeRow.input.listeners.input();vpnServerRow.input.value="quic://draft.example.com:8444/vpn";vpnServerRow.input.listeners.input();revision="r1"',context);
   let request;
   context.api=async(path,options)=>{request={path,body:JSON.parse(options.body)};return {ok:true,stage:"datagram",elapsed_ms:4,detail:"echo verified",address_in_use:true}};
-  await vm.runInContext('testVPNConnection()',context);
+  await vm.runInContext('vpnProbeState.button.listeners.click()',context);
   assert.equal(request.path,"vpn-test");
   assert.equal(request.body.fields["vpn-server"],"quic://draft.example.com:8444/vpn");
   assert.equal(request.body.fields["vpn-mode"],"only");
@@ -2010,6 +2022,33 @@ test("VPN manual controls reflect client status and serialize requests without s
   vm.runInContext('renderVPNControls({role:"client",enabled:false,state:"disabled"})',context);
   assert.equal(elements.get("vpn-start").disabled,true);
   assert.equal(elements.get("vpn-stop").disabled,true);
+});
+
+test("VPN client prompts once before cleaning up a previous session", async () => {
+  const {context,elements}=await page();
+  let prompts=0, confirmed=false;
+  const calls=[];
+  context.window.confirm=()=>{prompts++; return confirmed;};
+  context.api=async path=>{
+    calls.push(path);
+    return {runtime:{vpn:{role:"client",enabled:true,state:"stopped"}}};
+  };
+  const render='renderVPNControls({role:"client",enabled:true,state:"stopped",recovery_pending:true})';
+  vm.runInContext(render,context);
+  vm.runInContext(render,context);
+  assert.equal(prompts,1);
+  assert.deepEqual(calls,[]);
+  assert.equal(elements.get("vpn-start").disabled,true);
+  assert.equal(elements.get("vpn-stop").disabled,false);
+  assert.equal(elements.get("vpn-recovery-warning").hidden,false);
+  await vm.runInContext('controlVPN(true)',context);
+  assert.deepEqual(calls,[]);
+  confirmed=true;
+  await vm.runInContext('controlVPN(false)',context);
+  assert.equal(prompts,2);
+  assert.deepEqual(calls,["vpn-stop"]);
+  assert.equal(elements.get("vpn-recovery-warning").hidden,true);
+  assert.equal(elements.get("vpn-start").disabled,false);
 });
 
 test("VPN queue observation exposes cumulative metrics and tolerates older servers", async () => {

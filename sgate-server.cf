@@ -160,7 +160,7 @@ service sgate-server {
     # VPN mode: disabled turns VPN off; both runs proxy and VPN; only runs VPN while retaining framework and management listeners. Applying VPN changes interrupts VPN and restores/rebuilds its network configuration. Other VPN options are ignored while disabled and validated when enabled.
     vpn-mode = disabled
     # Dedicated VPN server accounts JSON. Setting the path enables account authentication.
-    vpn-accounts-file = ''
+    vpn-accounts-file =
     # Require an accounts file even when its path is empty.
     vpn-require-account = false
     # IPv4 VPN subnet; must match on both ends and must not overlap existing networks.

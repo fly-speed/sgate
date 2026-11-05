@@ -25,26 +25,20 @@ func applyNetwork(o NetworkOptions, run commandRunner) (cleanup func(), err erro
 	if e != nil {
 		return nil, e
 	}
-	var gateway, dev, destination string
-	for _, line := range strings.Split(line, "\n") {
-		key, value, ok := strings.Cut(strings.TrimSpace(line), ":")
-		if ok {
-			switch key {
-			case "gateway":
-				gateway = strings.TrimSpace(value)
-			case "interface":
-				dev = strings.TrimSpace(value)
-			case "destination":
-				destination = strings.TrimSpace(value)
-			}
-		}
-	}
+	gateway, dev, destination := macRouteDetails(line)
 	if dev == "" || interfaceUnsafe(dev) {
 		return nil, errors.New("VPN endpoint must use a physical route; stop other VPNs first")
 	}
 	if destination != o.Endpoint.String() {
-		if _, e = netip.ParseAddr(gateway); e == nil {
-			if err = t.step("route", []string{"-n", "add", "-host", o.Endpoint.String(), gateway}, t.reverse("route", "-n", "delete", "-host", o.Endpoint.String(), gateway)); err != nil {
+		if next, parseErr := netip.ParseAddr(gateway); parseErr == nil {
+			undo := t.reverse("route", "-n", "delete", "-host", o.Endpoint.String(), gateway)
+			if r := o.recovery; r != nil {
+				if err = r.rememberRoute(o.Endpoint, next, dev, 0); err != nil {
+					return nil, err
+				}
+				undo = recordCleanup(undo, r.clearRoute)
+			}
+			if err = t.step("route", []string{"-n", "add", "-host", o.Endpoint.String(), gateway}, undo); err != nil {
 				return nil, err
 			}
 		}
@@ -99,9 +93,34 @@ func applyNetwork(o NetworkOptions, run commandRunner) (cleanup func(), err erro
 		}
 		args := append([]string{"-setdnsservers", o.DNSService}, dnsStrings(o.DNS)...)
 		undo := append([]string{"-setdnsservers", o.DNSService}, old...)
-		if err = t.step("networksetup", args, t.reverse("networksetup", undo...)); err != nil {
+		restore := t.reverse("networksetup", undo...)
+		if r := o.recovery; r != nil {
+			if err = r.rememberDNS(o.DNSService, old, dnsStrings(o.DNS)); err != nil {
+				return nil, err
+			}
+			restore = recordCleanup(restore, r.clearDNS)
+		}
+		if err = t.step("networksetup", args, restore); err != nil {
 			return nil, err
 		}
 	}
 	return t.close, nil
+}
+
+func macRouteDetails(line string) (string, string, string) {
+	var gateway, dev, destination string
+	for _, line := range strings.Split(line, "\n") {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if ok {
+			switch key {
+			case "gateway":
+				gateway = strings.TrimSpace(value)
+			case "interface":
+				dev = strings.TrimSpace(value)
+			case "destination":
+				destination = strings.TrimSpace(value)
+			}
+		}
+	}
+	return gateway, dev, destination
 }

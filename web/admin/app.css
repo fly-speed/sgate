@@ -558,9 +558,12 @@ dd {
   outline: 2px solid var(--accent, #07856f);
   outline-offset: 3px;
 }
+.vpn-config-group {
+  --config-actions-width: 86px;
+}
 .config-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(180px, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 1fr) var(--config-actions-width, auto);
   gap: 16px;
   align-items: center;
   border-top: 1px solid #eaf0f2;
@@ -627,7 +630,7 @@ dd {
 }
 @media (max-width: 680px) {
   .config-row {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) var(--config-actions-width, auto);
     gap: 10px;
   }
   .config-row label {
@@ -1093,7 +1096,9 @@ html[lang="en"] nav button span {
 #traffic-quic-legend:not([hidden]) { display: inline-flex; }
 .legend { flex-wrap: wrap; }
 
-.vpn-test-button { margin-top: 10px; }
+.vpn-probe-row { align-items: start; }
+.vpn-probe-row .config-row-actions { padding-top: 2px; }
+.config-row .vpn-test-help,
 .config-row .vpn-test-result { display: block; margin-top: 8px; overflow-wrap: anywhere; }
 .config-row .vpn-test-result[hidden] { display: none; }
 .vpn-test-result.bad { color: var(--red, #c53030); }

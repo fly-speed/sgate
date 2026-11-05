@@ -63,17 +63,35 @@ func applyWindowsNetwork(o NetworkOptions, run commandRunner) (cleanup func(), e
 	}
 	index := strconv.Itoa(route.InterfaceIndex)
 	pin := " -DestinationPrefix " + psQuote(o.Endpoint.String()+"/32") + " -InterfaceIndex " + index + " -NextHop " + psQuote(next.String())
-	output, e = ps("if (Get-NetRoute" + pin + " -PolicyStore ActiveStore -ErrorAction SilentlyContinue) { 'existing' } else { New-NetRoute" + pin + " -PolicyStore ActiveStore -RouteMetric 1 | Out-Null; 'created' }")
-	if e != nil {
-		return nil, e
-	}
-	if strings.TrimSpace(output) == "created" {
-		t.undo = append(t.undo, func() error {
-			_, e := ps("Remove-NetRoute" + pin + " -PolicyStore ActiveStore -Confirm:$false")
-			return e
-		})
-	} else if strings.TrimSpace(output) != "existing" {
-		return nil, errors.New("unexpected endpoint route response")
+	if r := o.recovery; r != nil {
+		output, e = ps("if (Get-NetRoute" + pin + " -PolicyStore ActiveStore -ErrorAction SilentlyContinue) { 'existing' }")
+		if e != nil {
+			return nil, e
+		}
+		if output != "existing" {
+			if err = r.rememberRoute(o.Endpoint, next, "", route.InterfaceIndex); err != nil {
+				return nil, err
+			}
+			if err = step("New-NetRoute"+pin+" -PolicyStore ActiveStore -RouteMetric 1 | Out-Null",
+				"Remove-NetRoute"+pin+" -PolicyStore ActiveStore -Confirm:$false"); err != nil {
+				return nil, err
+			}
+			last := len(t.undo) - 1
+			t.undo[last] = recordCleanup(t.undo[last], r.clearRoute)
+		}
+	} else {
+		output, e = ps("if (Get-NetRoute" + pin + " -PolicyStore ActiveStore -ErrorAction SilentlyContinue) { 'existing' } else { New-NetRoute" + pin + " -PolicyStore ActiveStore -RouteMetric 1 | Out-Null; 'created' }")
+		if e != nil {
+			return nil, e
+		}
+		if strings.TrimSpace(output) == "created" {
+			t.undo = append(t.undo, func() error {
+				_, e := ps("Remove-NetRoute" + pin + " -PolicyStore ActiveStore -Confirm:$false")
+				return e
+			})
+		} else if strings.TrimSpace(output) != "existing" {
+			return nil, errors.New("unexpected endpoint route response")
+		}
 	}
 	output, e = ps("$a=@(Get-NetAdapter -IncludeHidden | Where-Object { $_.Name -eq " + psQuote(o.Interface) + " }); if ($a.Count -ne 1) { throw 'VPN adapter not found or ambiguous' }; $a[0].ifIndex")
 	if e != nil {

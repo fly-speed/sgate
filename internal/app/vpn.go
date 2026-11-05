@@ -16,26 +16,27 @@ import (
 )
 
 type vpnHealth struct {
-	Clients      []vpn.ClientSnapshot `json:"clients,omitempty"`
-	Generation   string               `json:"generation,omitempty"`
-	Enabled      bool                 `json:"enabled"`
-	Healthy      bool                 `json:"healthy"`
-	State        string               `json:"state"`
-	Role         string               `json:"role,omitempty"`
-	Mode         string               `json:"mode,omitempty"`
-	Device       string               `json:"device,omitempty"`
-	Address      string               `json:"address,omitempty"`
-	Transport    string               `json:"transport,omitempty"`
-	UDPAddress   string               `json:"udp_address,omitempty"`
-	TCPAddress   string               `json:"tcp_address,omitempty"`
-	Network      string               `json:"network,omitempty"`
-	ClientIP     string               `json:"client_ip,omitempty"`
-	LastError    string               `json:"last_error,omitempty"`
-	QueueMaxAge  string               `json:"queue_max_age"`
-	NoiseRate    int                  `json:"noise_rate"`
-	NoiseTraffic bool                 `json:"noise_traffic"`
-	NoiseIdle    bool                 `json:"noise_idle"`
-	Stats        vpn.Snapshot         `json:"stats"`
+	Clients         []vpn.ClientSnapshot `json:"clients,omitempty"`
+	Generation      string               `json:"generation,omitempty"`
+	RecoveryPending bool                 `json:"recovery_pending,omitempty"`
+	Enabled         bool                 `json:"enabled"`
+	Healthy         bool                 `json:"healthy"`
+	State           string               `json:"state"`
+	Role            string               `json:"role,omitempty"`
+	Mode            string               `json:"mode,omitempty"`
+	Device          string               `json:"device,omitempty"`
+	Address         string               `json:"address,omitempty"`
+	Transport       string               `json:"transport,omitempty"`
+	UDPAddress      string               `json:"udp_address,omitempty"`
+	TCPAddress      string               `json:"tcp_address,omitempty"`
+	Network         string               `json:"network,omitempty"`
+	ClientIP        string               `json:"client_ip,omitempty"`
+	LastError       string               `json:"last_error,omitempty"`
+	QueueMaxAge     string               `json:"queue_max_age"`
+	NoiseRate       int                  `json:"noise_rate"`
+	NoiseTraffic    bool                 `json:"noise_traffic"`
+	NoiseIdle       bool                 `json:"noise_idle"`
+	Stats           vpn.Snapshot         `json:"stats"`
 }
 type vpnDevice interface {
 	vpn.Device
@@ -129,7 +130,7 @@ func (i *instance) startVPNWithDevice(ctx context.Context, p *vpn.Prepared, open
 	}
 	go func() {
 		defer close(v.done)
-		err := v.run(ctx, p, open)
+		err := v.run(ctx, p, open, i.vpnRecoveryPath)
 		v.mu.Lock()
 		defer v.mu.Unlock()
 		v.health.Healthy = false
@@ -142,7 +143,7 @@ func (i *instance) startVPNWithDevice(ctx context.Context, p *vpn.Prepared, open
 		}
 	}()
 }
-func (v *vpnWorker) run(ctx context.Context, p *vpn.Prepared, open func(string) (vpnDevice, error)) error {
+func (v *vpnWorker) run(ctx context.Context, p *vpn.Prepared, open func(string) (vpnDevice, error), recoveryPath string) error {
 	config, network, err := p.Resolve(ctx)
 	if err != nil {
 		return err
@@ -229,7 +230,13 @@ func (v *vpnWorker) run(ctx context.Context, p *vpn.Prepared, open func(string) 
 		v.mu.Unlock()
 	}
 	if p.Manage {
-		config.Connected = func() (func(), error) { return vpn.ApplyNetwork(network) }
+		config.Connected = func() (func(), error) {
+			undo, err := vpn.ApplyManagedClientNetwork(network, recoveryPath)
+			v.mu.Lock()
+			v.health.RecoveryPending = errors.Is(err, vpn.ErrClientRecoveryPending)
+			v.mu.Unlock()
+			return undo, err
+		}
 	}
 	v.mu.Lock()
 	v.health.State = "connecting"
@@ -238,6 +245,9 @@ func (v *vpnWorker) run(ctx context.Context, p *vpn.Prepared, open func(string) 
 }
 func (c *controller) replaceVPN(next definition) {
 	old := c.current.vpn
+	if c.role == "client" && c.worker.vpn == nil {
+		return
+	}
 	if old == nil && next.vpn == nil {
 		return
 	}
@@ -255,17 +265,27 @@ func (c *controller) replaceVPN(next definition) {
 	c.worker.startVPN(c.ctx, next.vpn)
 }
 
+func (c *controller) vpnRecoveryPath() string {
+	if c.role != "client" || c.path == "" {
+		return ""
+	}
+	return c.path + ".vpn-recovery"
+}
+
 func (c *controller) workerVPNStatus() vpnHealth {
 	if c.worker == nil {
 		return (*vpnWorker)(nil).snapshot()
 	}
-	if c.worker.vpn == nil && c.current.vpn != nil && c.role == "client" {
-		p := c.current.vpn
-		return vpnHealth{Enabled: true, Healthy: true, State: "stopped", Role: "client", Mode: p.Mode, Transport: p.Config.Transport, Network: p.Config.Network.String(), QueueMaxAge: p.Config.QueueMaxAge.String(), NoiseRate: p.Config.Noise.Rate, NoiseTraffic: p.Config.Noise.Traffic, NoiseIdle: p.Config.Noise.Idle}
-	}
 	h := c.worker.vpn.snapshot()
 	if c.role == "client" {
+		if c.worker.vpn == nil && c.current.vpn != nil {
+			p := c.current.vpn
+			h = vpnHealth{Enabled: true, Healthy: true, State: "stopped", Mode: p.Mode, Transport: p.Config.Transport, Network: p.Config.Network.String(), QueueMaxAge: p.Config.QueueMaxAge.String(), NoiseRate: p.Config.Noise.Rate, NoiseTraffic: p.Config.Noise.Traffic, NoiseIdle: p.Config.Noise.Idle}
+		}
 		h.Role = "client"
+		if h.State == "stopped" || h.State == "disabled" || h.State == "failed" {
+			h.RecoveryPending = vpn.ClientRecoveryPending(c.vpnRecoveryPath())
+		}
 	}
 	return h
 }
@@ -287,7 +307,7 @@ func (c *controller) controlVPN(start bool) error {
 	if !start {
 		c.worker.vpn.stop() // Joins RunClient, including network cleanup and TUN close.
 		c.worker.vpn = nil
-		return nil
+		return vpn.RecoverClientNetwork(c.vpnRecoveryPath())
 	}
 	if c.current.vpn == nil {
 		return errors.New("请先将 vpn-mode 设置为 both 或 only，并保存及应用配置")
@@ -299,6 +319,10 @@ func (c *controller) controlVPN(start bool) error {
 		}
 		v.stop()
 	}
+	if vpn.ClientRecoveryPending(c.vpnRecoveryPath()) {
+		return vpn.ErrClientRecoveryPending
+	}
+	c.worker.vpnRecoveryPath = c.vpnRecoveryPath()
 	c.worker.startVPN(c.ctx, c.current.vpn)
 	return nil
 }
@@ -342,10 +366,11 @@ func (c *controller) restartVPN() error {
 		return errors.New("vpn-mode 改变了代理运行模式，请使用全局“保存并应用”切换模式")
 	}
 
+	started := c.worker.vpn != nil
 	c.worker.vpn.stop()
 	c.worker.vpn = nil
 	c.current.vpn = prepared
-	if prepared != nil {
+	if prepared != nil && (c.role != "client" || started) {
 		c.worker.startVPN(c.ctx, prepared)
 		c.worker.vpn.restartFromSaved = true
 	}

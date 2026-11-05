@@ -10,6 +10,7 @@ import (
 )
 
 type NetworkOptions struct {
+	recovery   *clientRecovery
 	Server     bool
 	Interface  string
 	Network    netip.Prefix

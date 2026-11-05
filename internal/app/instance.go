@@ -33,22 +33,23 @@ type definition struct {
 	shared                         *sharedServer
 }
 type instance struct {
-	vpnIdentity  string
-	openTUN      func(string) (vpnDevice, error)
-	vpn          *vpnWorker
-	quic         *quicWorker
-	quicHTTP     *http.Server
-	quicListener net.Listener
-	quicDone     chan struct{}
-	proxies      *clientProxyGroup
-	live         *tunnel.LiveSettings
-	cancel       context.CancelFunc
-	listener     net.Listener
-	server       *tunnel.Server
-	http         *http.Server
-	done         chan struct{}
-	err          error
-	service      HTTPWorker
+	vpnIdentity     string
+	vpnRecoveryPath string
+	openTUN         func(string) (vpnDevice, error)
+	vpn             *vpnWorker
+	quic            *quicWorker
+	quicHTTP        *http.Server
+	quicListener    net.Listener
+	quicDone        chan struct{}
+	proxies         *clientProxyGroup
+	live            *tunnel.LiveSettings
+	cancel          context.CancelFunc
+	listener        net.Listener
+	server          *tunnel.Server
+	http            *http.Server
+	done            chan struct{}
+	err             error
+	service         HTTPWorker
 }
 
 func (d definition) start(ctx context.Context, stats *tunnel.Stats) (*instance, error) {

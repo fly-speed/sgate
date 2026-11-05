@@ -293,7 +293,7 @@ sudo python3 scripts/test-vpn-linux.py \
 
 完成系统级验证后，再在中美实际链路比较旧 OpenVPN 组合与新 VPN 的空闲/下载中 ping、业务吞吐、CPU 和数据报丢弃指标。
 
-手动控制仅适用于集成的 `sgate-client`，独立 `sgate-vpn client` 命令仍直接启动 VPN。正常退出（SIGTERM/SIGINT）也执行网络清理；强制终止（SIGKILL）、断电等无法执行退出清理，手动停止按钮不能保证这类情况下的恢复。`vpn-manage-network=false` 时系统网络由外部管理，sgate 不负责清理外部路由。
+手动控制仅适用于集成的 `sgate-client`，独立 `sgate-vpn client` 命令仍直接启动 VPN。正常退出（SIGTERM/SIGINT）也执行网络清理；强制终止（SIGKILL）或断电时，集成客户端会在下次启动后提示是否清理已记录的遗留网络设置。请在实时概览确认清理，然后手动启动 VPN。恢复记录跟随客户端配置文件，只覆盖本版本记录的服务器物理出口路由和 macOS 物理网络服务 DNS。`vpn-manage-network=false` 时系统网络由外部管理，sgate 不负责清理外部路由。
 
 ### 负载下延迟与发送调度
 

@@ -5,6 +5,7 @@ package vpn
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -134,7 +135,15 @@ func applyNetwork(o NetworkOptions, run commandRunner) (cleanup func(), err erro
 			args = append(args, "dev", dev)
 			undo := append([]string(nil), args...)
 			undo[1] = "del"
-			if err = t.step("ip", args, t.reverse("ip", undo...)); err != nil {
+			restore := t.reverse("ip", undo...)
+			if r := o.recovery; r != nil {
+				next, _ := netip.ParseAddr(gateway)
+				if err = r.rememberRoute(o.Endpoint, next, dev, 0); err != nil {
+					return nil, err
+				}
+				restore = recordCleanup(restore, r.clearRoute)
+			}
+			if err = t.step("ip", args, restore); err != nil {
 				return nil, err
 			}
 		}

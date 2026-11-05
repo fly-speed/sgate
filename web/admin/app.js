@@ -104,11 +104,17 @@ function renderConfigFields(fields, runtime, role) {
   if (configRole === "client" && !fields.some((field) => field.key === "proxies")) {
     fields = [...fields, { key: "proxies", kind: "proxies", mappings: [], group: "代理与通道" }];
   }
-  if (role === "client") {
+  if (configRole === "client") {
     fields = [
       ...fields.filter((field) => field.kind === "proxies"),
       ...fields.filter((field) => field.kind !== "proxies"),
     ];
+    const serverIndex = fields.findIndex(field => field.key === "vpn-server");
+    if (serverIndex >= 0 && fields.some(field => field.key === "vpn-mode")) {
+      const [server] = fields.splice(serverIndex, 1);
+      const modeIndex = fields.findIndex(field => field.key === "vpn-mode");
+      fields.splice(modeIndex + 1, 0, server);
+    }
   }
   const container = $("config-fields");
   container.replaceChildren();
@@ -123,7 +129,7 @@ function renderConfigFields(fields, runtime, role) {
     let group = groups.get(groupKey);
     if (!group) {
       group = document.createElement("details");
-      group.className = "config-group";
+      group.className = section === "vpn" ? "config-group vpn-config-group" : "config-group";
       group.configSection = section;
       group.open = configGroupOpen.get(groupKey) ?? false;
       group.addEventListener("toggle", () => configGroupOpen.set(groupKey, group.open));
@@ -251,12 +257,21 @@ function renderConfigFields(fields, runtime, role) {
     updateConfigSaveButton(entry);
     saveButton.addEventListener("click", () => saveConfigField(entry));
     configInputs.push(entry);
-    if (configRole === "client" && field.key === "vpn-mode") renderVPNProbe(editor,entry);
+    const probeMode = configRole === "client" && (field.key === "vpn-server" ||
+      (field.key === "vpn-mode" && !fields.some(item => item.key === "vpn-server")))
+      ? configInputs.find(item => item.key === "vpn-mode")
+      : null;
+    const canRestart = section === "vpn" && runtime.vpn_restart_supported && !field.validation?.live && !overridden;
     let actions = saveButton;
-    if (section === "vpn" && runtime.vpn_restart_supported && !field.validation?.live && !overridden) {
+    if (probeMode || canRestart) {
       actions = document.createElement("div");
       actions.className = "config-row-actions";
-      actions.append(saveButton, vpnRestartButton(field.key));
+      actions.append(saveButton);
+      if (probeMode) {
+        row.classList.toggle("vpn-probe-row", true);
+        actions.append(renderVPNProbe(editor, probeMode));
+      }
+      if (canRestart) actions.append(vpnRestartButton(field.key));
     }
     row.append(label, editor, actions);
     group.append(row);
@@ -1091,18 +1106,23 @@ async function saveConfigField(entry) {
   }
 }
 function renderVPNProbe(editor,mode) {
-  const button=document.createElement("button");button.type="button";button.className="secondary vpn-test-button";button.id="vpn-test-button";
+  const button=document.createElement("button");button.type="button";button.className="secondary config-save";button.id="vpn-test-button";
+  button.innerHTML =
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>';
   const result=document.createElement("small");result.className="vpn-test-result";result.hidden=true;result.setAttribute("role","status");result.setAttribute("aria-live","polite");
-  const help=document.createElement("small");help.className="muted";
+  const help=document.createElement("small");help.className="muted vpn-test-help";
   localText(help,()=>t("使用当前表单测试 QUIC、证书、密钥认证及数据报回显；不保存配置、不修改系统网络，不验证完整网络转发。"));
   vpnProbeState={button,result,mode,busy:false,version:0};
   button.addEventListener("click",testVPNConnection);
-  editor.append(button,help,result);updateVPNProbeButton();
+  editor.append(help,result);updateVPNProbeButton();
+  return button;
 }
 function updateVPNProbeButton() {
   const p=vpnProbeState;if(!p)return;
   p.button.disabled=p.busy||configSaving||serviceRestarting||!["both","only"].includes(p.mode.input.value);
-  localText(p.button,()=>p.busy?t("测试中…"):t("测试 VPN 连接"));
+  const label = () => t(p.busy ? "测试中…" : "测试 VPN 连接");
+  localAttr(p.button, "title", label);
+  localAttr(p.button, "aria-label", label);
 }
 function invalidateVPNProbe() {
   const p=vpnProbeState;if(!p)return;p.version++;p.result.hidden=true;updateVPNProbeButton();
@@ -1357,6 +1377,7 @@ async function refreshAuth() {
 }
 
 function renderSignedOut() {
+  vpnRecoveryPrompted = false;
  vpnProbeState=null;
   vpnRestartFields.clear();
   clearTimeout(vpnRestartTracking?.timer);
@@ -2113,6 +2134,8 @@ function observeVPNRestart(vpn) {
     finishVPNRestart(tracking, () => t("VPN 重启失败") + (vpn.last_error ? " · " + vpn.last_error : ""), true);
   } else if (vpn.state === "disabled" || vpn.enabled === false) {
     finishVPNRestart(tracking, () => t("VPN 已关闭，已保存配置已应用，未启动隧道。"), false);
+  } else if (vpn.state === "stopped") {
+    finishVPNRestart(tracking, () => t("VPN 配置已应用，请手动启动 VPN。"), false);
   } else if (vpn.state === "connected" || vpn.state === "listening") {
     finishVPNRestart(tracking, () => t(vpn.state === "connected" ? "VPN 重启成功，客户端已连接。" : "VPN 重启成功，服务端已开始监听。"), false);
   }
@@ -2692,17 +2715,29 @@ $("tunnel-account-create").addEventListener("submit", (event) => {
 
 let vpnControlBusy = false;
 let vpnControlHealth = null;
+let vpnRecoveryPrompted = false;
 function renderVPNControls(v) {
   vpnControlHealth = v;
   const group = $("vpn-controls");
   if (!group) return;
   group.hidden = v?.role !== "client";
+  const recovery = v?.role === "client" && !!v.recovery_pending;
   const running = v?.enabled && !["stopped", "failed", "disabled"].includes(v.state);
-  $("vpn-start").disabled = vpnControlBusy || !v?.enabled || running;
-  $("vpn-stop").disabled = vpnControlBusy || !running;
+  $("vpn-start").disabled = vpnControlBusy || !v?.enabled || running || recovery;
+  $("vpn-stop").disabled = vpnControlBusy || (!running && !recovery);
+  localText($("vpn-stop"), () => t(recovery ? "清理上次 VPN" : "停止 VPN"));
+  $("vpn-recovery-warning").hidden = !recovery;
+  if (!recovery) vpnRecoveryPrompted = false;
+  if (recovery && !vpnRecoveryPrompted && !vpnControlBusy) {
+    vpnRecoveryPrompted = true;
+    void controlVPN(false);
+  }
 }
 async function controlVPN(start) {
   if (vpnControlBusy) return;
+  if (vpnControlHealth?.recovery_pending) {
+    if (start || !window.confirm(t("检测到上次由 sgate-client 启动的 VPN 可能遗留了网络设置。是否清理这些设置？"))) return;
+  }
   vpnControlBusy = true; renderVPNControls(vpnControlHealth);
   try {
     const result = await api(start ? "vpn-start" : "vpn-stop", {method:"POST",body:"{}"});

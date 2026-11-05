@@ -174,10 +174,39 @@ func TestVPNClientStartsStoppedAndApplyDoesNotStartTUN(t *testing.T) {
 		t.Fatal(err)
 	}
 	check()
+	setConfig(t, c, "vpn-mtu", "1200")
+	if err := c.restartVPN(); err != nil {
+		t.Fatal(err)
+	}
+	check()
+	if c.current.vpn.Config.MTU != 1200 {
+		t.Fatal("saved MTU was not applied")
+	}
 	if err := c.controlVPN(false); err != nil {
 		t.Fatal(err)
 	}
 	check()
+}
+
+func TestVPNClientReportsPreviousRecoveryWithoutStarting(t *testing.T) {
+	c := &controller{
+		ctx: context.Background(), role: "client",
+		path:    filepath.Join(t.TempDir(), "client.cf"),
+		current: definition{vpn: &vpn.Prepared{}}, worker: &instance{},
+	}
+	path := c.vpnRecoveryPath()
+	if err := os.WriteFile(path, []byte("unreadable recovery record"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if h := c.workerVPNStatus(); !h.RecoveryPending || h.State != "stopped" {
+		t.Fatal(h)
+	}
+	if err := c.controlVPN(true); !errors.Is(err, vpn.ErrClientRecoveryPending) || c.worker.vpn != nil {
+		t.Fatal("VPN started before the previous settings were cleaned up", err)
+	}
+	if err := c.controlVPN(false); err == nil || !c.workerVPNStatus().RecoveryPending {
+		t.Fatal("failed recovery should remain visible", err)
+	}
 }
 
 func TestVPNManualStopWaitsForWorkerCleanup(t *testing.T) {
