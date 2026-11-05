@@ -146,7 +146,7 @@ func TestVPNOnlyConfigShowsSavedMappingCardsWithoutExposingPasswords(t *testing.
 func TestVPNEnableFailureExplainsForeignOptionsAndPreservesConfig(t *testing.T) {
 	h, cfg := adminFixture(t)
 	h.view.Role = "server"
-	old := []byte("service server {\nlisten = 127.0.0.1:8081\nvpn-mode = disabled\nvpn-server = quic://127.0.0.1:8444/vpn\nvpn-client-ip = 10.77.0.2\n}\n")
+	old := []byte("service server {\nlisten = 127.0.0.1:8081\nvpn-mode = disabled\nvpn-credentials-file = client.json\n}\n")
 	if err := os.WriteFile(h.view.AppConfigPath, old, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestVPNEnableFailureExplainsForeignOptionsAndPreservesConfig(t *testing.T) 
 	}
 	result := object(t, w)
 	reason := result["field_errors"].(map[string]any)["vpn-mode"].(string)
-	if !strings.Contains(reason, "vpn-server") || !strings.Contains(reason, "客户端") {
+	if !strings.Contains(reason, "vpn-credentials-file") || !strings.Contains(reason, "客户端") {
 		t.Fatal(reason)
 	}
 	actual, _ := os.ReadFile(h.view.AppConfigPath)
@@ -178,5 +178,57 @@ func TestVPNEnableFailureExplainsForeignOptionsAndPreservesConfig(t *testing.T) 
 	w = request(h, "PUT", "/api/config", map[string]any{"revision": view["revision"], "fields": map[string]string{"vpn-mode": "both"}}, cookie, csrf, "")
 	if w.Code != 400 || !strings.Contains(w.Body.String(), "Linux") {
 		t.Fatal(w.Code, w.Body.String())
+	}
+}
+
+func TestLegacyServerVPNConfigCanEnableBothModesFromWeb(t *testing.T) {
+	for _, mode := range []string{"both", "only"} {
+		for _, format := range []string{"plain", "service"} {
+			t.Run(mode+"/"+format, func(t *testing.T) {
+				h, cfg := adminFixture(t)
+				h.view.Role = "server"
+				key := filepath.Join(t.TempDir(), "vpn.key")
+				if err := os.WriteFile(key, []byte(strings.Repeat("12", 32)), 0600); err != nil {
+					t.Fatal(err)
+				}
+				legacy := "vpn-server = quic://old.invalid:8444/vpn\nvpn-client-ip = 10.77.0.2\nvpn-tls-ca = client.pem\nvpn-routes = invalid-old-route\nvpn-dns = 1.1.1.1\nvpn-dns-service = Wi-Fi\nvpn-block-ipv6 = true\n"
+				config := "vpn-mode = disabled\nvpn-listen = ''\nvpn-udp-listen = 127.0.0.1:8445\n" + legacy
+				if format == "service" {
+					config = "service server {\n" + config + "}\n"
+				}
+				if err := os.WriteFile(h.view.AppConfigPath, []byte(config), 0600); err != nil {
+					t.Fatal(err)
+				}
+				flags := flag.NewFlagSet("server", flag.ContinueOnError)
+				flags.String("key-file", key, "")
+				vpn.RegisterFlags(flags, "server")
+				h.view.Validate = func(path string) error {
+					fs := cli.CloneFlags(flags)
+					if err := cli.Parse(fs, []string{"-config", path}); err != nil {
+						return err
+					}
+					_, err := vpn.Prepare("server", fs)
+					return err
+				}
+				cookie, csrf := setupAccount(t, h, cfg)
+				view := object(t, request(h, "GET", "/api/config", nil, cookie, "", ""))
+				for _, raw := range view["fields"].([]any) {
+					if vpn.IsLegacyServerFileOption(raw.(map[string]any)["key"].(string)) {
+						t.Fatal("client-only legacy option is editable on the server")
+					}
+				}
+				w := request(h, "PUT", "/api/config", map[string]any{"revision": view["revision"], "fields": map[string]string{"vpn-mode": mode}}, cookie, csrf, "")
+				if w.Code != 200 {
+					t.Fatal(w.Code, w.Body.String())
+				}
+				saved, err := os.ReadFile(h.view.AppConfigPath)
+				if err != nil || !strings.Contains(string(saved), legacy) {
+					t.Fatal("legacy lines were modified", err)
+				}
+				if err := cli.Parse(cli.CloneFlags(flags), []string{"-vpn-server=quic://example.invalid:8444/vpn"}); err == nil {
+					t.Fatal("client option accepted as a server command-line flag")
+				}
+			})
+		}
 	}
 }

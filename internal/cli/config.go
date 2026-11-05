@@ -72,7 +72,7 @@ func Parse(fs *flag.FlagSet, args []string) (result error) {
 			return fmt.Errorf("configuration line %d: expected key = value", line)
 		}
 		name, value = strings.TrimSpace(name), strings.TrimSpace(value)
-		ignoredVPN := ignoreVPN && inactiveVPNOption(name)
+		ignoredVPN := (ignoreVPN && inactiveVPNOption(name)) || ignoredFileOption(fs, name)
 		if (name == "config" || fs.Lookup(name) == nil) && !ignoredVPN {
 			return fmt.Errorf("configuration line %d: unknown or unsupported option", line)
 		}
@@ -125,7 +125,7 @@ func ParseSection(fs *flag.FlagSet, path, prefix string) error {
 func applyService(fs *flag.FlagSet, values map[string]string, prefix string, explicit map[string]bool) error {
 	ignoreVPN := prefix == "" && vpnDisabled(fs, values["vpn-mode"], explicit)
 	for key, value := range values {
-		if ignoreVPN && inactiveVPNOption(key) {
+		if prefix == "" && ((ignoreVPN && inactiveVPNOption(key)) || ignoredFileOption(fs, key)) {
 			continue
 		}
 		name := key
@@ -200,6 +200,27 @@ func vpnDisabled(fs *flag.FlagSet, fileMode string, explicit map[string]bool) bo
 }
 func inactiveVPNOption(name string) bool {
 	return strings.HasPrefix(name, "vpn-") && name != "vpn-mode"
+}
+
+// IgnoreFileOption accepts a legacy file entry without applying its value.
+// Passing it explicitly on the command line is still an error.
+func IgnoreFileOption(fs *flag.FlagSet, name string) {
+	fs.Var(legacyFileOption{}, name, "legacy configuration file entry; ignored")
+}
+
+type legacyFileOption struct{}
+
+func (legacyFileOption) String() string { return "" }
+func (legacyFileOption) Set(string) error {
+	return fmt.Errorf("option is only accepted in legacy configuration files")
+}
+
+func ignoredFileOption(fs *flag.FlagSet, name string) bool {
+	if f := fs.Lookup(name); f != nil {
+		_, ok := f.Value.(legacyFileOption)
+		return ok
+	}
+	return false
 }
 func plainVPNDisabled(fs *flag.FlagSet, path string, explicit map[string]bool) bool {
 	if fs.Lookup("vpn-mode") == nil {

@@ -285,8 +285,8 @@ nav button:hover {
 .nav-group > summary:hover {
   background: #213942;
 }
-.client-nav > button,
-.client-nav > .nav-group > summary {
+.sectioned-nav > button,
+.sectioned-nav > .nav-group > summary {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) 8px;
   align-items: center;
@@ -295,14 +295,14 @@ nav button:hover {
   padding: 10px 16px;
   line-height: 20px;
 }
-.client-nav .nav-icon {
+.sectioned-nav .nav-icon {
   text-align: center;
   font-size: 15px;
 }
-.client-nav summary::-webkit-details-marker {
+.sectioned-nav summary::-webkit-details-marker {
   display: none;
 }
-.client-nav .nav-group > summary::after {
+.sectioned-nav .nav-group > summary::after {
   content: "";
   width: 6px;
   height: 6px;
@@ -310,7 +310,7 @@ nav button:hover {
   border-width: 0 1px 1px 0;
   transform: rotate(-45deg);
 }
-.client-nav .nav-group[open] > summary::after {
+.sectioned-nav .nav-group[open] > summary::after {
   transform: rotate(45deg);
 }
 .nav-children {
@@ -570,6 +570,11 @@ dd {
   margin: 0;
   min-width: 0;
 }
+.config-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .config-key {
   display: block;
   margin-bottom: 4px;
@@ -787,8 +792,8 @@ footer {
     padding: 10px 12px;
     white-space: nowrap;
   }
-  .client-nav > button,
-  .client-nav > .nav-group > summary {
+  .sectioned-nav > button,
+  .sectioned-nav > .nav-group > summary {
     padding-inline: 12px;
     font-size: 12px;
   }

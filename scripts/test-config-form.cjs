@@ -2058,21 +2058,87 @@ test("VPN fields distinguish live saves from apply-required settings", async () 
  assert.match(group.children[2].children[0].children.at(-1).textContent,/应用后生效/);
 });
 
-test("VPN endpoint uses reconnect badge and scoped restart preserves unsaved drafts", async () => {
+for (const role of ["client", "server"]) test(`${role} VPN rows show scoped restart icons and preserve unsaved drafts`, async () => {
  const {context,elements}=await page();
  context.fields=[
  {key:"vpn-server",value:"tcp://vpn.example.com:8444/vpn",group:"独立 VPN",validation:{type:"vpn-url",live:true}},
- {key:"vpn-mtu",value:"1280",group:"独立 VPN",validation:{type:"integer"}}];
- vm.runInContext('revision="saved-version";renderConfigFields(fields,{vpn_restart_supported:true},"server");configInputs[1].input.value="1200";configInputs[1].dirty=true',context);
- const group=elements.get("config-fields").children[0];
+ {key:"vpn-mtu",value:"1280",group:"独立 VPN",validation:{type:"integer"}},
+ {key:"vpn-key-file",value:"sgate.key",group:"独立 VPN"},
+ {key:"vpn-network",value:"10.77.0.0/24",group:"独立 VPN"}];
+ vm.runInContext(`revision="saved-version";renderConfigFields(fields,{vpn_restart_supported:true,cli_overrides:["vpn-network"]},${JSON.stringify(role)});
+   var mtuEntry=configInputs.find(entry=>entry.key==="vpn-mtu"); mtuEntry.input.value="1200";mtuEntry.dirty=true`,context);
+ const group=elements.get("config-fields").children.find(group => group.configSection === "vpn");
  assert.match(group.children[1].children[0].children.at(-1).textContent,/保存后自动重连/);
- assert.equal(vm.runInContext('vpnRestartButtons.length',context),1);
- const calls=[];context.api=async(path,options)=>{calls.push({path,body:JSON.parse(options.body)});return {runtime:{},requires_restart:true}};
- await vm.runInContext('restartSavedVPN()',context);
+ assert.equal(group.children[0].children.length,0);
+ assert.equal(group.children[1].children.at(-1).type,"button");
+ assert.equal(group.children[4].children.at(-1).type,"button");
+ assert.equal(vm.runInContext('vpnRestartButtons.length',context),2);
+ const restart = group.children[2].children.at(-1).children[1];
+ const otherRestart = group.children[3].children.at(-1).children[1];
+ assert.match(restart["aria-label"],/vpn-mtu/);
+ assert.equal(restart.className,"secondary config-save");
+ assert.match(restart.innerHTML,/<svg/);
+ assert.equal(restart.disabled,true);
+ assert.match(restart.title,/此配置项没有待生效的修改/);
+ let generation = "first";
+ const calls=[];context.api=async(path,options)=>{
+   calls.push({path,body:JSON.parse(options.body)});
+   return {runtime:{vpn:{generation,state:"starting",enabled:true}},vpn_restart_fields:[],requires_restart:true};
+ };
+ assert.equal(otherRestart.disabled,true);
+ await restart.listeners.click({preventDefault(){},stopPropagation(){}});
+ assert.deepEqual(calls,[]);
+ vm.runInContext('updateVPNRestartPending({vpn_restart_fields:["vpn-mtu","vpn-key-file"]})',context);
+ assert.equal(otherRestart.disabled,false);
+ vm.runInContext('updateVPNRestartPending({})',context);
+ assert.equal(restart.disabled,true);
+ assert.equal(otherRestart.disabled,true);
+ await otherRestart.listeners.click({preventDefault(){},stopPropagation(){}});
+ assert.deepEqual(calls,[]);
+ vm.runInContext('updateVPNRestartPending({vpn_restart_fields:["vpn-mtu","vpn-key-file"]})',context);
+ assert.equal(otherRestart.disabled,false);
+ vm.runInContext('updateVPNRestartPending({vpn_restart_fields:["vpn-mtu"]})',context);
+ assert.equal(otherRestart.disabled,true);
+ assert.equal(restart.disabled,false);
+ assert.match(restart.title,/已保存的 VPN 参数/);
+ await otherRestart.listeners.click({preventDefault(){},stopPropagation(){}});
+ await restart.listeners.click({preventDefault(){},stopPropagation(){}});
  assert.deepEqual(calls,[{path:"vpn-restart",body:{revision:"saved-version"}}]);
- assert.equal(vm.runInContext('configInputs[1].input.value',context),"1200");
- assert.equal(vm.runInContext('configInputs[1].dirty',context),true);
- assert.equal(vm.runInContext('vpnRestartButtons[0].disabled',context),false);
+ assert.equal(vm.runInContext('mtuEntry.input.value',context),"1200");
+ assert.equal(vm.runInContext('mtuEntry.dirty',context),true);
+ assert.equal(restart.disabled,true);
+ assert.match(elements.get("notice").textContent,/正在确认/);
+ vm.runInContext('observeVPNRestart({generation:"previous",state:"listening"})',context);
+ assert.match(elements.get("notice").textContent,/正在确认/);
+ vm.runInContext('observeVPNRestart({generation:"first",state:"failed",last_error:"address already in use"})',context);
+ assert.match(elements.get("notice").textContent,/VPN 重启失败.*address already in use/);
+ assert.equal(restart.disabled,false);
+ assert.equal(otherRestart.disabled,true);
+ generation = "second";
+ await restart.listeners.click({preventDefault(){},stopPropagation(){}});
+ context.readyState = role === "client" ? "connected" : "listening";
+ vm.runInContext('observeVPNRestart({generation:"second",state:readyState})',context);
+ assert.match(elements.get("notice").textContent,role === "client" ? /客户端已连接/ : /服务端已开始监听/);
+ assert.equal(restart.disabled,true);
+ vm.runInContext('updateVPNRestartPending({vpn_restart_fields:["vpn-mtu","vpn-key-file"]})',context);
+ const prompts = [];
+ let confirmRestart = false;
+ context.window.confirm = message => { prompts.push(message); return confirmRestart; };
+ const callCount = calls.length;
+ await otherRestart.listeners.click({preventDefault(){},stopPropagation(){}});
+ assert.equal(calls.length,callCount);
+ assert.equal(restart.disabled,false);
+ assert.equal(otherRestart.disabled,false);
+ assert.match(prompts[0],/• vpn-mtu\n• vpn-key-file/);
+ assert.doesNotMatch(prompts[0],/vpn-network|1200/);
+ confirmRestart = true;
+ generation = "third";
+ await restart.listeners.click({preventDefault(){},stopPropagation(){}});
+ assert.equal(prompts[1],prompts[0]);
+ assert.equal(calls.length,callCount+1);
+ vm.runInContext('observeVPNRestart({generation:"third",state:readyState})',context);
+ assert.equal(restart.disabled,true);
+ assert.equal(otherRestart.disabled,true);
  assert.match(vm.runInContext('configSaveMessage({live_applied:["vpn-server"],runtime:{vpn:{enabled:true,state:"connecting"}}})',context),/重新连接/);
  assert.match(vm.runInContext('configSaveMessage({live_applied:["vpn-server"],runtime:{vpn:{enabled:true,state:"stopped"}}})',context),/下次启动/);
 });
@@ -2162,8 +2228,8 @@ test("client settings use feature navigation and retain drafts across sections",
   const { context, elements } = await page();
   const panel = Object.assign(context.document.getElementById("configuration"), {id:"configuration", hidden:true});
   const entries = ["mappings","connection","performance","noise","vpn","management","framework"];
-  const proxyNav = context.document.getElementById("client-proxy-nav");
-  const vpnNav = context.document.getElementById("client-vpn-nav");
+  const proxyNav = context.document.getElementById("proxy-nav");
+  const vpnNav = context.document.getElementById("vpn-nav");
   const nav = entries.map(configSection => ({
     dataset:{tab:"configuration",configSection},
     classList:{toggle(_,selected){this.selected=selected;}},
@@ -2186,18 +2252,17 @@ test("client settings use feature navigation and retain drafts across sections",
     {key:"buffer-bytes",value:"4194304",group:"代理与通道",validation:{type:"integer",min:"0"}},
     {key:"noise-interval",value:"0s",group:"代理与通道"},
     {key:"vpn-mode",value:"disabled",group:"独立 VPN",validation:{choices:["disabled","only","both"]}},
-    {key:"vpn-server",value:"",group:"独立 VPN"},
+    {key:"vpn-server",value:"",group:"独立 VPN",validation:{live:true}},
     {key:"admin_enabled",value:"true",group:"Web 管理"},
     {key:"master_type",value:"sock",group:"服务框架"},
   ];
   vm.runInContext('renderConfigFields(featureFields, {vpn_restart_supported:true}, "client"); showAdminTab("configuration","connection")', context);
   const shown = () => elements.get("config-fields").children.filter(group => !group.hidden).map(group => group.configSection);
   assert.deepEqual(shown(),["mappings","connection"]);
-  assert.equal(elements.get("server-config-nav").hidden,true);
+  assert.equal(elements.get("tunnel-accounts-nav").hidden,true);
   assert.equal(proxyNav.hidden,false);
   assert.equal(proxyNav.open,true);
   assert.equal(vpnNav.hidden,false);
-  assert.equal(elements.get("server-vpn-accounts-nav").hidden,true);
   assert.ok(nav.every(button => !button.hidden));
   const entry = key => vm.runInContext('configInputs.find(e => e.key === ' + JSON.stringify(key) + ')', context);
   const mappings = entry("proxies");
@@ -2234,13 +2299,24 @@ test("client settings use feature navigation and retain drafts across sections",
   vm.runInContext('showConfigSaveError({message:"invalid VPN",fieldErrors:{"vpn-mode":"invalid VPN"}})',context);
   assert.deepEqual(shown(),["vpn"]);
 
-  vm.runInContext('renderConfigFields(featureFields, {}, "server")',context);
-  assert.equal(elements.get("server-config-nav").hidden,false);
-  assert.equal(elements.get("server-vpn-accounts-nav").hidden,false);
-  assert.equal(proxyNav.hidden,true);
-  assert.equal(vpnNav.hidden,true);
-  assert.ok(nav.every(button => button.hidden));
-  assert.ok(elements.get("config-fields").children.every(group => !group.hidden));
+  vm.runInContext(`renderConfigFields([
+    ...featureFields.filter(field=>!["proxies","server","vpn-server"].includes(field.key)),
+    {key:"target",value:"127.0.0.1:8080",group:"代理与通道"},
+    {key:"session-ttl",value:"2m",group:"代理与通道"}
+  ], {vpn_restart_supported:true}, "server"); showAdminTab("configuration","connection")`,context);
+  assert.equal(elements.get("tunnel-accounts-nav").hidden,false);
+  assert.equal(proxyNav.hidden,false);
+  assert.equal(vpnNav.hidden,false);
+  assert.equal(nav.find(button=>button.dataset.configSection==="mappings").hidden,true);
+  assert.deepEqual(shown(),["connection"]);
+  assert.equal(entry("session-ttl").section,"performance");
+  entry("target").input.value = "127.0.0.1:9090";
+  entry("target").input.listeners.input();
+  vm.runInContext('showAdminTab("configuration","vpn")',context);
+  assert.deepEqual(shown(),["vpn"]);
+  assert.equal(vm.runInContext('vpnRestartButtons.length',context),1);
+  assert.equal(vm.runInContext('configEdits().target',context),"127.0.0.1:9090");
+  assert.equal(vm.runInContext('vpnProbeState',context),null);
 });
 
 test("proxy mapping controls follow the VPN mode draft, applied mode and CLI override", async () => {

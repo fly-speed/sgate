@@ -102,8 +102,14 @@ func TestScopedVPNRestartAppliesSavedVPNButNotProxySettings(t *testing.T) {
 		return nil, errors.New("test device unavailable")
 	}
 	worker, generation := c.worker, c.generation
-	setConfig(t, c, "vpn-mtu", "1200")
 	setConfig(t, c, "heartbeat", "30s")
+	if pending, _, err := c.vpnRestartPending(); err != nil || pending {
+		t.Fatalf("proxy-only edit should not require a VPN restart: %v, %v", pending, err)
+	}
+	setConfig(t, c, "vpn-mtu", "1200")
+	if pending, _, err := c.vpnRestartPending(); err != nil || !pending {
+		t.Fatalf("saved VPN MTU should require a VPN restart: %v, %v", pending, err)
+	}
 	if err = c.restartVPN(); err != nil {
 		t.Fatal(err)
 	}
@@ -111,6 +117,14 @@ func TestScopedVPNRestartAppliesSavedVPNButNotProxySettings(t *testing.T) {
 	case <-opened:
 	case <-time.After(3 * time.Second):
 		t.Fatal("VPN was not restarted")
+	}
+	select {
+	case <-c.worker.vpn.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("VPN worker did not report the test device failure")
+	}
+	if pending, _, err := c.vpnRestartPending(); err != nil || !pending {
+		t.Fatalf("failed configuration restart should allow retry: %v, %v", pending, err)
 	}
 	if c.current.vpn.Config.MTU != 1200 || c.current.client.Options.Heartbeat != 20*time.Second || c.worker != worker || c.generation != generation {
 		t.Fatal("scoped restart applied unrelated proxy changes")

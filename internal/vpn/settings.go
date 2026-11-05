@@ -62,9 +62,24 @@ func Settings(role string) []Setting {
 		Setting{"vpn-dns-service", "Wi-Fi", "macOS 网络服务名称；Linux 使用 resolvectl。"},
 		Setting{"vpn-block-ipv6", "true", "首版不转发 IPv6；将公网 IPv6 导入 TUN 后丢弃，避免绕过 VPN。"})
 }
+
+var legacyServerFileOptions = []string{
+	"vpn-server", "vpn-client-ip", "vpn-tls-ca", "vpn-routes",
+	"vpn-dns", "vpn-dns-service", "vpn-block-ipv6",
+}
+
+func IsLegacyServerFileOption(key string) bool {
+	return slices.Contains(legacyServerFileOptions, key)
+}
+
 func RegisterFlags(fs *flag.FlagSet, role string) {
 	if role == "client" {
 		fs.String("vpn-client-ip", "", "deprecated; ignored, address is assigned by server")
+	}
+	if role == "server" {
+		for _, key := range legacyServerFileOptions {
+			cli.IgnoreFileOption(fs, key)
+		}
 	}
 	for _, s := range Settings(role) {
 		switch s.Key {

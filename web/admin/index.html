@@ -66,25 +66,23 @@
         ><p class="eyebrow nav-label"><span data-i18n="管理工作台">管理工作台</span></p
         ><nav id="admin-nav"
           ><button data-tab="overview" class="selected"><span class="nav-icon" aria-hidden="true">◉</span><span data-i18n="实时概览">实时概览</span></button
-          ><button id="server-config-nav" data-tab="configuration">☷ <span><span data-i18n="代理配置">代理配置</span></span></button
-          ><details id="client-proxy-nav" class="nav-group" hidden>
+          ><details id="proxy-nav" class="nav-group" hidden>
             <summary><span class="nav-icon" aria-hidden="true">☷</span><span data-i18n="代理配置">代理配置</span></summary>
             <div class="nav-children">
               <button data-tab="configuration" data-config-section="mappings" hidden><span data-i18n="代理映射">代理映射</span></button>
               <button data-tab="configuration" data-config-section="connection" hidden><span data-i18n="代理连接">代理连接</span></button>
               <button data-tab="configuration" data-config-section="performance" hidden><span data-i18n="代理性能">代理性能</span></button>
               <button data-tab="configuration" data-config-section="noise" hidden><span data-i18n="代理白噪音">代理白噪音</span></button>
+              <button id="tunnel-accounts-nav" data-tab="tunnel-accounts" hidden><span data-i18n="客户端账号">客户端账号</span></button>
             </div>
           </details
-          ><details id="client-vpn-nav" class="nav-group" hidden>
+          ><details id="vpn-nav" class="nav-group" hidden>
             <summary><span class="nav-icon" aria-hidden="true">◇</span><span data-i18n="VPN 配置">VPN 配置</span></summary>
             <div class="nav-children">
               <button data-tab="configuration" data-config-section="vpn" hidden><span data-i18n="VPN 参数">VPN 参数</span></button>
               <button data-tab="vpn-accounts"><span data-i18n="VPN 账号">VPN 账号</span></button>
             </div>
           </details
-          ><button id="tunnel-accounts-nav" data-tab="tunnel-accounts" hidden>♧ <span data-i18n="客户端账号">客户端账号</span></button
-          ><button id="server-vpn-accounts-nav" data-tab="vpn-accounts">♧ <span data-i18n="VPN 账号">VPN 账号</span></button
           ><button data-tab="configuration" data-config-section="management" hidden><span class="nav-icon" aria-hidden="true">☷</span><span data-i18n="Web 管理">Web 管理</span></button
           ><button data-tab="configuration" data-config-section="framework" hidden><span class="nav-icon" aria-hidden="true">⚙</span><span data-i18n="服务框架">服务框架</span></button
           ><button data-tab="account"><span class="nav-icon" aria-hidden="true">◇</span><span data-i18n="账号与会话">账号与会话</span></button></nav

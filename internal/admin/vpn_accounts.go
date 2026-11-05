@@ -33,6 +33,7 @@ type VPNAccountsSnapshot struct {
 	ConfigRevision         string           `json:"config_revision,omitempty"`
 	PreviousConfigRevision string           `json:"previous_config_revision,omitempty"`
 	ConfigValue            string           `json:"config_value,omitempty"`
+	VPNRestartFields       *[]string        `json:"vpn_restart_fields,omitempty"`
 }
 
 var errVPNAccountsConflict = errors.New("VPN 账号或配置已变化，请刷新后重试")
@@ -77,10 +78,15 @@ func (h *Handler) vpnAccounts(w http.ResponseWriter, r *http.Request) {
 		problem(w, status, err.Error())
 		return
 	}
-	if view.ConfigChanged {
-		view.PreviousConfigRevision = previousRevision
+	if change != nil {
 		if current, err := regularRead(h.view.AppConfigPath, 1<<20); err == nil {
-			view.ConfigRevision = h.configRevision(current)
+			h.vpnAccountRestartPending = true
+			fields := h.vpnRestartFields(current)
+			view.VPNRestartFields = &fields
+			if view.ConfigChanged {
+				view.PreviousConfigRevision = previousRevision
+				view.ConfigRevision = h.configRevision(current)
+			}
 		}
 	}
 	reply(w, 200, view)

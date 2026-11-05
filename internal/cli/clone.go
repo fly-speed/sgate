@@ -16,6 +16,10 @@ func CloneFlags(original *flag.FlagSet) *flag.FlagSet {
 		if f.Name == "config" {
 			return
 		}
+		if _, ok := f.Value.(legacyFileOption); ok {
+			IgnoreFileOption(fs, f.Name)
+			return
+		}
 		if _, ok := f.Value.(*byteSizeValue); ok {
 			v, err := ParseByteSize(f.DefValue)
 			if err != nil {

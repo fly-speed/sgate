@@ -2,9 +2,51 @@ package admin
 
 import (
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
+
+	"sgate/internal/vpn"
 )
+
+func (h *Handler) vpnRestartFields(current []byte) []string {
+	fields := []string{}
+	var retry bool
+	if h.view.VPNRestartPending != nil {
+		pending, failed, err := h.view.VPNRestartPending()
+		if err == nil && !pending {
+			return fields
+		}
+		retry = failed
+	}
+	values := func(content []byte) map[string]string {
+		fields, _ := configFields(string(content))
+		out := make(map[string]string, len(fields))
+		for _, field := range fields {
+			out[field.Key] = field.Value
+		}
+		return out
+	}
+	old, saved := values(h.startupContent), values(current)
+	for _, setting := range vpn.Settings(h.view.Role) {
+		if slices.Contains(h.view.LiveFields, setting.Key) {
+			continue
+		}
+		before, found := old[setting.Key]
+		if !found {
+			before = setting.Default
+		}
+		after, found := saved[setting.Key]
+		if !found {
+			after = setting.Default
+		}
+		if before != after || (h.vpnAccountRestartPending && setting.Key == VPNAccountFileKey(h.view.Role)) ||
+			(retry && slices.Contains(h.vpnRestartAttemptFields, setting.Key)) {
+			fields = append(fields, setting.Key)
+		}
+	}
+	return fields
+}
 
 // mergeVPNBaseline preserves every non-VPN pending setting and updates only
 // the saved VPN portion of the management restart baseline. No file is written.
@@ -59,6 +101,11 @@ func (h *Handler) restartVPN(w http.ResponseWriter, r *http.Request) {
 		problem(w, 409, "配置已变化，请重新加载后再重启 VPN。")
 		return
 	}
+	fields := h.vpnRestartFields(current)
+	if len(fields) == 0 {
+		problem(w, 409, "没有待生效的 VPN 配置，请先保存需要重启的修改。")
+		return
+	}
 	baseline, err := mergeVPNBaseline(h.startupContent, current)
 	if err != nil {
 		problem(w, 400, "VPN 配置格式无效")
@@ -73,11 +120,14 @@ func (h *Handler) restartVPN(w http.ResponseWriter, r *http.Request) {
 		problem(w, 409, "VPN 已发起重启，但配置在操作期间发生变化，请重新加载核对。")
 		return
 	}
+	h.vpnRestartAttemptFields = fields
+	h.vpnAccountRestartPending = false
 	h.startupContent = baseline
 	h.startupRevision = h.restartDigest(baseline)
 	var runtime any
 	if h.view.Runtime != nil {
 		runtime = h.view.Runtime()
 	}
-	reply(w, 200, map[string]any{"ok": true, "runtime": runtime, "requires_restart": h.restartDigest(current) != h.startupRevision || h.mappingRestartPending})
+	pending := h.vpnRestartFields(current)
+	reply(w, 200, map[string]any{"ok": true, "runtime": runtime, "vpn_restart_pending": len(pending) != 0, "vpn_restart_fields": pending, "requires_restart": h.restartDigest(current) != h.startupRevision || h.mappingRestartPending})
 }

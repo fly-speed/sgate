@@ -123,6 +123,7 @@ type View struct {
 	TestProxy            func(context.Context, ProxyMapping) (tunnel.ProbeResult, error)
 	ControlVPN           func(bool) error
 	RestartVPN           func() error
+	VPNRestartPending    func() (pending, retry bool, err error)
 	TestVPN              func(context.Context, map[string]string) (vpn.ProbeResult, error)
 	ManageTunnelAccounts func(*TunnelAccountChange) (TunnelAccountsSnapshot, error)
 	ManageVPNAccounts    func(*VPNAccountChange) (VPNAccountsSnapshot, error)

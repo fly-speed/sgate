@@ -17,7 +17,7 @@ let tunnelAccountCreateMappings = null;
 let configRole = "";
 let proxyVPNModeOverride = false, appliedVPNMode = "";
 let activeConfigSection = "";
-const clientConfigSections = {
+const configSections = {
   mappings: "代理映射",
   connection: "代理连接",
   performance: "代理性能",
@@ -27,7 +27,7 @@ const clientConfigSections = {
   framework: "服务框架",
 };
 const proxyPerformanceFields = new Set([
-  "reconnect-min", "reconnect-max", "offline-timeout", "max-streams", "buffer-bytes", "heartbeat", "heartbeat-timeout",
+  "reconnect-min", "reconnect-max", "offline-timeout", "session-ttl", "max-sessions", "max-streams", "buffer-bytes", "heartbeat", "heartbeat-timeout",
   "quic-initial-packet-bytes", "quic-stream-window", "quic-connection-window", "quic-stream-buffer",
   "quic-replay-bytes", "quic-receive-bytes", "memory-budget-bytes",
 ]);
@@ -35,13 +35,14 @@ let vpnConfigSupport = null;
 let vpnProbeState = null;
 let vpnAccountsView = null, vpnAccountsBusy = false;
 let vpnRestartButtons = [];
+let vpnRestartFields = new Set(), vpnRestartTracking = null;
 // Keep each role's expanded sections across saves and language changes.
 const configGroupOpen = new Map();
 let configInputs = [],
   configSaving = false,
   loggingOut = false;
 
-function clientConfigSection(field) {
+function configSectionForField(field) {
   if (field.key.startsWith("vpn-")) return "vpn";
   if (field.kind === "proxies" || ["proxies", "proxies-file"].includes(field.key)) return "mappings";
   if (field.group === "服务框架") return "framework";
@@ -52,25 +53,24 @@ function clientConfigSection(field) {
 }
 
 function updateNavigationRole(role) {
-  const client = role === "client";
-  $("admin-nav").classList.toggle("client-nav", client);
-  $("server-config-nav").hidden = client;
-  $("server-vpn-accounts-nav").hidden = client;
-  $("client-proxy-nav").hidden = !client;
-  $("client-vpn-nav").hidden = !client;
+  const configured = role === "client" || role === "server";
+  $("admin-nav").classList.toggle("sectioned-nav", configured);
+  $("proxy-nav").hidden = !configured;
+  $("vpn-nav").hidden = !configured;
+  $("tunnel-accounts-nav").hidden = role !== "server";
 }
 
 function updateConfigSections(open = false) {
-  const client = configRole === "client";
+  const sectioned = configRole === "client" || configRole === "server";
   updateNavigationRole(configRole);
   const groups = Array.from($("config-fields").children);
   const sections = new Set(groups.map(group => group.configSection));
   if (!sections.has(activeConfigSection)) {
-    activeConfigSection = Object.keys(clientConfigSections).find(section => sections.has(section)) || "";
+    activeConfigSection = Object.keys(configSections).find(section => sections.has(section)) || "";
   }
   for (const button of document.querySelectorAll("[data-config-section]")) {
     const section = button.dataset.configSection;
-    button.hidden = !client || !sections.has(section);
+    button.hidden = !sectioned || !sections.has(section);
     const selected = !button.hidden && !$("configuration").hidden && section === activeConfigSection;
     button.classList.toggle("selected", selected);
     if (open && selected) {
@@ -80,16 +80,16 @@ function updateConfigSections(open = false) {
   }
   for (const group of groups) {
     const mappingsInConnection = activeConfigSection === "connection" && group.configSection === "mappings";
-    group.hidden = client && group.configSection !== activeConfigSection && !mappingsInConnection;
-    if (client && !group.hidden && (open || (group.configSection === "mappings" && $("configuration").hidden === false))) {
+    group.hidden = sectioned && group.configSection !== activeConfigSection && !mappingsInConnection;
+    if (sectioned && !group.hidden && (open || (group.configSection === "mappings" && $("configuration").hidden === false))) {
       group.open = true;
     }
   }
-  localText($("config-heading"), () => t((client && clientConfigSections[activeConfigSection]) || "服务配置"));
-  localText($("save-config-label"), () => t(client ? "保存全部修改" : "保存配置"));
-  localText($("apply-config-label"), () => t(client ? "保存全部修改并应用 ↗" : "保存并应用 ↗"));
-  if (client && !$("configuration").hidden) {
-    localText($("page-title"), () => t(clientConfigSections[activeConfigSection] || "服务配置"));
+  localText($("config-heading"), () => t((sectioned && configSections[activeConfigSection]) || "服务配置"));
+  localText($("save-config-label"), () => t(sectioned ? "保存全部修改" : "保存配置"));
+  localText($("apply-config-label"), () => t(sectioned ? "保存全部修改并应用 ↗" : "保存并应用 ↗"));
+  if (sectioned && !$("configuration").hidden) {
+    localText($("page-title"), () => t(configSections[activeConfigSection] || "服务配置"));
   }
 }
 
@@ -117,8 +117,8 @@ function renderConfigFields(fields, runtime, role) {
   const groups = new Map();
   const overrides = new Set(runtime.cli_overrides || []);
   for (const field of fields) {
-    const section = configRole === "client" ? clientConfigSection(field) : "";
-    const groupName = section && field.group === "代理与通道" ? clientConfigSections[section] : field.group;
+    const section = configRole ? configSectionForField(field) : "";
+    const groupName = section && field.group === "代理与通道" ? configSections[section] : field.group;
     const groupKey = configRole + ":" + section + ":" + groupName;
     let group = groups.get(groupKey);
     if (!group) {
@@ -129,14 +129,6 @@ function renderConfigFields(fields, runtime, role) {
       group.addEventListener("toggle", () => configGroupOpen.set(groupKey, group.open));
       const summary = document.createElement("summary");
       localText(summary, () => t(groupName));
-      if(field.group==="独立 VPN" && runtime.vpn_restart_supported){
-        const restart=document.createElement("button");restart.type="button";restart.className="secondary";
-        localText(restart,()=>t("重启 VPN 使配置生效"));
-        localAttr(restart,"title",()=>t("应用已保存的 VPN 参数并重启隧道；现有连接会断开，未保存修改保留。模式切换请使用保存并应用。"));
-        restart.disabled=configSaving||serviceRestarting;
-        restart.addEventListener("click",event=>{event.preventDefault();event.stopPropagation();restartSavedVPN()});
-        summary.append(restart);vpnRestartButtons.push(restart);
-      }
       group.append(summary);
       container.append(group);
       groups.set(groupKey, group);
@@ -260,11 +252,50 @@ function renderConfigFields(fields, runtime, role) {
     saveButton.addEventListener("click", () => saveConfigField(entry));
     configInputs.push(entry);
     if (configRole === "client" && field.key === "vpn-mode") renderVPNProbe(editor,entry);
-    row.append(label, editor, saveButton);
+    let actions = saveButton;
+    if (section === "vpn" && runtime.vpn_restart_supported && !field.validation?.live && !overridden) {
+      actions = document.createElement("div");
+      actions.className = "config-row-actions";
+      actions.append(saveButton, vpnRestartButton(field.key));
+    }
+    row.append(label, editor, actions);
     group.append(row);
   }
   updateConfigSections();
   updateProxyMappingMode();
+  updateVPNRestartButtons();
+}
+
+function vpnRestartButton(key) {
+  const restart = document.createElement("button");
+  restart.type = "button";
+  restart.disabled = true;
+  restart.className = "secondary config-save";
+  restart.innerHTML =
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 4v5h-5M20 9a8 8 0 1 0 .3 5"/></svg>';
+  localAttr(restart, "aria-label", () => t("重启 VPN 使配置生效") + " · " + key);
+  restart.addEventListener("click", event => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!restart.disabled) return restartSavedVPN(key);
+  });
+  vpnRestartButtons.push({key, button:restart});
+  return restart;
+}
+
+function updateVPNRestartButtons(busy = configSaving || serviceRestarting) {
+  for (const {key, button} of vpnRestartButtons) {
+    const pending = vpnRestartFields.has(key);
+    button.disabled = busy || !pending || !!vpnRestartTracking;
+    localAttr(button, "title", () => t(vpnRestartTracking?.fields.has(key) ? "正在确认 VPN 重启结果…" : pending
+      ? "应用已保存的 VPN 参数并重启隧道；现有连接会断开，未保存修改保留。模式切换请使用保存并应用。"
+      : "此配置项没有待生效的修改。"));
+  }
+}
+
+function updateVPNRestartPending(result) {
+  vpnRestartFields = new Set(Array.isArray(result.vpn_restart_fields) ? result.vpn_restart_fields : []);
+  updateVPNRestartButtons();
 }
 
 function proxyMappingLockReason() {
@@ -981,7 +1012,7 @@ function configEdits() {
 }
 
 function setConfigBusy(busy) {
-  vpnRestartButtons.forEach(button=>button.disabled=busy);
+  updateVPNRestartButtons(busy);
   for (const entry of configInputs) {
     if (["proxies", "proxies-file"].includes(entry.key)) continue;
     entry.input.disabled = busy;
@@ -1028,6 +1059,7 @@ async function saveConfigField(entry) {
       body: JSON.stringify(configPayload({ [entry.key]: value }, false)),
     });
     revision = result.revision;
+    updateVPNRestartPending(result);
     if (result.proxy_mappings) {
       const mappings = configInputs.find(item => item.kind === "proxies");
       if (mappings && mappings !== entry && !mappings.dirty) mappings.replaceMappings(result.proxy_mappings);
@@ -1187,6 +1219,7 @@ async function runVPNAccountAction(action, change) {
       return;
     }
     renderVPNAccounts(data);
+    updateVPNRestartPending(data);
     if (data.config_changed && data.previous_config_revision === revision && data.config_revision) {
       revision = data.config_revision;
       const entry = configInputs.find(e => e.key === (state.role === "server" ? "vpn-accounts-file" : "vpn-credentials-file"));
@@ -1302,7 +1335,6 @@ async function refreshAuth() {
     renderSignedOut();
     return;
   }
-  $("tunnel-accounts-nav").hidden = state.role !== "server";
   updateNavigationRole(state.role);
   localText($("role-title"), () => state.role === "server" ? "SERVER" : "CLIENT");
   localText($("side-role"), () => state.role === "server" ? t("服务端代理") : t("客户端代理"));
@@ -1326,6 +1358,9 @@ async function refreshAuth() {
 
 function renderSignedOut() {
  vpnProbeState=null;
+  vpnRestartFields.clear();
+  clearTimeout(vpnRestartTracking?.timer);
+  vpnRestartTracking = null;
   activeConfigSection = "";
   vpnAccountsView = null;
   vpnAccountsBusy = false;
@@ -1421,6 +1456,7 @@ async function loadConfig() {
   if (!Array.isArray(data.fields))
     throw new Error(t("配置表单需要新版程序，请更新并重启 sgate 服务。"));
   revision = data.revision;
+  updateVPNRestartPending(data);
   renderConfigFields(data.fields || [], {...(data.runtime || {}), vpn_support:data.vpn_support}, data.role);
   localText($("config-path"), () => data.path);
   localText($("pending-label"), () => data.requires_restart ? t("已保存 · 待应用") : t("配置文件已同步"));
@@ -1526,6 +1562,7 @@ async function poll(run) {
     localText($("tx-rate"), () => rates ? units(rates.tx, true) : t("采样中"));
     localText($("rx-rate"), () => rates ? units(rates.rx, true) : t("采样中"));
     renderVPNControls(data.health?.vpn);
+    observeVPNRestart(data.health?.vpn);
     localText($("vpn-queue-summary"),()=>vpnQueueObservationText(data.health?.vpn));
     if($("vpn-summary")) localText($("vpn-summary"), () => vpnObservationText(data.health?.vpn));
     renderVPNClients(data.health?.vpn);
@@ -2011,18 +2048,18 @@ function showAdminTab(tab, section = "") {
   document.querySelectorAll(".tab").forEach(panel => { panel.hidden = panel.id !== tab; });
   localText($("page-title"), () => t({
     overview: "实时概览",
-    configuration: clientConfigSections[section] || "代理配置",
+    configuration: configSections[section] || "代理配置",
     account: "账号与会话",
     "tunnel-accounts": "客户端账号",
     "vpn-accounts": "VPN 账号",
   }[tab]));
-  if (tab === "configuration" && configRole === "client") {
+  if (tab === "configuration" && configRole) {
     activeConfigSection = section;
     updateConfigSections(true);
   }
 }
 function revealConfigSection(section) {
-  if (configRole === "client" && section && (section !== activeConfigSection || $("configuration").hidden)) {
+  if (configRole && section && (section !== activeConfigSection || $("configuration").hidden)) {
     showAdminTab("configuration", section);
   }
 }
@@ -2057,16 +2094,60 @@ function configSaveMessage(result, key = t("配置")) {
   }
   return key + t("已校验并保存，尚未重启代理。");
 }
-async function restartSavedVPN(){
-  if(configSaving||serviceRestarting)return;
+function finishVPNRestart(tracking, message, failed) {
+  if (vpnRestartTracking !== tracking) return;
+  clearTimeout(tracking.timer);
+  vpnRestartTracking = null;
+  if (failed) for (const key of tracking.fields) vpnRestartFields.add(key);
+  updateVPNRestartButtons();
+  localText($("pending-label"), () => (Object.keys(configEdits()).length ? t("有未保存修改 · ") : "") +
+    (failed ? t("VPN 重启结果待确认或失败") : tracking.requiresRestart ? t("其他配置仍待应用或重启。") : t("已保存项已生效")));
+  notice(message, failed);
+}
+
+function observeVPNRestart(vpn) {
+  const tracking = vpnRestartTracking;
+  if (!tracking || !vpn || (tracking.generation && vpn.generation !== tracking.generation)) return;
+  if (vpn.last_error) tracking.lastError = vpn.last_error;
+  if (vpn.state === "failed") {
+    finishVPNRestart(tracking, () => t("VPN 重启失败") + (vpn.last_error ? " · " + vpn.last_error : ""), true);
+  } else if (vpn.state === "disabled" || vpn.enabled === false) {
+    finishVPNRestart(tracking, () => t("VPN 已关闭，已保存配置已应用，未启动隧道。"), false);
+  } else if (vpn.state === "connected" || vpn.state === "listening") {
+    finishVPNRestart(tracking, () => t(vpn.state === "connected" ? "VPN 重启成功，客户端已连接。" : "VPN 重启成功，服务端已开始监听。"), false);
+  }
+}
+
+async function restartSavedVPN(key){
+  if (configSaving || serviceRestarting || !vpnRestartFields.has(key) || vpnRestartTracking) return;
+  const fields = vpnRestartFields;
+  if (fields.size > 1) {
+    const list = Array.from(fields, field => "• " + field).join("\n");
+    const message = t("本次重启 VPN 将一起应用以下已保存的配置项。") + "\n\n" + list +
+      "\n\n" + t("现有 VPN 连接会断开。确认重启？");
+    if (!window.confirm(message)) return;
+  }
+  const run = epoch;
   configSaving=true;setConfigBusy(true);
   notice(()=>t("正在应用已保存的 VPN 配置并重启隧道…"));
   try{
     const result=await api("vpn-restart",{method:"POST",body:JSON.stringify({revision})});
+    if (run !== epoch) return;
+    updateVPNRestartPending(result);
     if(result.runtime)renderRuntime(result.runtime);
-    localText($("pending-label"),()=> (Object.keys(configEdits()).length?t("有未保存修改 · "):"")+(result.requires_restart?t("其他配置仍待应用或重启。"):t("已保存项已生效")));
-    notice(()=>t(result.runtime?.vpn?.enabled===false ? "VPN 已关闭，已保存配置已应用，未启动隧道。" : "已发起 VPN 重启，请在实时概览查看连接结果。管理界面及其他未保存修改已保留。"));
-  }catch(error){notice(()=>errorText(error),true)}
+    const vpn = result.runtime?.vpn;
+    const tracking = {fields, generation:vpn?.generation, requiresRestart:result.requires_restart};
+    vpnRestartTracking = tracking;
+    observeVPNRestart(vpn);
+    if (vpnRestartTracking === tracking) {
+      notice(() => t("正在确认 VPN 重启结果…"));
+      tracking.timer = setTimeout(() => {
+        if (vpnRestartTracking !== tracking) return;
+        notice(() => t("VPN 重启后尚未确认就绪，请查看实时概览。") +
+          (tracking.lastError ? " · " + tracking.lastError : ""), true);
+      }, 30000);
+    }
+  }catch(error){if (run === epoch) notice(()=>errorText(error),true)}
   finally{configSaving=false;setConfigBusy(serviceRestarting)}
 }
 async function saveConfig(apply) {

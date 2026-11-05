@@ -42,14 +42,15 @@ type vpnDevice interface {
 	Name() string
 }
 type vpnWorker struct {
-	server *vpn.Server
-	mu     sync.Mutex
-	health vpnHealth
-	stats  *vpn.Stats
-	live   *vpn.LiveSettings
-	cancel context.CancelFunc
-	done   chan struct{}
-	once   sync.Once
+	restartFromSaved bool // Protected by the controller mutex.
+	server           *vpn.Server
+	mu               sync.Mutex
+	health           vpnHealth
+	stats            *vpn.Stats
+	live             *vpn.LiveSettings
+	cancel           context.CancelFunc
+	done             chan struct{}
+	once             sync.Once
 }
 
 func (v *vpnWorker) snapshot() vpnHealth {
@@ -302,6 +303,29 @@ func (c *controller) controlVPN(start bool) error {
 	return nil
 }
 
+func (c *controller) prepareSavedVPN() (*vpn.Prepared, error) {
+	fs := cli.CloneFlags(c.original)
+	if err := cli.Parse(fs, c.args); err != nil {
+		return nil, err
+	}
+	return vpn.Prepare(c.role, fs)
+}
+
+func (c *controller) vpnRestartPending() (pending, retry bool, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	saved, err := c.prepareSavedVPN()
+	if err != nil {
+		return false, false, err
+	}
+	running := c.current.vpn
+	if saved == nil || running == nil {
+		return saved != running, false, nil
+	}
+	retry = c.worker != nil && c.worker.vpn != nil && c.worker.vpn.restartFromSaved && c.workerVPNStatus().State == "failed"
+	return saved.Fingerprint != running.Fingerprint || retry, retry, nil
+}
+
 // restartVPN applies saved VPN settings without applying pending proxy edits.
 func (c *controller) restartVPN() error {
 	c.mu.Lock()
@@ -309,11 +333,7 @@ func (c *controller) restartVPN() error {
 	if c.ctx.Err() != nil || c.restartPending || c.worker == nil {
 		return errors.New("服务正在停止或重启，无法重启 VPN")
 	}
-	fs := cli.CloneFlags(c.original)
-	if err := cli.Parse(fs, c.args); err != nil {
-		return err
-	}
-	prepared, err := vpn.Prepare(c.role, fs)
+	prepared, err := c.prepareSavedVPN()
 	if err != nil {
 		return err
 	}
@@ -327,6 +347,7 @@ func (c *controller) restartVPN() error {
 	c.current.vpn = prepared
 	if prepared != nil {
 		c.worker.startVPN(c.ctx, prepared)
+		c.worker.vpn.restartFromSaved = true
 	}
 	return nil
 }

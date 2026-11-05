@@ -2,6 +2,7 @@ package admin
 
 import (
 	"os"
+	"slices"
 	"testing"
 )
 
@@ -20,6 +21,16 @@ func TestVPNRestartRequiresCSRFAndRevisionAndKeepsProxyPending(t *testing.T) {
 			if err := os.WriteFile(h.view.AppConfigPath, current, 0600); err != nil {
 				t.Fatal(err)
 			}
+			if pending := h.vpnRestartFields(current); !slices.Equal(pending, []string{"vpn-mtu"}) {
+				t.Fatal("unexpected pending VPN fields", pending)
+			}
+			w := request(h, "GET", "/api/config", nil, cookie, "", "")
+			if w.Code != 200 {
+				t.Fatal(w.Code, w.Body.String())
+			}
+			if fields := object(t, w)["vpn_restart_fields"]; !slices.Equal(fields.([]any), []any{"vpn-mtu"}) {
+				t.Fatal("unexpected pending VPN fields on reload", fields)
+			}
 			revision := h.configRevision(current)
 			if w := request(h, "POST", "/api/vpn-restart", map[string]string{"revision": revision}, cookie, "", ""); w.Code != 403 {
 				t.Fatal(w.Code)
@@ -30,11 +41,17 @@ func TestVPNRestartRequiresCSRFAndRevisionAndKeepsProxyPending(t *testing.T) {
 			if calls != 0 {
 				t.Fatal("invalid restart request reached controller")
 			}
-			w := request(h, "POST", "/api/vpn-restart", map[string]string{"revision": revision}, cookie, csrf, "")
+			w = request(h, "POST", "/api/vpn-restart", map[string]string{"revision": revision}, cookie, csrf, "")
 			if w.Code != 200 || calls != 1 {
 				t.Fatal(w.Code, w.Body.String())
 			}
 			result := object(t, w)
+			if result["vpn_restart_pending"] != false || len(result["vpn_restart_fields"].([]any)) != 0 {
+				t.Fatal("applied VPN configuration still pending", result)
+			}
+			if w := request(h, "POST", "/api/vpn-restart", map[string]string{"revision": revision}, cookie, csrf, ""); w.Code != 409 || calls != 1 {
+				t.Fatal("redundant restart reached controller", w.Code, calls)
+			}
 			if result["requires_restart"] != true {
 				t.Fatal("pending proxy setting lost")
 			}

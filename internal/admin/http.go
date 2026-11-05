@@ -614,11 +614,14 @@ func (h *Handler) getConfig(w http.ResponseWriter) {
 		}
 		fields = append(fields, field)
 	}
+	vpnRestartFields := h.vpnRestartFields(b)
 	v := map[string]any{
 		"fields":               fields,
 		"content":              redactConfig(b),
 		"revision":             configRevision,
 		"requires_restart":     h.restartDigest(b) != h.startupRevision || h.mappingRestartPending,
+		"vpn_restart_pending":  len(vpnRestartFields) != 0,
+		"vpn_restart_fields":   vpnRestartFields,
 		"path":                 h.view.AppConfigPath,
 		"role":                 h.view.Role,
 		"vpn_support":          vpn.PlatformSupport(h.view.Role),
@@ -865,10 +868,14 @@ func (h *Handler) commitConfig(
 	if restart {
 		h.startupRevision = h.restartDigest([]byte(content))
 		h.startupContent = []byte(content)
+		h.vpnAccountRestartPending = false
+		h.vpnRestartAttemptFields = nil
 		requiresRestart = false
 	}
+	vpnRestartFields := h.vpnRestartFields([]byte(content))
 	result := map[string]any{
 		"revision": h.configRevision([]byte(content)), "requires_restart": requiresRestart,
+		"vpn_restart_pending": len(vpnRestartFields) != 0, "vpn_restart_fields": vpnRestartFields,
 		"applied": restart, "live_applied": live, "service_restart_required": serviceRestart,
 	}
 	if len(synced) > 0 {
