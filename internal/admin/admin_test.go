@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -140,7 +141,7 @@ func TestFirstAccountAndPersistentSession(t *testing.T) {
 		t.Fatal("password hashing failed")
 	}
 	st, _ := os.Stat(c.UsersFile)
-	if st.Mode().Perm() != 0600 {
+	if runtime.GOOS != "windows" && st.Mode().Perm() != 0600 {
 		t.Fatal("credential permissions")
 	}
 	restarted, e := New(c, h.view)
@@ -214,7 +215,7 @@ func TestConfigRedactionValidationRevisionAndApplyRollback(t *testing.T) {
 		t.Fatal("password not preserved")
 	}
 	st, e := os.Stat(h.view.AppConfigPath + ".bak")
-	if e != nil || st.Mode().Perm() != 0600 {
+	if e != nil || runtime.GOOS != "windows" && st.Mode().Perm() != 0600 {
 		t.Fatal("backup missing or insecure")
 	}
 	if w = request(h, "GET", "/api/stats", nil, cookie, "", ""); w.Code != 200 {

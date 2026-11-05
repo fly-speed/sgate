@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -61,7 +62,7 @@ func TestStartupCreatesEmptyAccountsAndWebCanAddFirstUser(t *testing.T) {
 	}
 	for name, want := range map[string]os.FileMode{path: 0600, filepath.Dir(path): 0700} {
 		st, err := os.Stat(name)
-		if err != nil || st.Mode().Perm() != want {
+		if err != nil || runtime.GOOS != "windows" && st.Mode().Perm() != want {
 			t.Fatal("private storage permissions", err)
 		}
 	}
@@ -183,8 +184,8 @@ func TestConcurrentAccountsStartupAndPermissionFailure(t *testing.T) {
 	if len(temps) != 0 {
 		t.Fatal("temporary files retained", temps)
 	}
-	if os.Geteuid() == 0 {
-		t.Skip("root bypasses directory permissions")
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("requires Unix chmod enforcement")
 	}
 	dir := t.TempDir()
 	if err := os.Chmod(dir, 0500); err != nil {

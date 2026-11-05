@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"sgate/internal/admin"
 	"sgate/internal/clientcontrol"
 	"sgate/internal/serviceconfig"
 )
@@ -106,22 +107,43 @@ func (c *Client) Stop() {
 	c.input.Close()
 }
 
-func (c *Client) ManagementURL() (string, error) {
+func (c *Client) managementConfig() (string, map[string]string, error) {
 	values, _, err := serviceconfig.Read(c.Config)
 	if err != nil {
-		return "", err
-	}
-	if values["admin-config"] == "" {
-		enabled, _ := strconv.ParseBool(values["admin_enabled"])
-		if !enabled {
-			return "", errors.New("管理页面未启用，请编辑配置设置 admin_enabled = true，然后重启客户端")
-		}
+		return "", nil, err
 	}
 	if separate := values["admin-config"]; separate != "" {
 		if !filepath.IsAbs(separate) {
 			separate = filepath.Join(filepath.Dir(c.Config), separate)
 		}
-		values, _, err = serviceconfig.Read(separate)
+		return separate, values, nil
+	}
+	enabled, _ := strconv.ParseBool(values["admin_enabled"])
+	if !enabled {
+		return "", nil, errors.New("管理页面未启用，请编辑配置设置 admin_enabled = true，然后重启客户端")
+	}
+	return c.Config, values, nil
+}
+
+func (c *Client) InitialSetupToken() string {
+	path, _, err := c.managementConfig()
+	if err != nil {
+		return ""
+	}
+	config, err := admin.LoadConfig(path)
+	if err != nil {
+		return ""
+	}
+	return config.InitialSetupToken()
+}
+
+func (c *Client) ManagementURL() (string, error) {
+	path, values, err := c.managementConfig()
+	if err != nil {
+		return "", err
+	}
+	if values["admin-config"] != "" {
+		values, _, err = serviceconfig.Read(path)
 		if err != nil {
 			return "", err
 		}

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -58,7 +59,7 @@ func TestMappingFileMigrationSecretsAndRollback(t *testing.T) {
 	if err != nil || !strings.Contains(string(raw), "alice-private") {
 		t.Fatal("credentials not migrated", err)
 	}
-	if st, err := os.Stat(path); err != nil || st.Mode().Perm() != 0600 {
+	if st, err := os.Stat(path); err != nil || runtime.GOOS != "windows" && st.Mode().Perm() != 0600 {
 		t.Fatal("mapping file not private")
 	}
 	config, _ := os.ReadFile(h.view.AppConfigPath)

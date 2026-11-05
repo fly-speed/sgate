@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -19,11 +20,14 @@ func TestServiceControlPathsResolveBesideManagementConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	relative, err := filepath.Rel(cwd, path)
+	configPath, err := filepath.Rel(cwd, path)
+	if err != nil && runtime.GOOS == "windows" && filepath.VolumeName(cwd) != filepath.VolumeName(path) {
+		configPath, err = path, nil
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadConfig(relative)
+	cfg, err := LoadConfig(configPath)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -102,8 +102,12 @@ func TestShippedConfigManagementPaths(t *testing.T) {
 			if strings.Contains(filepath.Base(path), "server") {
 				role = "server"
 			}
-			if cfg.UsersFile != filepath.Join(root, "conf/admin-"+role+"-users.json") ||
-				cfg.SessionDir != filepath.Join(root, "conf/admin-"+role+"-sessions") ||
+			storage := filepath.Join(root, "conf")
+			if filepath.Base(path) == "windows-client.cf" {
+				storage = filepath.Dir(path)
+			}
+			if cfg.UsersFile != filepath.Join(storage, "admin-"+role+"-users.json") ||
+				cfg.SessionDir != filepath.Join(storage, "admin-"+role+"-sessions") ||
 				cfg.WebDir != filepath.Join(root, "web/admin") {
 				t.Fatalf("management resources moved for %s", path)
 			}

@@ -78,7 +78,7 @@ func dialResetReason(err error) byte {
 	case errors.As(err, &network) && network.Timeout():
 		return resetDialTimeout
 	default:
-		return resetDialFailed
+		return windowsDialResetReason(err)
 	}
 }
 
@@ -115,7 +115,7 @@ func streamFailureEvent(operation string, err error) string {
 	if operation == "TLS handshake" {
 		return "ingress_tls_rejected"
 	}
-	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ENOTCONN) {
+	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ENOTCONN) || windowsPeerClosed(err) {
 		return "stream_peer_closed"
 	}
 	return "stream_error"

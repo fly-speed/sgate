@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 // CreatePrivate publishes a complete file atomically. Concurrent initializers
@@ -19,7 +20,7 @@ func CreatePrivate(path string, data []byte) (bool, error) {
 		return false, fmt.Errorf("cannot prepare configuration file: %w", err)
 	}
 	defer os.Remove(f.Name())
-	if err = f.Chmod(0600); err == nil {
+	if err = ProtectFile(f); err == nil {
 		_, err = f.Write(data)
 	}
 	if err == nil {
@@ -36,13 +37,22 @@ func CreatePrivate(path string, data []byte) (bool, error) {
 	} else if err != nil {
 		return false, fmt.Errorf("cannot create configuration file: %w", err)
 	}
-	dir, err := os.Open(filepath.Dir(path))
-	if err == nil {
-		err = dir.Sync()
-		_ = dir.Close()
-	}
-	if err != nil {
+	if err := SyncDirectory(filepath.Dir(path)); err != nil {
 		return true, fmt.Errorf("cannot synchronize configuration directory: %w", err)
 	}
 	return true, nil
+}
+
+// SyncDirectory flushes directory metadata where the OS supports it.
+func SyncDirectory(path string) error {
+	// Windows does not support FlushFileBuffers on directory handles.
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
 }

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -138,8 +139,8 @@ func TestExternalWebStartupPreservesFilesystemCause(t *testing.T) {
 	})
 	for _, directory := range []bool{false, true} {
 		t.Run(fmt.Sprintf("permission/directory=%t", directory), func(t *testing.T) {
-			if os.Geteuid() == 0 {
-				t.Skip("root bypasses Unix permission checks")
+			if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+				t.Skip("requires Unix chmod enforcement")
 			}
 			dir := externalWeb(t)
 			path, mode := filepath.Join(dir, "index.html"), os.FileMode(0600)

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -41,7 +42,7 @@ func TestCreatePublishesCompletePrivateFileAndPreservesWinner(t *testing.T) {
 	}
 	for file, mode := range map[string]os.FileMode{path: 0600, filepath.Dir(path): 0700} {
 		st, err := os.Stat(file)
-		if err != nil || st.Mode().Perm() != mode {
+		if err != nil || runtime.GOOS != "windows" && st.Mode().Perm() != mode {
 			t.Fatal("incorrect storage permissions", file, err)
 		}
 	}
@@ -67,8 +68,8 @@ func TestCreateRejectsInvalidDataAndUnwritableDirectory(t *testing.T) {
 	if _, err := os.Stat(filepath.Dir(path)); !os.IsNotExist(err) {
 		t.Fatal("invalid data created a directory")
 	}
-	if os.Geteuid() == 0 {
-		t.Skip("root bypasses directory permissions")
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("requires Unix chmod enforcement")
 	}
 	if err := os.Chmod(root, 0500); err != nil {
 		t.Fatal(err)

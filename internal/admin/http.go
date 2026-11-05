@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	"sgate/internal/configfile"
 	"sgate/internal/proxyconfig"
 	"sgate/internal/tunnel"
 	"sgate/internal/vpn"
@@ -898,7 +899,7 @@ func exclusiveFile(path string, data []byte) error {
 		return e
 	}
 	defer os.Remove(f.Name())
-	if e = f.Chmod(0600); e == nil {
+	if e = configfile.ProtectFile(f); e == nil {
 		_, e = f.Write(data)
 	}
 	if e == nil {
@@ -914,5 +915,5 @@ func exclusiveFile(path string, data []byte) error {
 	if e = os.Link(f.Name(), path); e != nil {
 		return e
 	}
-	return syncDirectory(filepath.Dir(path))
+	return configfile.SyncDirectory(filepath.Dir(path))
 }

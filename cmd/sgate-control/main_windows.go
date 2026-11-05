@@ -1,5 +1,7 @@
 package main
 
+//go:generate go run github.com/tc-hib/go-winres@v0.3.3 make --in assets/winres.json --arch amd64,arm64,386
+
 import (
 	"crypto/sha256"
 	"errors"
@@ -29,6 +31,7 @@ var (
 	controller                                        *desktop.Client
 	mainWindow, statusWindow, startButton, stopButton uintptr
 	closing                                           bool
+	choosingExit                                      bool
 	lastStatus                                        string
 	instance                                          uintptr
 	font                                              uintptr
@@ -82,7 +85,7 @@ func openEditor(path string) error {
 }
 
 func control(class, text string, style uintptr, x, y, w, h, id int) uintptr {
-	hwnd, _, _ := createWindow.Call(0, address(class), address(text), 0x50000000|style, px(x), px(y), px(w), px(h), mainWindow, uintptr(id), instance, 0)
+	hwnd, _, _ := createWindow.Call(0, address(class), address(text), 0x40000000|style, px(x), px(y), px(w), px(h), mainWindow, uintptr(id), instance, 0)
 	if hwnd != 0 {
 		sendMessage.Call(hwnd, 0x30, font, 1)
 	}
@@ -102,7 +105,7 @@ func refresh() {
 		text += "\r\n清理完成后窗口将自动关闭。"
 	}
 	if text != lastStatus {
-		setText.Call(statusWindow, address(text))
+		setText.Call(statusWindow, uintptr(unsafe.Pointer(wide(text))))
 		lastStatus = text
 	}
 	active := s.State == "running" || s.State == "stopping"
@@ -116,18 +119,43 @@ func refresh() {
 		stopEnabled = 1
 	}
 	enableWindow.Call(stopButton, stopEnabled)
+	updateStatusColor(s.State)
 	if closing && !active {
 		destroyWindow.Call(mainWindow)
 	}
 }
 func procedure(hwnd, msg, wparam, lparam uintptr) uintptr {
 	switch msg {
+	case wmTray:
+		handleTrayMessage(lparam, wparam)
+		return 0
+	case 0x0014: // WM_ERASEBKGND
+		paintBackground(hwnd, wparam)
+		return 1
+	case 0x0138: // WM_CTLCOLORSTATIC
+		return styleLabel(wparam, lparam)
+	case 0x0112: // WM_SYSCOMMAND
+		if wparam&0xfff0 == 0xf020 { // SC_MINIMIZE
+			if !closing {
+				minimizeToTray()
+			}
+			return 0
+		}
 	case 0x111: // WM_COMMAND
 		if closing {
 			return 0
 		}
 		var err error
 		switch wparam & 0xffff {
+		case idCopySetupToken:
+			copySetupToken()
+		case idKeepInTray:
+			minimizeToTray()
+		case idExit:
+			beginExit()
+			return 0
+		case idCancelExit:
+			showExitChoice(false)
 		case 101:
 			err = controller.Start()
 		case 102:
@@ -148,17 +176,29 @@ func procedure(hwnd, msg, wparam, lparam uintptr) uintptr {
 		}
 		refresh()
 		return 0
-	case 0x113:
-		refresh()
-		return 0 // WM_TIMER
+	case 0x113: // WM_TIMER
+		if wparam == setupTimer {
+			refreshSetupToken()
+		} else {
+			refresh()
+		}
+		return 0
 	case 0x10:
-		closing = true
-		controller.Stop()
-		refresh()
+		if !closing {
+			showExitChoice(true)
+		}
 		return 0 // WM_CLOSE
-	case 0x2:
+	case 0x2: // WM_DESTROY
+		removeTrayIcon()
 		user32.NewProc("PostQuitMessage").Call(0)
 		return 0 // WM_DESTROY
+	}
+	if msg == taskbarCreated && inTray {
+		trayIconAdded = false
+		if !addTrayIcon() {
+			restoreFromTray()
+		}
+		return 0
 	}
 	r, _, _ := defWindow.Call(hwnd, msg, wparam, lparam)
 	return r
@@ -195,30 +235,27 @@ func run() error {
 		}
 	}
 	instance, _, _ = kernel32.NewProc("GetModuleHandleW").Call(0)
-	font, _, _ = gdi32.NewProc("GetStockObject").Call(17)
+	initializeAppearance()
+	defer releaseAppearance()
+	largeIcon, smallIcon := loadAppIcons()
 	cursor, _, _ := user32.NewProc("LoadCursorW").Call(0, 32512)
 	name := wide("sgateIndependentClientController")
-	class := windowClass{Procedure: syscall.NewCallback(procedure), Instance: instance, Cursor: cursor, Background: 16, Name: name}
+	class := windowClass{Procedure: syscall.NewCallback(procedure), Instance: instance, Cursor: cursor, Icon: largeIcon, SmallIcon: smallIcon, Name: name}
 	class.Size = uint32(unsafe.Sizeof(class))
 	if n, _, e := user32.NewProc("RegisterClassExW").Call(uintptr(unsafe.Pointer(&class))); n == 0 {
 		return e
 	}
-	mainWindow, _, err = createWindow.Call(0, uintptr(unsafe.Pointer(name)), address("sgate 客户端控制"), 0x00ca0000, 0x80000000, 0x80000000, px(740), px(440), 0, 0, instance, 0)
+	mainWindow, _, err = createWindow.Call(0, uintptr(unsafe.Pointer(name)), address("sgate 客户端控制"), 0x00ca0000, 0x80000000, 0x80000000, px(windowWidth), px(windowHeight), 0, 0, instance, 0)
 	if mainWindow == 0 {
 		return err
 	}
-	control("STATIC", "sgate 客户端控制", 0, 24, 20, 660, 30, 0)
-	control("STATIC", "独立控制程序 · 代理与 VPN 的参数配置请打开管理页面", 0, 24, 56, 660, 28, 0)
-	statusWindow = control("STATIC", "", 0, 24, 96, 670, 95, 0)
-	startButton = control("BUTTON", "启动客户端", 0x10000, 24, 208, 138, 38, 101)
-	stopButton = control("BUTTON", "停止客户端", 0x10000, 176, 208, 138, 38, 102)
-	control("BUTTON", "打开管理页面", 0x10000, 328, 208, 164, 38, 103)
-	control("BUTTON", "编辑配置", 0x10000, 24, 262, 138, 34, 104)
-	control("BUTTON", "查看日志", 0x10000, 176, 262, 138, 34, 105)
-	control("STATIC", "配置："+controller.Config, 0, 24, 314, 670, 30, 0)
-	control("STATIC", "仅管理由此窗口启动的客户端；关闭窗口会停止客户端并等待清理。", 0, 24, 350, 670, 30, 0)
+	buildDashboard(largeIcon)
+	buildSetupPanel()
+	initializeTray(smallIcon)
 	refresh()
+	refreshSetupToken()
 	user32.NewProc("SetTimer").Call(mainWindow, 1, 300, 0)
+	user32.NewProc("SetTimer").Call(mainWindow, setupTimer, 1000, 0)
 	user32.NewProc("ShowWindow").Call(mainWindow, 1)
 	user32.NewProc("UpdateWindow").Call(mainWindow)
 	var m message
@@ -229,6 +266,10 @@ func run() error {
 		}
 		if n == 0 {
 			break
+		}
+		if choosingExit && m.Message == 0x100 && m.WParam == 0x1b { // Escape
+			showExitChoice(false)
+			continue
 		}
 		if handled, _, _ := user32.NewProc("IsDialogMessageW").Call(mainWindow, uintptr(unsafe.Pointer(&m))); handled == 0 {
 			user32.NewProc("TranslateMessage").Call(uintptr(unsafe.Pointer(&m)))

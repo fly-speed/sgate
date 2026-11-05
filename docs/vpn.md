@@ -12,7 +12,26 @@ Windows 10/11 的客户端使用 [Wintun 官方签名驱动](https://www.wintun.
 
 Windows 包还包含独立窗口程序 `bin/sgate-control.exe`，与 `sgate-client.exe` 是两个可执行程序。双击控制 APP，确认 Windows 管理员授权提示后，可点击“启动客户端”“停止客户端”，并查看进程 PID、停止进度及错误；“打开管理页面”进入原有代理/VPN 配置界面，“编辑配置”打开配置文件，“查看日志”打开 `logs/sgate-client.log`。客户端在后台运行，没有额外控制台窗口。控制 APP 本身不自动启动客户端，VPN 仍须在网页手动启动。
 
-控制 APP 仅管理由本窗口启动的子进程，不接管其他窗口、脚本或服务启动的客户端。同一安装目录只允许一个控制窗口。停止或关闭窗口通过私有继承管道通知客户端正常退出，等待原有退出流程完成 VPN 清理后才显示“已停止”或关闭窗口；不会用强制终止冒充清理完成。控制 APP 意外退出时，管道关闭也会通知子进程退出。若客户端正在清理，窗口保留“正在停止”的状态。强制结束客户端或系统关机仍无法保证完成清理。新版控制 APP 与客户端应配套更新；旧客户端会因不支持控制参数而拒绝启动，避免启动一个无法正常停止的旧进程。
+点击窗口的最小化按钮可将 sgate 收起到 Windows 通知区域。单击盾牌图标恢复窗口，右键可打开窗口或退出。如果图标被 Windows 折叠，可在任务栏右侧的隐藏图标区找到它。点击关闭按钮会询问是最小化到托盘、退出程序，还是取消。最小化时代理和 VPN 继续运行。
+
+控制 APP 仅管理由本窗口启动的客户端。同一安装目录只允许一个控制窗口。选择退出时，如果客户端仍在运行，控制 APP 会通过控制管道通知客户端正常退出，并在 VPN 路由、DNS 等清理完成且客户端进程退出后关闭窗口。点击“停止客户端”使用相同的停止流程并保留控制窗口。新版控制 APP 与客户端应配套更新。
+
+### 创建和使用 Windows 安装包
+
+在 Windows 构建机安装 Go 1.24 或更新版本，以及 [Inno Setup 6.3 或更新版本](https://jrsoftware.org/isdl.php)。双击 `package\build-windows-installer.bat` 即可构建 AMD64 安装包。命令行也可以指定架构和输出目录。
+
+```bat
+package\build-windows-installer.bat -Architecture amd64
+package\build-windows-installer.bat -Architecture arm64 -Destination "D:\sgate builds\arm64"
+```
+
+默认输出为 `dist\windows-installer\sgate-client-<版本>-windows-<架构>-setup.exe`。如果编译器装在其他位置，用 `-Iscc "完整的 ISCC.exe 路径"` 指定。构建需要联网获取 Go 依赖和 Wintun。
+
+双击生成的 EXE，按向导安装到 `%ProgramFiles%\sgate`，然后从开始菜单打开 **sgate Client**。目标电脑只需运行安装包。安装器为每次全新安装生成本地占位密钥。连接实际服务器前，用管理员权限编辑 `conf\sgate-client.cf` 并将 `conf\sgate.key` 替换为服务端的共享密钥。
+
+升级或卸载前，在控制窗口选择“退出程序”并等待清理结束。在 Windows **设置 → 应用 → 已安装的应用**中选择 **sgate Client → 卸载**。卸载会移除程序、管理页面和快捷方式，保留 `%ProgramFiles%\sgate\conf` 和 `logs` 中的用户配置、密钥及日志，重新安装会沿用已有配置。
+
+### 生成便携包
 
 在已安装 Go 1.24 或更新版本的 Windows 上，从项目根目录运行打包入口：
 
@@ -33,7 +52,7 @@ package\build-windows.bat -Architecture arm64 -Destination "D:\sgate builds\arm6
 
 VPN 默认不自动启动，在网页配置启用模式后手动启动。Windows 创建独立 Wintun 网卡；认证分配地址后，先保留服务器外层 IP 的物理出口路由，再安装虚拟地址、隧道路由及 DNS。IPv6 阻断使用隧道黑洞路由。停止、重启或配置失败会逆序清理本次创建的设置，保留已有外层主机路由，物理网卡地址和 DNS 不作修改。`vpn-dns-service` 仅用于 macOS，Windows 自动使用新建的 Wintun 网卡。正常退出请先停止 VPN，再使用 Ctrl+C；强制终止无法保证执行清理。
 
-验证情况：已在 macOS 进行 Windows amd64/arm64 交叉编译，以及 Windows 路由计划、出口保留、已有路由保护、DNS 失败回滚、命令参数编码和 IPv6 阻断测试。控制进程的启动、正常停止、等待清理、重复启动保护、重启、控制管道 EOF 和取消流程有进程级测试。没有 Windows 实机，原生窗口交互、管理员提升、Wintun 驱动加载和系统网络转发尚未实测。原有 macOS/Linux 客户端继续支持独立启动。
+验证情况：已在 macOS 进行 Windows amd64/arm64 交叉编译，以及 Windows 路由计划、出口保留、已有路由保护、DNS 失败回滚、命令参数编码和 IPv6 阻断测试。控制进程的启动、正常停止、等待清理、重复启动保护、重启、控制管道 EOF 和取消流程有进程级测试。已在 Windows AMD64 上验证安装、GUI 启动和卸载。Wintun 实际组网和系统网络转发仍待验证。原有 macOS/Linux 客户端继续支持独立启动。
 
 ## 在原客户端、服务端及网页中使用（推荐）
 

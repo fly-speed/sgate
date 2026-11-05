@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -33,6 +34,9 @@ func (s reverseManagedHTTP) Managed() bool            { return true }
 
 func TestReverseManagedSaveSynchronizesBothFilesAndDefersActivation(t *testing.T) {
 	for _, withScripts := range []bool{true, false} {
+		if withScripts && runtime.GOOS == "windows" {
+			continue // Managed server restart uses Unix shell scripts.
+		}
 		t.Run(map[bool]string{true: "success", false: "rollback"}[withScripts], func(t *testing.T) {
 			c := newController(t, "server", "listen = "+onlineAddress(t)+"\ntarget = localhost:22\n")
 			address := c.worker.listener.Addr().String()

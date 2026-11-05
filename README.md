@@ -31,9 +31,9 @@ PREFIX="$HOME/.local/sgate" ./install.sh
 
 系统级安装可运行 `sudo ./install.sh`，默认目录为 `/opt/soft/sgate`。安装包包含两端程序、配置模板和 Web 文件。安装会保留已有配置和密钥，且不启动服务。
 
-**Windows** 解压客户端包，编辑 `conf/sgate-client.cf`，再用 `bin/sgate-control.exe` 启动客户端并打开管理页。首次配置需将服务端使用的共享密钥安全地复制到客户端。 [Windows 构建和部署](docs/vpn.md#windows-客户端)
+**Windows** 双击安装包，安装完成后从开始菜单打开 **sgate Client**。也可解压便携包，运行 `bin/sgate-control.exe`。首次连接服务器前需配置服务器地址和共享密钥。 [Windows 构建和部署](docs/vpn.md#windows-客户端)
 
-**从源码构建** 需要 Go 1.24 或更新版本。运行 `make build`，再用 `sudo make install` 安装；跨平台打包可运行 `./package/package-release.sh ubuntu amd64` 或 `./package/package-release.sh macos arm64`。Windows 源码打包入口是 `package\build-windows.bat`。运行 `sgate-client -version` 或 `sgate-server -verbose` 可查看版本及构建信息。
+**从源码构建** 需要 Go 1.24 或更新版本。运行 `make build`，再用 `sudo make install` 安装；跨平台打包可运行 `./package/package-release.sh ubuntu amd64` 或 `./package/package-release.sh macos arm64`。Windows 安装包构建入口是 `package\build-windows-installer.bat`。运行 `sgate-client -version` 或 `sgate-server -verbose` 可查看版本及构建信息。
 
 ## 第一次跑通代理
 

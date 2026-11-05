@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/crypto/pbkdf2"
+	"sgate/internal/configfile"
 )
 
 const iterations = 600000
@@ -78,6 +80,28 @@ func validToken(s string) bool {
 	b, e := hex.DecodeString(s)
 	return e == nil && len(b) == 32 && s == strings.ToLower(s)
 }
+
+// InitialSetupToken returns the local bootstrap token only while the account
+// file is absent. An unreadable or invalid account file blocks setup as well.
+func (c Config) InitialSetupToken() string {
+	if _, err := os.Lstat(c.UsersFile); !os.IsNotExist(err) {
+		return ""
+	}
+	raw, err := regularRead(c.SetupTokenFile, 256)
+	if err != nil {
+		return ""
+	}
+	token := strings.TrimSpace(string(raw))
+	if !validToken(token) {
+		return ""
+	}
+	// Account creation publishes the account before removing the token.
+	if _, err := os.Lstat(c.UsersFile); !os.IsNotExist(err) {
+		return ""
+	}
+	return token
+}
+
 func validName(s string) bool {
 	n := utf8.RuneCountInString(s)
 	if n < 3 || n > 64 {
@@ -160,12 +184,8 @@ func New(c Config, v View) (*Handler, error) {
 	if e := os.MkdirAll(filepath.Dir(c.SetupTokenFile), 0700); e != nil {
 		return nil, e
 	}
-	if e := os.MkdirAll(c.SessionDir, 0700); e != nil {
-		return nil, e
-	}
-	st, e := os.Lstat(c.SessionDir)
-	if e != nil || !st.IsDir() || st.Mode().Perm()&0077 != 0 {
-		return nil, errors.New("session-dir must be a private directory (mode 0700)")
+	if e := configfile.PrivateDirectory(c.SessionDir); e != nil {
+		return nil, fmt.Errorf("initialize management session directory: %w", e)
 	}
 	h := &Handler{cfg: c, view: v, attempts: make(map[string]attempt), authGate: make(chan struct{}, 1), probeGate: make(chan struct{}, 4)}
 	path, _ := filepath.Abs(c.UsersFile)
@@ -186,20 +206,7 @@ func New(c Config, v View) (*Handler, error) {
 		if e != nil {
 			return nil, e
 		}
-		f, e := os.OpenFile(c.SetupTokenFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-		if e == nil {
-			_, e = f.WriteString(token + "\n")
-			if e == nil {
-				e = f.Sync()
-			}
-			ce := f.Close()
-			if e == nil {
-				e = ce
-			}
-			if e != nil {
-				return nil, e
-			}
-		} else if !os.IsExist(e) {
+		if _, e := configfile.CreatePrivate(c.SetupTokenFile, []byte(token+"\n")); e != nil {
 			return nil, e
 		}
 		b, e := regularRead(c.SetupTokenFile, 256)
@@ -211,7 +218,7 @@ func New(c Config, v View) (*Handler, error) {
 		return nil, e
 	}
 	h.mu.Lock()
-	e = h.cleanSessions(time.Now())
+	e := h.cleanSessions(time.Now())
 	h.mu.Unlock()
 	if e != nil {
 		return nil, e

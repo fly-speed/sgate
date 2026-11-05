@@ -1,0 +1,16 @@
+{
+  "RT_GROUP_ICON": {
+    "#1": {
+      "0000": ["sgate.png"]
+    }
+  },
+  "RT_MANIFEST": {
+    "#1": {
+      "0409": {
+        "execution-level": "as invoker",
+        "dpi-awareness": "system",
+        "use-common-controls-v6": true
+      }
+    }
+  }
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -60,7 +61,7 @@ func TestStartupInitializesMissingProxyFile(t *testing.T) {
 				t.Fatal("empty initialization lost single-proxy settings")
 			}
 			st, _ := os.Stat(path)
-			if st.Mode().Perm() != 0600 {
+			if runtime.GOOS != "windows" && st.Mode().Perm() != 0600 {
 				t.Fatal("new file not private")
 			}
 			// Repeated startup reads rather than replacing the persisted document.

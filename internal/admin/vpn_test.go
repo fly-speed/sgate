@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -182,6 +183,9 @@ func TestVPNEnableFailureExplainsForeignOptionsAndPreservesConfig(t *testing.T) 
 }
 
 func TestLegacyServerVPNConfigCanEnableBothModesFromWeb(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not support VPN server mode")
+	}
 	for _, mode := range []string{"both", "only"} {
 		for _, format := range []string{"plain", "service"} {
 			t.Run(mode+"/"+format, func(t *testing.T) {

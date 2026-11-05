@@ -13,11 +13,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sync"
 	"time"
 
 	"sgate/internal/cli"
+	"sgate/internal/configfile"
 	"sgate/internal/tunnel"
 	"sgate/internal/vpn"
 )
@@ -250,7 +250,7 @@ func atomicFile(path string, data []byte) error {
 	}
 	name := f.Name()
 	defer os.Remove(name)
-	if e = f.Chmod(0600); e == nil {
+	if e = configfile.ProtectFile(f); e == nil {
 		_, e = f.Write(data)
 	}
 	if e == nil {
@@ -265,21 +265,9 @@ func atomicFile(path string, data []byte) error {
 	if e = os.Rename(name, path); e != nil {
 		return e
 	}
-	return syncDirectory(filepath.Dir(path))
+	return configfile.SyncDirectory(filepath.Dir(path))
 }
 
-func syncDirectory(path string) error {
-	// Windows does not support FlushFileBuffers on directory handles.
-	if runtime.GOOS == "windows" {
-		return nil
-	}
-	dir, e := os.Open(path)
-	if e != nil {
-		return e
-	}
-	defer dir.Close()
-	return dir.Sync()
-}
 func regularRead(path string, limit int64) ([]byte, error) {
 	st, e := os.Lstat(path)
 	if e != nil {

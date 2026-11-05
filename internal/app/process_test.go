@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -104,7 +105,8 @@ func TestManagementRealProcessRestartAndExpiry(t *testing.T) {
 				if child == nil {
 					return
 				}
-				if crash {
+				force := crash || runtime.GOOS == "windows" // Process.Signal cannot send Interrupt on Windows.
+				if force {
 					e = child.Process.Kill()
 				} else {
 					e = child.Process.Signal(os.Interrupt)
@@ -116,7 +118,7 @@ func TestManagementRealProcessRestartAndExpiry(t *testing.T) {
 				go func() { done <- child.Wait() }()
 				select {
 				case err := <-done:
-					if !crash && err != nil {
+					if !force && err != nil {
 						b, _ := os.ReadFile(log.Name())
 						t.Errorf("child exit: %v %s", err, b)
 					}
