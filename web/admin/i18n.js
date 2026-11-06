@@ -160,6 +160,7 @@ const sgateI18n = (() => {
  "可选 TLS/TCP 与 WSS 共用监听，例如 0.0.0.0:8444；可与 VPN UDP 使用相同数字端口，不能与其他 TCP 服务共用。": "Optional shared TLS/TCP and WSS listener, e.g. 0.0.0.0:8444. May use the VPN UDP port number, but cannot share another TCP listener.",
  "独立 QUIC UDP 监听，不能与 quic-listen 共用 UDP 端口；配置 TCP 监听后可留空以关闭 UDP。": "Separate QUIC UDP listener; cannot share quic-listen's UDP port. Leave empty to disable UDP when a TCP listener is configured.",
  "quic://、tcp:// 或 wss://证书域名:8444/vpn；tcp 也使用 TLS，TCP/WSS 需服务端启用 vpn-tcp-listen。": "quic://, tcp:// or wss://certificate-host:8444/vpn; TCP also uses TLS. TCP/WSS requires vpn-tcp-listen on the server.",
+ "udp://、quic://、tcp:// 或 wss://主机:端口/vpn；UDP 对应 vpn-udp-listen，TCP/WSS 对应 vpn-tcp-listen。": "Use udp://, quic://, tcp://, or wss:// with host:port/vpn. UDP uses vpn-udp-listen, and TCP/WSS uses vpn-tcp-listen.",
  "可选 TLS/TCP 与 WSS 共用监听，可与 VPN UDP 使用同一数字端口；两种监听至少填写一个。": "Optional shared TLS/TCP and WSS listener; may use the VPN UDP port number. Configure at least one listener.",
  "VPN 独立 UDP 地址；启用 TCP 监听后可留空，不能与 quic-listen 共用 UDP 端口。": "Separate VPN UDP address; may be empty when TCP is enabled. Cannot share quic-listen's UDP port.",
  "拥塞窗口/在途：": "Congestion window/in flight: ",

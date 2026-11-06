@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="336" viewBox="0 0 960 336" role="img" aria-labelledby="title desc">
+  <title id="title">sgate TCP forwarding and VPN data paths</title>
+  <desc id="desc">TCP forwarding carries local connections to a selected backend. The IPv4 VPN carries packets selected by system routes through TUN interfaces.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0l8 4-8 4z" fill="#456577"/>
+    </marker>
+    <style>
+      text { font-family: system-ui, sans-serif; fill: #172f3b; }
+      .heading { font-size: 20px; font-weight: 700; }
+      .caption { font-size: 13px; fill: #375562; }
+      .node { fill: #fff; stroke: #abc2ca; }
+      .label { font-size: 15px; font-weight: 650; text-anchor: middle; }
+      .detail { font-size: 13px; fill: #375562; text-anchor: middle; }
+      .path { fill: none; stroke: #456577; stroke-width: 2; marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect x="1" y="1" width="958" height="156" rx="18" fill="#edf7f4" stroke="#c3ddd5"/>
+  <rect x="1" y="178" width="958" height="156" rx="18" fill="#eff4fc" stroke="#c6d6ec"/>
+  <text x="25" y="35" class="heading">01 · TCP port forwarding</text>
+  <text x="25" y="59" class="caption">Map selected ports while applications keep using their own protocols.</text>
+  <text x="25" y="212" class="heading">02 · Independent IPv4 VPN</text>
+  <text x="25" y="236" class="caption">System routes determine which IPv4 packets enter the tunnel.</text>
+  <g>
+    <rect class="node" x="25" y="82" width="174" height="55" rx="9"/>
+    <rect class="node" x="239" y="82" width="152" height="55" rx="9"/>
+    <rect class="node" x="569" y="82" width="152" height="55" rx="9"/>
+    <rect class="node" x="761" y="82" width="174" height="55" rx="9"/>
+    <text class="label" x="112" y="104">Local application</text><text class="detail" x="112" y="123">Mapped TCP port</text>
+    <text class="label" x="315" y="113">sgate-client</text>
+    <text class="label" x="645" y="113">sgate-server</text>
+    <text class="label" x="848" y="104">Remote backend</text><text class="detail" x="848" y="123">SSH / Database / Web</text>
+    <path class="path" d="M199 109h33"/><path class="path" d="M391 109h170"/><path class="path" d="M721 109h33"/>
+    <text class="detail" x="480" y="97">WS / WSS / QUIC</text>
+    <text class="detail" x="480" y="130">Encrypted proxy tunnel</text>
+  </g>
+  <g transform="translate(0 177)">
+    <rect class="node" x="25" y="82" width="174" height="55" rx="9"/>
+    <rect class="node" x="239" y="82" width="152" height="55" rx="9"/>
+    <rect class="node" x="569" y="82" width="152" height="55" rx="9"/>
+    <rect class="node" x="761" y="82" width="174" height="55" rx="9"/>
+    <text class="label" x="112" y="104">Local application</text><text class="detail" x="112" y="123">Selected by system routes</text>
+    <text class="label" x="315" y="104">sgate-client</text><text class="detail" x="315" y="123">TUN interface</text>
+    <text class="label" x="645" y="104">sgate-server</text><text class="detail" x="645" y="123">TUN interface</text>
+    <text class="label" x="848" y="104">Remote network</text><text class="detail" x="848" y="123">IPv4 forwarding</text>
+    <path class="path" d="M199 109h33"/><path class="path" d="M391 109h170"/><path class="path" d="M721 109h33"/>
+    <text class="detail" x="480" y="97">UDP / QUIC / TCP / WSS</text>
+    <text class="detail" x="480" y="130">Encrypted IP tunnel</text>
+  </g>
+</svg>

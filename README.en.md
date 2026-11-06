@@ -6,7 +6,7 @@ Version `1.5.1` · [简体中文](README.md)
 
 Use sgate to reach selected TCP services such as SSH, databases, and internal web apps, or enable the IPv4 VPN to route traffic from multiple applications through a virtual network interface. The two modes can run together and are configurable from the web interface.
 
-![TCP forwarding and IPv4 VPN data paths](docs/images/sgate-paths.svg)
+![TCP forwarding and IPv4 VPN data paths](docs/images/sgate-paths.en.svg)
 
 ## Choose a mode
 
@@ -82,43 +82,43 @@ Use the [web setup wizard](#web-setup-wizard) below, or configure the VPN manual
 
 For per-user access, configure **VPN accounts** on both ends. VPN credentials are separate from proxy credentials and web administrator accounts. Review `vpn-routes` and DNS settings before starting. The sample's two IPv4 `/1` routes cover the entire IPv4 address space. [VPN routing, permissions, and standalone CLI (Chinese)](docs/vpn.md) · [DTLS/UDP transport (Chinese)](docs/vpn-udp.md)
 
-![Client VPN parameters, with save and connection test controls next to the VPN address](docs/images/vpn-settings.png)
+![Client VPN parameters, with save and connection test controls next to the VPN address](docs/images/vpn-settings.en.png)
 
 ## Web setup wizard
 
-Configure the server first. Sign in to each web interface and select **VPN setup wizard** in the sidebar. The screenshots show the Chinese interface with a QUIC example.
+Configure the server first. Sign in to each web interface and select **VPN setup wizard** in the sidebar. The wizard screenshots show a UDP example.
 
 ### Server
 
-1. **Listener settings.** Choose **Proxy and VPN** or **VPN only**, and set at least one listener. The QUIC example uses `0.0.0.0:8444`. For QUIC, TCP, or WSS, provide a matching TLS certificate and private key or reuse the existing TLS files. Check the shared key, VPN subnet, MTU, and the forwarding and NAT settings for your deployment.
+1. **Listener settings.** Choose **Proxy and VPN** or **VPN only**, and set at least one listener. The UDP example uses `0.0.0.0:8445`. For QUIC, TCP, or WSS, provide a matching TLS certificate and private key or reuse the existing TLS files. Check the shared key, VPN subnet, MTU, and the forwarding and NAT settings for your deployment.
 2. **VPN accounts.** For per-user authentication, enter a username and password and click **Add VPN account**. The account is saved immediately. Skip this step for shared-key-only access.
 3. **Save and apply.** Click **Save and apply VPN settings**. The server attempts to start the listeners automatically. Check their status in **Overview**.
 
-![Server wizard step 1, with the operating mode and listener settings](docs/images/vpn-wizard-server-1.png)
+![Server wizard step 1, with the operating mode and listener settings](docs/images/vpn-wizard-server-1.en.png)
 
 <details>
 <summary>View server wizard steps 2 and 3</summary>
 
-![Server wizard step 2, VPN accounts](docs/images/vpn-wizard-server-2.png)
+![Server wizard step 2, VPN accounts](docs/images/vpn-wizard-server-2.en.png)
 
-![Server wizard step 3, save and apply](docs/images/vpn-wizard-server-3.png)
+![Server wizard step 3, save and apply](docs/images/vpn-wizard-server-3.en.png)
 
 </details>
 
 ### Client
 
-1. **Connection settings.** Choose the operating mode and enter the server URL, for example `quic://vpn.example.com:8444/vpn`. Use the same shared key, subnet, and MTU as the server. Supply a trusted PEM certificate for a self-signed certificate or private CA.
+1. **Connection settings.** Choose the operating mode and enter the server URL, for example `udp://vpn.example.com:8445/vpn`. Use the same shared key, subnet, and MTU as the server. Supply a trusted PEM certificate for a self-signed certificate or private CA.
 2. **VPN accounts.** If the server requires an account, enter its username and password and click **Save VPN credentials** before continuing. Skip this step for shared-key-only access.
 3. **Test and apply.** Use **Test VPN connection** to check connectivity, authentication, and echo with the current settings and saved credentials. Then choose **Save and apply VPN settings** and start the VPN from **Overview**, or choose **Save, apply, and start VPN** to start it from the wizard and see the connection status there.
 
-![Client wizard step 1, with the VPN server URL and shared key controls](docs/images/vpn-wizard-client-1.png)
+![Client wizard step 1, with the VPN server URL and shared key controls](docs/images/vpn-wizard-client-1.en.png)
 
 <details>
 <summary>View client wizard steps 2 and 3</summary>
 
-![Client wizard step 2, VPN account](docs/images/vpn-wizard-client-2.png)
+![Client wizard step 2, VPN account](docs/images/vpn-wizard-client-2.en.png)
 
-![Client wizard step 3, test and apply](docs/images/vpn-wizard-client-3.png)
+![Client wizard step 3, test and apply](docs/images/vpn-wizard-client-3.en.png)
 
 </details>
 
