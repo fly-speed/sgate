@@ -1,28 +1,39 @@
-# 专用配置示例
+# 配置示例
 
-正式部署使用项目根目录的 `sgate-client.cf` 和 `sgate-server.cf`。客户端通过 `proxies` 配置多个本地监听和远程后端；服务端通过目标允许列表及 `/tunnel?addr=host:port` 服务多个后端，不必按 SSH、VPN、Web 各启动一套进程。
+[English](#configuration-examples)
 
-本目录保留原有 SSH、VPN、Web 专用配置和四份 SSH 启停脚本，便于参考或单独部署。业务地址、密码、证书和其它应用参数保持原值；管理页面和账号、会话路径已按新的目录层级调整。外部密钥、证书及 `acl_master` 需自行准备，示例不会自动注册或启动。
+部署时从项目根目录的 `sgate-client.cf` 和 `sgate-server.cf` 开始。客户端可通过 `proxies` 或 `proxies-file` 配置多条映射。由客户端显式指定的后端须加入服务端的 `allowed-targets`。
 
-- `ssh-client.cf`、`ssh-server.cf`：SSH 专用示例。
-- `vpn-client.cf`、`vpn-server.cf`：TCP OpenVPN 专用示例。
-- `web-client.cf`：Web 代理客户端示例。
-- `sshc-start.sh`、`sshc-stop.sh`、`sshd-start.sh`、`sshd-stop.sh`：只操作本目录对应的 SSH 配置，支持 `MASTER_CTL` 环境变量。
+| 示例 | 用途 |
+| --- | --- |
+| `ssh-client.cf`、`ssh-server.cf` | 转发 SSH。配套 `sshc-*.sh` 和 `sshd-*.sh` 只操作对应示例，可用 `MASTER_CTL` 指定管理命令 |
+| `web-client.cf` | 转发内网 Web 服务 |
+| `vpn-client.cf`、`vpn-server.cf` | 通过 TCP 代理转发 OpenVPN |
+| `sgate-vpn-client.conf`、`sgate-vpn-server.conf` | 供独立 `sgate-vpn` 命令读取的 IPv4 VPN 配置。集成 VPN 在两端的主 `.cf` 中设置 `vpn-*` 参数 |
+| `windows-client.cf` | Windows 客户端打包模板 |
+| `sgate-proxies.json` | 通过客户端 `proxies-file` 加载多条映射，每条映射可使用单独的凭据 |
+| `sgate-accounts.json` | 通过服务端 `accounts-file` 加载代理账号。客户端用 `username` 和 `password` 登录 |
+| `sgate-reverse-accounts.json` | 为同一代理账号配置多条反向 TCP 映射。`listen` 在服务端绑定，`target` 由客户端连接 |
 
-从源码目录参考配置运行，例如 `./bin/sgate-client -alone -f samples/ssh-client.cf`。首次使用应核对地址、认证密码、密钥和证书，按部署环境修改配置。
+部署前修改示例中的地址、密码、密钥和证书路径。JSON 账号示例默认禁用，修改凭据后再启用所需条目。包含密码的 JSON 文件应限制访问权限，例如在 Unix 上设置为 `0600`。反向代理还需客户端对每条映射显式授权（JSON 中设为 `"allow_reverse": true`）。旧式单映射配置使用 `allow-reverse = true`。
 
-`make install` 把本目录安装到 `${PREFIX}/samples/`，正式配置仅放在 `${PREFIX}/conf/sgate-client.cf`、`${PREFIX}/conf/sgate-server.cf`；默认 `${PREFIX}` 为 `/opt/soft/sgate`。重复安装保留已存在的示例配置，更新模板另存为 `.cf.dist`。
+Unix 安装将所选角色的示例放在 `${PREFIX}/samples/`，主配置放在 `${PREFIX}/conf/`。重复安装保留已有配置，将更新过的模板另存为 `.dist` 文件。若从旧的专用服务迁移，先停止对应服务，再将监听和后端合并到主配置。测试证书和公开测试私钥仅用于本机验证。 [测试证书说明](test-tls/README.md) · [VPN 指南](../docs/vpn.md)
 
-`test-tls/` 包含安装测试用的自签名证书及公开测试私钥，两端安装均包含，证书和私钥安装到 `${PREFIX}/conf/`；仅适用于 localhost/127.0.0.1/::1，不会自动启用，不用于生产。配置方法见 [测试证书说明](test-tls/README.md)。重复安装保留已有证书对。
+## Configuration examples
 
-旧版本已安装在 `conf/` 的 SSH、VPN、Web 配置及旧启停脚本会保留，不会由安装程序自动删除。迁移前请先停止对应的旧服务，把需要的监听和后端映射合并到正式配置，再启用统一服务；确认后自行归档旧部署文件。
+Start with the root-level `sgate-client.cf` and `sgate-server.cf`. The client can define multiple mappings through `proxies` or `proxies-file`. Add any backend explicitly selected by the client to the server's `allowed-targets`.
 
-`sgate-accounts.json` is a disabled example of server tunnel accounts (not Web administrator accounts). Copy it to a private configuration location, replace passwords, enable the required accounts, and set server `accounts-file` to that path. Client `username` and `password` select the account. Protect this file with mode 0600 and reload the server proxy after editing it.
+| Example | Use |
+| --- | --- |
+| `ssh-client.cf`, `ssh-server.cf` | Forward SSH. The accompanying `sshc-*.sh` and `sshd-*.sh` scripts operate on these examples and accept the `MASTER_CTL` environment variable |
+| `web-client.cf` | Forward an internal web service |
+| `vpn-client.cf`, `vpn-server.cf` | Forward OpenVPN over TCP |
+| `sgate-vpn-client.conf`, `sgate-vpn-server.conf` | Configure the standalone `sgate-vpn` command. For integrated VPN, set the `vpn-*` options in the main `.cf` files |
+| `windows-client.cf` | Windows client packaging template |
+| `sgate-proxies.json` | Load multiple client mappings through `proxies-file`, with optional per-mapping credentials |
+| `sgate-accounts.json` | Load server tunnel accounts through `accounts-file`. Clients authenticate with `username` and `password` |
+| `sgate-reverse-accounts.json` | Configure multiple reverse TCP mappings for one account. `listen` binds on the server and the client connects to `target` |
 
-`sgate-proxies.json` is a client mapping-file example with independent credentials per mapping. Copy it to a private configuration directory, change its addresses/passwords, set mode 0600, and select it with `proxies-file`. It is not enabled automatically.
+Update the example addresses, passwords, key paths, and certificate paths before deployment. The JSON account examples ship disabled. Change the credentials before enabling an account. Restrict access to JSON files containing passwords, for example with mode `0600` on Unix. For reverse forwarding, grant consent on each intended client mapping with `"allow_reverse": true`. Legacy single-mapping configurations use `allow-reverse = true`.
 
-`sgate-reverse-accounts.json` demonstrates multiple server-side reverse TCP listeners for one account. `listen` binds on the server; `target` is reached from the authenticated client network. The example account is disabled. Replace its password and addresses, enable it, and apply it through server `accounts-file`. Both endpoints need reverse proxy support.
-
-Client mappings deny server reverse proxy access by default. In the client mapping form, explicitly check Allow server reverse proxy for each intended row (`"allow_reverse": true` in JSON). Other rows do not inherit it. Legacy single-proxy mode uses `allow-reverse = true`, default false.
-
-`sgate-vpn-client.conf` / `sgate-vpn-server.conf` 是独立 VPN 示例，由 `sgate-vpn` 读取；原 `vpn-client.cf` / `vpn-server.cf` 仍是 TCP OpenVPN 代理示例，二者不可混用。参见 [独立 VPN 文档](../docs/vpn.md)。
+On Unix, installation places examples for the selected roles in `${PREFIX}/samples/` and the main configuration in `${PREFIX}/conf/`. Reinstalling preserves existing configuration and writes updated templates to `.dist` files. To migrate from older dedicated services, stop them before merging their listeners and targets into the main configuration. Use the bundled test certificate and public test private key for local verification only. [Test TLS instructions](test-tls/README.md) · [VPN guide (Chinese)](../docs/vpn.md)

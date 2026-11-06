@@ -1,6 +1,6 @@
 # sgate 部署与测试参考
 
-[返回上手指南](../README.md)
+[返回上手指南](../README.md) · [English reference](reference.en.md)
 
 本页保留详细配置、协议边界和历史回归记录。命令默认从项目根目录执行，历史测试结果以各段注明的版本、平台和条件为准。
 
@@ -14,7 +14,8 @@ Go 编写的通用 TCP 加密通道，支持 TCP 上的 WS/WSS 和 UDP 上的 QU
 实现说明：[整体架构与隧道协议](../docs/architecture.md)。
 
 
-新增独立 IPv4 VPN 入口 `sgate-vpn`：macOS/Linux 服务端及客户端通过 TUN＋QUIC DATAGRAM 直接传输 IP 包，不依赖 OpenVPN。也已集成至 `sgate-client` / `sgate-server` 的管理网页，在“独立 VPN”分组选择关闭、共存或仅 VPN 模式；客户端启动后 VPN 保持停止，通过实时概览的启动/停止按钮手动控制；另提供不改变系统网络的连接/认证/数据报回显测试按钮；两端可通过 `vpn-noise-rate` 等参数独立配置 VPN 白噪音。使用 `make build` 更新现有程序；独立入口使用 `make vpn` / `make install-vpn`；配置、权限、路由/DNS 恢复及未完成的系统级实测范围见 [独立 VPN 文档](../docs/vpn.md)。
+独立 IPv4 VPN 可通过 `sgate-client` 和 `sgate-server` 的「VPN 配置」启用，支持 QUIC、UDP、TLS/TCP 和 WSS。客户端在实时概览手动启动和停止 VPN，也可在参数页测试连接、认证和回显。独立命令 `sgate-vpn` 使用 `make vpn` 构建、`make install-vpn` 安装。配置、权限、路由和 DNS 恢复、各平台验证状态见 [独立 VPN 指南](vpn.md)。
+
 
 ## UDP / QUIC 隧道
 

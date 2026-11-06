@@ -2,7 +2,7 @@
 
 **加密 TCP 端口代理 · 独立 IPv4 VPN**
 
-当前版本 `1.5.0` · [English documentation](README.en.md)
+当前版本 `1.5.1` · [English documentation](README.en.md)
 
 sgate 用两个进程连接本地与远端网络。只需访问 SSH、数据库或内网 Web 服务时，映射所需 TCP 端口即可。希望应用按系统路由访问远端网络时，可以启用独立 VPN。两种模式可同时运行，并可通过 Web 管理界面配置和观察。
 
@@ -20,27 +20,27 @@ sgate 用两个进程连接本地与远端网络。只需访问 SSH、数据库�
 
 ## 快速安装
 
-**macOS / Ubuntu** 选择对应架构的 `sgate-1.5.0-<系统>-<架构>.tar.gz`。Apple Silicon 用 `arm64`，Intel Mac 和常见 x86_64 Ubuntu 用 `amd64`。解压后运行包内的安装脚本。以下用 Apple Silicon 和用户目录举例。
+**macOS / Ubuntu** 选择对应架构的 `sgate-1.5.1-<系统>-<架构>.tar.gz`。Apple Silicon 和 ARM64 Ubuntu 用 `arm64`，Intel Mac 和常见 x86_64 Ubuntu 用 `amd64`。解压后运行包内的安装脚本。以下用 Apple Silicon 和用户目录举例。
 
 ```sh
-shasum -a 256 -c sgate-1.5.0-macos-arm64.tar.gz.sha256  # Ubuntu 可用 sha256sum -c
-tar -xzf sgate-1.5.0-macos-arm64.tar.gz
-cd sgate-1.5.0-macos-arm64
+shasum -a 256 -c sgate-1.5.1-macos-arm64.tar.gz.sha256  # Ubuntu 可用 sha256sum -c
+tar -xzf sgate-1.5.1-macos-arm64.tar.gz
+cd sgate-1.5.1-macos-arm64
 PREFIX="$HOME/.local/sgate" ./install.sh
 ```
 
 系统级安装可运行 `sudo ./install.sh`，默认目录为 `/opt/soft/sgate`。安装包包含两端程序、配置模板和 Web 文件。安装会保留已有配置和密钥，且不启动服务。
 
-**Windows** 双击安装包，安装完成后从开始菜单打开 **sgate Client**。也可解压便携包，运行 `bin/sgate-control.exe`。首次连接服务器前需配置服务器地址和共享密钥。 [Windows 构建和部署](docs/vpn.md#windows-客户端)
+**Windows** 双击安装包，安装完成后从开始菜单打开 **sgate Client**。也可解压便携包，运行 `bin/sgate-control.exe`。首次连接服务器前需配置服务器地址和共享密钥。使用 VPN 时，以管理员权限运行客户端，并将与客户端架构匹配的 `wintun.dll` 放在 `sgate-client.exe` 同目录。 [Windows 构建和部署](docs/vpn.md#windows-客户端)
 
-**从源码构建** 需要 Go 1.24 或更新版本。运行 `make build`，再用 `sudo make install` 安装；跨平台打包可运行 `./package/package-release.sh ubuntu amd64` 或 `./package/package-release.sh macos arm64`。Windows 安装包构建入口是 `package\build-windows-installer.bat`。运行 `sgate-client -version` 或 `sgate-server -verbose` 可查看版本及构建信息。
+**从源码构建** 需要 Go 1.24 或更新版本。在仓库根目录运行 `make build`，将客户端、服务端和独立 `sgate-vpn` 编译到 `bin/`，再用 `sudo make install` 安装；跨平台打包可运行 `./package/package-release.sh ubuntu amd64` 或 `./package/package-release.sh macos arm64`。Windows 安装包构建入口是 `package\build-windows-installer.bat`。运行 `sgate-client -version` 查看版本，或用 `sgate-server -verbose` 同时查看构建时间。
 
 ## 第一次跑通代理
 
-以下用同一台 macOS 或 Ubuntu 机器验证。默认模板让客户端的 `127.0.0.1:9000` 经服务端的 `127.0.0.1:8081` 访问后端 `127.0.0.1:8080`。
+以下用同一台 macOS 或 Ubuntu 机器验证。默认模板让客户端的 `127.0.0.1:9000` 经服务端的 `127.0.0.1:8081` 访问后端 `127.0.0.1:8080`。若示例端口已被占用，请选用空闲端口，并同步修改两端的 `.cf`、客户端的 `conf/sgate-proxies.json` 和下方命令。
 
-1. 在安装目录的 `conf/sgate-client.cf` 和 `conf/sgate-server.cf` 中，把示例 `password` 改成相同的自选密码。同一次安装已生成两端共用的 `conf/sgate.key`。
-2. 分别打开三个终端，运行下面的三条服务命令。若用的是系统级安装，将 `$HOME/.local/sgate` 换成实际安装目录，并以有权读取配置的用户运行。
+1. 在安装目录的 `conf/sgate-client.cf` 和 `conf/sgate-server.cf` 中，把示例 `password` 改成相同的自选密码。同一安装目录下的两端共用 `conf/sgate.key`。
+2. 分别打开三个终端，运行下面的三个程序（HTTP 后端需要 Python 3）。若用的是系统级安装，将 `$HOME/.local/sgate` 换成实际安装目录，并以有权读取配置的用户运行。
 
 ```sh
 # 终端 1：启动仅供测试的 HTTP 后端
@@ -58,7 +58,7 @@ python3 -m http.server 8080 --bind 127.0.0.1 --directory "$demo"
 curl --noproxy '*' http://127.0.0.1:9000/
 ```
 
-3. 打开客户端管理页 `http://127.0.0.1:9081/` 和服务端管理页 `http://127.0.0.1:8081/admin/`。首次登录按提示读取各自 `admin_setup_token_file` 指定的文件，并创建独立的 Web 管理员账号。
+3. 打开客户端管理页 `http://127.0.0.1:9081/` 和服务端管理页 `http://127.0.0.1:8081/admin/`。首次登录按启动日志提示读取初始化令牌文件（由各自的 `admin_setup_token_file` 指定），并创建独立的 Web 管理员账号。
 
 部署到两台机器时，客户端在「代理配置 → 代理映射」填写服务端地址，服务端填写后端目标，并只开放所需的监听。两端使用相同的共享密钥及匹配的代理凭据。若映射单独指定后端，将它加入服务端 `allowed-targets`。跨公网使用 WSS 或 QUIC 时，配置证书并校验服务端名称。 [部署参考与反向代理](docs/reference.md) · [配置示例](samples/README.md)
 
@@ -66,14 +66,56 @@ curl --noproxy '*' http://127.0.0.1:9000/
 
 ## 启用独立 VPN
 
+可以使用下方的 [Web 配置向导](#web-配置向导)，也可以在「VPN 参数」页手动配置。
+
 1. **服务端** 在「VPN 配置 → VPN 参数」把 `vpn-mode` 设为 `both`（代理与 VPN 共存）或 `only`（仅 VPN），选择监听地址并应用。TCP 和 WSS 共用 `vpn-tcp-listen`，QUIC 使用 `vpn-listen`，纯 UDP 使用 `vpn-udp-listen`。
-2. **客户端** 选择对应模式，填写 `vpn-server`，例如 `quic://vpn.example.com:8444/vpn`。两端的 VPN 子网、MTU 和共享密钥须匹配。使用私有 CA 时在客户端配置信任。服务端在认证后自动分配虚拟 IPv4 地址。
+2. **客户端** 选择对应模式，填写 `vpn-server`，例如 `quic://vpn.example.com:8444/vpn`。两端的 VPN 子网、MTU 和共享密钥须匹配。使用私有 CA 时，在客户端设置 `vpn-tls-ca` 或复用 `tls-ca`。服务端在认证后自动分配虚拟 IPv4 地址。
 3. 修改 URL 后，可以直接点保存图标右侧的「测试 VPN 连接」。测试使用当前表单，检查连接、认证和回显，无需保存，也不会接管系统路由。
 4. 保存并应用后，在客户端「实时概览」手动启动 VPN。进程启动或重启后仍需手动启动。停用时点击「停止 VPN」恢复网络设置。发现上次留下的恢复记录时，页面会提示先确认清理。
 
-需要按用户授权时，两端在「VPN 账号」页配置专用凭据。服务端可新增、修改、禁用和删除账号。代理账号、VPN 账号与 Web 管理员账号分别管理。 [VPN 完整部署、权限与路由说明](docs/vpn.md)
+启动前请检查 `vpn-routes` 和 DNS 设置。示例中的两条 IPv4 `/1` 路由覆盖全部 IPv4 地址。需要按用户授权时，两端在「VPN 账号」页配置专用凭据。服务端可新增、修改、禁用和删除账号。代理账号、VPN 账号与 Web 管理员账号分别管理。 [VPN 完整部署、权限与路由说明](docs/vpn.md)
 
 ![客户端 VPN 参数页。VPN 地址右侧是保存和连接测试图标](docs/images/vpn-settings.png)
+
+## Web 配置向导
+
+先配置服务端，再配置客户端。登录各自的 Web 管理页后，在侧栏选择「VPN 配置向导」。以下以 QUIC 为例。
+
+### 服务端
+
+1. **监听参数**。选择「代理与 VPN 共存」或「仅 VPN」，填写至少一个监听地址。QUIC 示例使用 `0.0.0.0:8444`。为 QUIC、TCP 或 WSS 配置匹配的 TLS 证书和私钥，或复用已有的 TLS 文件。确认共享密钥、VPN 子网和 MTU，并按部署环境设置转发和 NAT。
+2. **VPN 账号**。需要按用户认证时，填写用户名和密码，点击「新增 VPN 账号」。账号立即保存。仅使用共享密钥时可直接进入下一步。
+3. **保存与应用**。点击「保存并应用 VPN 配置」。服务端会自动尝试启动监听，在「实时概览」确认监听状态。
+
+![服务端向导第 1 步，选择运行模式和监听地址](docs/images/vpn-wizard-server-1.png)
+
+<details>
+<summary>查看服务端向导第 2、3 步</summary>
+
+![服务端向导第 2 步，VPN 账号](docs/images/vpn-wizard-server-2.png)
+
+![服务端向导第 3 步，保存与应用](docs/images/vpn-wizard-server-3.png)
+
+</details>
+
+### 客户端
+
+1. **连接参数**。选择运行模式，填写服务端提供的地址，例如 `quic://vpn.example.com:8444/vpn`。使用同一共享密钥，并匹配服务端的子网和 MTU。服务端使用自签名证书或私有 CA 时，提供可信的 PEM 证书。
+2. **VPN 账号**。服务端要求账号时，输入对应的用户名和密码，点击「保存 VPN 凭据」后继续。仅使用共享密钥时可跳过。
+3. **测试与应用**。点击「测试 VPN 连接」，用当前参数和已保存的凭据检查连通性、认证和回显。确认后可选择「保存并应用 VPN 配置」，再到「实时概览」手动启动，也可选择「保存、应用并启动 VPN」并在向导中查看连接状态。
+
+![客户端向导第 1 步，填写 VPN 服务端地址和共享密钥](docs/images/vpn-wizard-client-1.png)
+
+<details>
+<summary>查看客户端向导第 2、3 步</summary>
+
+![客户端向导第 2 步，VPN 账号](docs/images/vpn-wizard-client-2.png)
+
+![客户端向导第 3 步，测试与应用](docs/images/vpn-wizard-client-3.png)
+
+</details>
+
+客户端导入文件时立即写入配置目录，应用后才会使用新路径。服务端的「上传覆盖」会立即替换现有文件，包括代理共用的文件。两端应用时也会一并应用磁盘上待生效的配置，可能中断现有连接。
 
 ## 为什么这样设计
 
