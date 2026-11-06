@@ -128,6 +128,7 @@ type View struct {
 	ManageTunnelAccounts func(*TunnelAccountChange) (TunnelAccountsSnapshot, error)
 	ManageVPNAccounts    func(*VPNAccountChange) (VPNAccountsSnapshot, error)
 	ClientKeyPath        func() (string, error)
+	ServerVPNFilePaths   func() (map[string]string, error)
 	Apply                func() error
 	ApplyLive            func([]string) error
 	LiveFields           []string

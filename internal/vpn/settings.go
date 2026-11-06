@@ -131,7 +131,7 @@ func Prepare(role string, fs *flag.FlagSet) (*Prepared, error) {
 	if support := PlatformSupport(role); !support.Supported {
 		return nil, invalidFields(support.Reason, "vpn-mode")
 	}
-	keyPath := get("vpn-key-file")
+	keyPath := cli.NormalizeKeyFilePath(get("vpn-key-file"))
 	if keyPath == "" {
 		keyPath = get("key-file")
 	}

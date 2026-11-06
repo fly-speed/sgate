@@ -51,6 +51,15 @@ func TestIntegratedVPNPrepareIsOfflineAndValidatesBeforeTUN(t *testing.T) {
 	}
 }
 
+func TestIntegratedVPNQuotedEmptyKeyFileUsesSharedKey(t *testing.T) {
+	fs := integratedSettings(t)
+	fs.Set("vpn-mode", "only")
+	fs.Set("vpn-key-file", "''")
+	if _, err := Prepare("client", fs); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestIntegratedVPNCertificateVerificationOptIn(t *testing.T) {
 	fs := integratedSettings(t)
 	fs.Set("vpn-mode", "only")

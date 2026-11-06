@@ -40,7 +40,7 @@ func TestClientKeyEditingDoesNotExposeSecretAndChecksRevision(t *testing.T) {
 		save(rev, "invalid", csrf) != 400 || save(rev, next, csrf) != 200 || save(rev, old, csrf) != 409 {
 		t.Fatal("unexpected save response")
 	}
-	if content, err := os.ReadFile(path); err != nil || string(content) != strings.ToLower(next)+"\n" || !h.clientKeyPending {
+	if content, err := os.ReadFile(path); err != nil || string(content) != strings.ToLower(next)+"\n" || !h.credentialFilesPending {
 		t.Fatal("key was not saved or marked pending")
 	}
 }
@@ -96,5 +96,44 @@ func TestVPNClientFileImportStoresPrivateKeyWithoutChangingConfiguration(t *test
 	}
 	if content, err := os.ReadFile(h.view.AppConfigPath); err != nil || string(content) != string(original) {
 		t.Fatal("import changed the active configuration")
+	}
+}
+
+func TestVPNServerFileReplacementUsesCurrentConfiguredPathAndRevision(t *testing.T) {
+	h, cfg := adminFixture(t)
+	h.view.Role = "server"
+	cookie, csrf := setupAccount(t, h, cfg)
+	path := filepath.Join(t.TempDir(), "shared.key")
+	original, next := strings.Repeat("ab", 32), strings.Repeat("cd", 32)
+	if err := os.WriteFile(path, []byte(original), 0600); err != nil {
+		t.Fatal(err)
+	}
+	h.view.ServerVPNFilePaths = func() (map[string]string, error) {
+		return map[string]string{"vpn-key-file": path}, nil
+	}
+	w := request(h, "GET", "/api/vpn-server-files", nil, cookie, "", "")
+	if w.Code != 200 || strings.Contains(w.Body.String(), original) {
+		t.Fatalf("unexpected metadata response: %d", w.Code)
+	}
+	metadata := object(t, w)["vpn-key-file"].(map[string]any)
+	if metadata["path"] != path {
+		t.Fatal("wrong path in metadata")
+	}
+	save := func(field, value, token string) int {
+		w := request(h, "PUT", "/api/vpn-server-files", map[string]any{
+			"field": field, "revision": metadata["revision"], "content": value,
+		}, cookie, token, "")
+		if strings.Contains(w.Body.String(), next) {
+			t.Fatal("replacement key exposed")
+		}
+		return w.Code
+	}
+	if save("vpn-key-file", next, "") != 403 || save("vpn-key-file", "invalid", csrf) != 400 ||
+		save("vpn-tls-cert", next, csrf) != 409 || save("vpn-key-file", next, csrf) != 200 ||
+		save("vpn-key-file", original, csrf) != 409 {
+		t.Fatal("unexpected overwrite response")
+	}
+	if content, err := os.ReadFile(path); err != nil || string(content) != next+"\n" || !h.credentialFilesPending {
+		t.Fatal("key was not replaced or marked pending")
 	}
 }

@@ -138,6 +138,7 @@ func (c *controller) managementView() admin.View {
 		ManageTunnelAccounts: c.manageTunnelAccounts,
 		ManageVPNAccounts:    c.manageVPNAccounts,
 		ClientKeyPath:        c.clientKeyPath,
+		ServerVPNFilePaths:   c.serverVPNFilePaths,
 		ApplyLive:            c.applyLive,
 		LiveFields:           c.liveFields(),
 		Runtime:              c.status,

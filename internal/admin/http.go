@@ -137,6 +137,8 @@ func (h *Handler) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		h.clientKey(w, r)
 	case r.URL.Path == "/api/vpn-client-file" && r.Method == "POST":
 		h.importVPNClientFile(w, r)
+	case r.URL.Path == "/api/vpn-server-files" && (r.Method == "GET" || r.Method == "PUT"):
+		h.vpnServerFiles(w, r)
 	case r.URL.Path == "/api/vpn-accounts" && (r.Method == "GET" || r.Method == "PUT"):
 		h.vpnAccounts(w, r)
 	case r.URL.Path == "/api/stats" && r.Method == "GET":
@@ -272,7 +274,7 @@ func (h *Handler) applyProxy(w http.ResponseWriter, r *http.Request) {
 		problem(w, 409, e.Error())
 		return
 	}
-	h.clientKeyPending = false
+	h.credentialFilesPending = false
 	b, e := regularRead(h.view.AppConfigPath, 1<<20)
 	if e == nil {
 		h.startupRevision = h.restartDigest(b)
@@ -625,7 +627,7 @@ func (h *Handler) getConfig(w http.ResponseWriter) {
 		"fields":               fields,
 		"content":              redactConfig(b),
 		"revision":             configRevision,
-		"requires_restart":     h.restartDigest(b) != h.startupRevision || h.mappingRestartPending || h.clientKeyPending,
+		"requires_restart":     h.restartDigest(b) != h.startupRevision || h.mappingRestartPending || h.credentialFilesPending,
 		"vpn_restart_pending":  len(vpnRestartFields) != 0,
 		"vpn_restart_fields":   vpnRestartFields,
 		"path":                 h.view.AppConfigPath,
@@ -840,7 +842,7 @@ func (h *Handler) commitConfig(
 	if mappingSave != nil && h.view.ApplyLive != nil && !slices.Contains(live, "proxies") {
 		live = append(live, "proxies")
 	}
-	requiresRestart := h.restartDigest([]byte(content)) != h.startupRevision || h.mappingRestartPending || h.clientKeyPending
+	requiresRestart := h.restartDigest([]byte(content)) != h.startupRevision || h.mappingRestartPending || h.credentialFilesPending
 	// 有非热参数待应用时保持原重启流程，否则不触碰现有隧道和业务连接。
 	mappingLive := slices.Contains(live, "proxies-file") || slices.Contains(live, "proxies") || slices.Contains(live, "master_service")
 	restart := apply && (h.view.ApplyLive == nil || requiresRestart || len(live) == 0)
@@ -869,10 +871,10 @@ func (h *Handler) commitConfig(
 	}
 	if mappingLive {
 		h.mappingRestartPending = serviceRestart
-		requiresRestart = h.restartDigest([]byte(content)) != h.startupRevision || h.mappingRestartPending || h.clientKeyPending
+		requiresRestart = h.restartDigest([]byte(content)) != h.startupRevision || h.mappingRestartPending || h.credentialFilesPending
 	}
 	if restart {
-		h.clientKeyPending = false
+		h.credentialFilesPending = false
 		h.startupRevision = h.restartDigest([]byte(content))
 		h.startupContent = []byte(content)
 		h.vpnAccountRestartPending = false

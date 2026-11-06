@@ -557,6 +557,16 @@ header h1 {
   display: grid;
   gap: 6px;
 }
+.vpn-wizard-server-file-field,
+.vpn-wizard-server-file {
+  display: grid;
+  gap: 6px;
+}
+@container (min-width: 556px) {
+  .vpn-wizard-server-file {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
 .vpn-wizard-file-field {
   display: grid;
   align-content: start;
@@ -584,30 +594,33 @@ header h1 {
     padding-inline: 8px;
   }
 }
-.tunnel-account-create.vpn-wizard-account-form {
+.tunnel-account-create.vpn-account-credentials-form {
   align-items: end;
 }
-.vpn-wizard-account-field {
+.vpn-account-credential-field {
   display: grid;
   gap: 6px;
   min-width: 0;
 }
-.vpn-wizard-account-field label,
-.vpn-wizard-account-form input {
+.vpn-account-credential-field label,
+.vpn-account-credentials-form input {
   margin: 0;
 }
-.vpn-wizard-account-form input,
-.vpn-wizard-account-form button {
+.vpn-account-credentials-form input,
+.vpn-account-credentials-form button {
   min-height: 44px;
 }
-.vpn-wizard-account-form button[type="submit"] {
+.vpn-account-credentials-form button[type="submit"] {
   justify-self: start;
 }
-.vpn-wizard-password-row {
+.vpn-password-row {
   display: flex;
   gap: 6px;
 }
-.vpn-wizard-password-row button {
+.vpn-password-row > input {
+  margin: 0;
+}
+.vpn-password-row button {
   flex-shrink: 0;
   white-space: nowrap;
 }
@@ -1225,7 +1238,38 @@ html[lang="en"] nav button span {
   margin-bottom: 16px;
 }
 .tunnel-account-create { grid-template-columns: minmax(120px, 1fr) minmax(160px, 1fr) auto; }
-.vpn-account-row { grid-template-columns: minmax(120px, 1fr) minmax(160px, 1fr) auto auto; }
+.vpn-account-row {
+  grid-template-columns: minmax(120px, 1fr) minmax(160px, 1fr) auto auto;
+  align-items: end;
+}
+.vpn-account-row > .vpn-account-credential-field {
+  display: grid;
+  align-items: start;
+}
+.vpn-account-row input:not([type="checkbox"]),
+.vpn-account-row button,
+.vpn-account-row .vpn-account-disabled {
+  min-height: 44px;
+}
+.vpn-account-row input:not([type="checkbox"]) {
+  margin: 0;
+}
+#vpn-wizard-account-list {
+  margin: 8px 0 16px;
+  padding: 0;
+  list-style: none;
+}
+#vpn-wizard-account-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-block: 4px;
+  overflow-wrap: anywhere;
+}
+#vpn-wizard-account-list button {
+  flex-shrink: 0;
+}
 .tunnel-account-row { padding: 12px 0; border-bottom: 1px solid var(--border); }
 .tunnel-account-row strong { overflow-wrap: anywhere; }
 .tunnel-account-row label { display: flex; align-items: center; gap: 6px; margin: 0; }

@@ -129,5 +129,5 @@ func (h *Handler) restartVPN(w http.ResponseWriter, r *http.Request) {
 		runtime = h.view.Runtime()
 	}
 	pending := h.vpnRestartFields(current)
-	reply(w, 200, map[string]any{"ok": true, "runtime": runtime, "vpn_restart_pending": len(pending) != 0, "vpn_restart_fields": pending, "requires_restart": h.restartDigest(current) != h.startupRevision || h.mappingRestartPending || h.clientKeyPending})
+	reply(w, 200, map[string]any{"ok": true, "runtime": runtime, "vpn_restart_pending": len(pending) != 0, "vpn_restart_fields": pending, "requires_restart": h.restartDigest(current) != h.startupRevision || h.mappingRestartPending || h.credentialFilesPending})
 }

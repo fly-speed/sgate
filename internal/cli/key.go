@@ -8,7 +8,17 @@ import (
 	"sgate/internal/tunnel"
 )
 
+// NormalizeKeyFilePath handles empty values passed as literal quotes by a
+// service launcher or saved as text in the management UI.
+func NormalizeKeyFilePath(path string) string {
+	if path == "''" || path == "\"\"" {
+		return ""
+	}
+	return path
+}
+
 func LoadKey(path string) ([]byte, error) {
+	path = NormalizeKeyFilePath(path)
 	value := os.Getenv("SGATE_KEY")
 	if path != "" {
 		b, err := os.ReadFile(path)

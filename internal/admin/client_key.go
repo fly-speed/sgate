@@ -65,6 +65,6 @@ func (h *Handler) clientKey(w http.ResponseWriter, r *http.Request) {
 		problem(w, 500, "无法保存客户端共享密钥文件")
 		return
 	}
-	h.clientKeyPending = true
+	h.credentialFilesPending = true
 	reply(w, 200, map[string]bool{"ok": true})
 }
