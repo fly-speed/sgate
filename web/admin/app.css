@@ -434,6 +434,183 @@ header h1 {
 .chart-card {
   margin-bottom: 22px;
 }
+.vpn-wizard-card {
+  max-width: 780px;
+}
+#vpn-wizard-step {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+#vpn-wizard-parameters {
+  container-type: inline-size;
+}
+#vpn-wizard-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr));
+  gap: 16px;
+}
+#vpn-wizard-fields label,
+.vpn-wizard-key-heading {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  font-size: 13px;
+}
+#vpn-wizard-fields > div {
+  min-width: 0;
+}
+.vpn-wizard-connection-fields {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 8px 16px;
+  align-items: start;
+}
+.vpn-wizard-connection-fields > * {
+  min-width: 0;
+}
+@container (min-width: 556px) {
+  .vpn-wizard-connection-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .vpn-wizard-verification {
+    grid-area: 2 / 1;
+  }
+  .vpn-wizard-examples {
+    grid-area: 2 / 2;
+  }
+}
+#vpn-wizard-fields :is(input:not([type="checkbox"]), select, button) {
+  min-height: 44px;
+  min-width: 0;
+  margin: 0;
+}
+#vpn-wizard-fields select {
+  width: 100%;
+  font: inherit;
+  font-size: 14px;
+  color: #192d35;
+  background: white;
+  border: 1px solid #d8e0e6;
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+#vpn-wizard-fields input[type="file"] {
+  padding: 8px;
+}
+#vpn-wizard-fields .vpn-wizard-checkbox {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+.vpn-wizard-checkbox input[type="checkbox"] {
+  width: auto;
+}
+.vpn-wizard-checkbox small {
+  grid-column: 1 / -1;
+}
+.vpn-wizard-examples {
+  margin: 0;
+}
+.vpn-wizard-examples > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+}
+.vpn-wizard-examples > summary::-webkit-details-marker {
+  display: none;
+}
+.vpn-wizard-examples-arrow {
+  font-size: 18px;
+  line-height: 1;
+  transform: rotate(90deg);
+}
+.vpn-wizard-examples[open] .vpn-wizard-examples-arrow {
+  transform: rotate(-90deg);
+}
+.vpn-wizard-example {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.vpn-wizard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
+}
+#vpn-wizard-finish:not([hidden]) ~ .vpn-wizard-actions > button {
+  min-height: 44px;
+}
+@media (max-width: 680px) {
+  #vpn-wizard-finish:not([hidden]) ~ .vpn-wizard-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.vpn-wizard-import {
+  display: grid;
+  gap: 6px;
+}
+.vpn-wizard-file-field {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+@container (min-width: 556px) {
+  .vpn-wizard-file-field {
+    grid-row: span 3;
+    grid-template-rows: subgrid;
+  }
+  #vpn-wizard-fields.vpn-wizard-ca-hidden > .vpn-wizard-file-field:not([hidden]) {
+    grid-column: 1 / -1;
+    grid-row: auto;
+    grid-template-rows: none;
+  }
+  .vpn-wizard-file-field > small {
+    grid-row: 3;
+  }
+  .vpn-wizard-import {
+    grid-row: 2;
+    align-self: end;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 46%);
+  }
+  .vpn-wizard-import button {
+    padding-inline: 8px;
+  }
+}
+.tunnel-account-create.vpn-wizard-account-form {
+  align-items: end;
+}
+.vpn-wizard-account-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.vpn-wizard-account-field label,
+.vpn-wizard-account-form input {
+  margin: 0;
+}
+.vpn-wizard-account-form input,
+.vpn-wizard-account-form button {
+  min-height: 44px;
+}
+.vpn-wizard-account-form button[type="submit"] {
+  justify-self: start;
+}
+.vpn-wizard-password-row {
+  display: flex;
+  gap: 6px;
+}
+.vpn-wizard-password-row button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
 .chart-header {
   display: flex;
   justify-content: space-between;

@@ -57,6 +57,7 @@ func Settings(role string) []Setting {
 		Setting{"vpn-credentials-file", "", "VPN 客户端专用凭据 JSON 文件，包含一个账号；相对路径按本配置目录解析。"},
 		Setting{"vpn-server", "", "VPN 服务端 udp://、quic://、tcp:// 或 wss://主机:端口/vpn；UDP 使用共享密钥加密，业务包不重传，其余方式使用 TLS。保存后自动重连，已停止的 VPN 不会自动启动。"},
 		Setting{"vpn-tls-ca", "", "附加信任 CA；留空复用 tls-ca。自签名证书需要显式信任。"},
+		Setting{"vpn-tls-skip-verify", "false", "信任服务端证书（跳过校验）。仅用于 QUIC、TCP、WSS；开启后无法验证服务端身份。"},
 		Setting{"vpn-routes", "0.0.0.0/1,128.0.0.0/1", "逗号分隔 IPv4 路由；服务端外层地址保留物理出口。"},
 		Setting{"vpn-dns", "1.1.1.1", "VPN IPv4 DNS，逗号分隔；留空不改 DNS。"},
 		Setting{"vpn-dns-service", "Wi-Fi", "macOS 网络服务名称；Linux 使用 resolvectl。"},
@@ -83,7 +84,7 @@ func RegisterFlags(fs *flag.FlagSet, role string) {
 	}
 	for _, s := range Settings(role) {
 		switch s.Key {
-		case "vpn-require-account", "vpn-manage-network", "vpn-allow-private", "vpn-block-ipv6", "vpn-noise-traffic", "vpn-noise-idle":
+		case "vpn-require-account", "vpn-manage-network", "vpn-allow-private", "vpn-block-ipv6", "vpn-noise-traffic", "vpn-noise-idle", "vpn-tls-skip-verify":
 			fs.Bool(s.Key, s.Default == "true", s.Description)
 		case "vpn-noise-rate", "vpn-tcp-notsent-lowat":
 			cli.ByteSizeVar(fs, new(int), s.Key, 0, s.Description)
@@ -228,7 +229,8 @@ func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Pref
 		if err := setServerURL(p, get("vpn-server")); err != nil {
 			return nil, err
 		}
-		{
+		p.Config.skipCertificateVerification = get("vpn-tls-skip-verify") == "true"
+		if !p.Config.skipCertificateVerification {
 			roots, err := x509.SystemCertPool()
 			if err != nil {
 				roots = x509.NewCertPool()

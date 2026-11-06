@@ -2238,6 +2238,175 @@ test("VPN account page saves dedicated client credentials and probes saved setti
   assert.match(elements.get("vpn-account-test-result").textContent,/VPN 测试成功/);
 });
 
+test("client VPN wizard tests and applies its own settings after saving optional credentials", async () => {
+  const { context, elements } = await page();
+  context.wizardFields = [
+    {key:"vpn-mode", value:"disabled", validation:{choices:["disabled","both","only"]}},
+    {key:"vpn-server", value:"", validation:{type:"vpn-url"}},
+    {key:"vpn-key-file", value:"existing.key"},
+    {key:"vpn-credentials-file", value:""},
+    {key:"heartbeat", value:"20s"},
+  ];
+  vm.runInContext(`
+    state = {authenticated:true, role:"client"};
+    revision = "config-v1";
+    renderConfigFields(wizardFields, {cli_overrides:["vpn-key-file"]}, "client");
+    const heartbeat = configInputs.find(entry => entry.key === "heartbeat");
+    heartbeat.input.value = "30s";
+    heartbeat.input.listeners.input();
+    openVPNWizard();
+  `, context);
+  assert.equal(elements.get("vpn-wizard-nav").hidden, false);
+  assert.equal(vm.runInContext('vpnWizard.fields.get("vpn-key-file").input.disabled', context), true);
+  context.document.getElementById("vpn-wizard").querySelectorAll = () =>
+    Array.from(elements, ([id, node]) => id.startsWith("vpn-wizard-") ? node : null).filter(Boolean);
+  const calls = [];
+  const account = {path:"credentials.json", revision:"account-v1", accounts:[]};
+  context.api = async (path, options) => {
+    calls.push([path, options ? JSON.parse(options.body) : null]);
+    if (!options) return account;
+    if (path === "vpn-accounts") return {
+      ...account, accounts:[{username:"alice"}], config_changed:true, config_value:account.path,
+      previous_config_revision:"config-v1", config_revision:"config-v2",
+    };
+    if (path === "vpn-test") return {ok:true, stage:"datagram", elapsed_ms:10};
+    return {revision:"config-v3", requires_restart:false, applied:true};
+  };
+  const next = elements.get("vpn-wizard-next").listeners.click;
+  await next();
+  assert.equal(calls.length, 0);
+  vm.runInContext(`
+    vpnWizard.fields.get("vpn-mode").input.value = "only";
+    vpnWizard.fields.get("vpn-server").input.value = "quic://vpn.example.com:8444/vpn";
+  `, context);
+  await next();
+  elements.get("vpn-wizard-user").value = "alice";
+  elements.get("vpn-wizard-password").value = "private";
+  const togglePassword = elements.get("vpn-wizard-toggle-password").listeners.click;
+  togglePassword();
+  assert.equal(elements.get("vpn-wizard-password").type, "text");
+  await next();
+  assert.equal(elements.get("vpn-wizard-finish").hidden, true);
+  await vm.runInContext('runVPNWizard("credentials")', context);
+  assert.equal(elements.get("vpn-wizard-password").value, "");
+  assert.equal(elements.get("vpn-wizard-password").type, "password");
+  await next();
+  await elements.get("vpn-wizard-test").listeners.click();
+  await elements.get("vpn-wizard-apply").listeners.click();
+  const fields = {"vpn-mode":"only", "vpn-server":"quic://vpn.example.com:8444/vpn"};
+  assert.deepEqual(calls, [
+    ["vpn-accounts", null],
+    ["vpn-accounts", {action:"save", username:"alice", password:"private", revision:"account-v1"}],
+    ["vpn-test", {fields}],
+    ["config", {fields, revision:"config-v2", apply:true}],
+  ]);
+  assert.equal(elements.get("vpn-wizard-overview").hidden, false);
+  assert.equal(vm.runInContext("JSON.stringify(configEdits())", context), '{"heartbeat":"30s"}');
+  vm.runInContext('updateNavigationRole("server")', context);
+  assert.equal(elements.get("vpn-wizard-nav").hidden, true);
+});
+
+test("VPN wizard imports pasted and uploaded keys and adapts CA guidance to UDP", async () => {
+  const { context, elements } = await page();
+  context.wizardFields = [
+    {key:"vpn-server", value:"quic://vpn.example.com:8444/vpn"},
+    {key:"vpn-key-file", value:""},
+    {key:"vpn-tls-ca", value:""},
+  ];
+  context.document.getElementById("vpn-wizard").querySelectorAll = () => [];
+  vm.runInContext(`
+    state = {authenticated:true, role:"client"};
+    renderConfigFields(wizardFields, {}, "client");
+    openVPNWizard();
+  `, context);
+  const imports = vm.runInContext("vpnWizard.imports", context);
+  const key = imports.get("key");
+  assert.equal(vm.runInContext('vpnWizard.fields.get("vpn-key-file").input.type', context), "hidden");
+  const keyHeading = elements.get("vpn-wizard-fields").children[1].children[0];
+  assert.ok(keyHeading.children.includes(key.method));
+  assert.ok(!key.panel.children.includes(key.method));
+  const calls = [];
+  context.api = async (path, options) => {
+    calls.push([path, JSON.parse(options.body)]);
+    return {path:"/client/vpn-client-import.key"};
+  };
+  key.file.files = [];
+  key.secret.value = "ab".repeat(32);
+  await vm.runInContext('runVPNWizard("key")', context);
+  assert.equal(key.secret.value, "");
+  assert.equal(vm.runInContext('vpnWizard.fields.get("vpn-key-file").input.value', context), "/client/vpn-client-import.key");
+  key.method.value = "file";
+  key.method.listeners.change();
+  assert.equal(key.secret.hidden, true);
+  assert.equal(key.file.hidden, false);
+  key.file.files = [{size:65, text:async () => "CD".repeat(32) + "\n"}];
+  await vm.runInContext('runVPNWizard("key")', context);
+  assert.deepEqual(calls, [
+    ["vpn-client-file", {kind:"key", content:"ab".repeat(32)}],
+    ["vpn-client-file", {kind:"key", content:"CD".repeat(32)}],
+  ]);
+  vm.runInContext(`
+    const address = vpnWizard.fields.get("vpn-server").input;
+    address.value = "udp://vpn.example.com:8445/vpn";
+    address.listeners.input();
+  `, context);
+  assert.equal(imports.get("ca").panel.hidden, true);
+  assert.match(elements.get("vpn-wizard-fields").children[2].children[0].children[2].textContent, /无需 CA/);
+});
+
+test("VPN wizard applies before starting or restarting and displays connection failures", async () => {
+  for (const running of [false, true]) {
+    const { context, elements } = await page();
+    context.wizardFields = [
+      {key:"vpn-mode", value:"only", validation:{choices:["disabled","both","only"]}},
+      {key:"vpn-server", value:"tcp://vpn.example.com:8444/vpn"},
+      {key:"vpn-tls-skip-verify", value:"false", validation:{type:"boolean", choices:["true","false"]}},
+      {key:"vpn-tls-ca", value:""},
+    ];
+    context.running = running;
+    context.document.getElementById("vpn-wizard").querySelectorAll = () => [];
+    vm.runInContext(`
+      state = {authenticated:true, role:"client"};
+      revision = "v1";
+      renderConfigFields(wizardFields, {}, "client");
+      renderVPNControls({role:"client", enabled:true, state:running ? "connected" : "stopped"});
+      openVPNWizard();
+      showVPNWizardStep(2);
+      const skip = vpnWizard.fields.get("vpn-tls-skip-verify").input;
+      const ca = vpnWizard.fields.get("vpn-tls-ca");
+      ca.input.value = "/client/custom-ca.pem";
+      skip.checked = true;
+      skip.listeners.input();
+    `, context);
+    assert.equal(vm.runInContext('vpnWizard.imports.get("ca").panel.hidden', context), true);
+    assert.equal(vm.runInContext("ca.row.hidden", context), true);
+    vm.runInContext("skip.checked = false; skip.listeners.input();", context);
+    assert.equal(vm.runInContext("ca.row.hidden", context), false);
+    assert.equal(vm.runInContext("ca.input.value", context), "/client/custom-ca.pem");
+    vm.runInContext('ca.input.value = ""; skip.checked = true; skip.listeners.input();', context);
+    assert.match(elements.get("vpn-wizard-apply-start").textContent, running ? /重启 VPN/ : /启动 VPN/);
+    const calls = [];
+    context.api = async (path, options) => {
+      calls.push(path);
+      if (path === "config") {
+        assert.deepEqual(JSON.parse(options.body), {revision:"v1", apply:true, fields:{"vpn-tls-skip-verify":"true"}});
+        return {revision:"v2", applied:true, requires_restart:false};
+      }
+      return {};
+    };
+    await elements.get("vpn-wizard-apply-start").listeners.click();
+    assert.deepEqual(calls, running ? ["config","vpn-stop","vpn-start"] : ["config","vpn-start"]);
+    const status = elements.get("vpn-wizard-connection");
+    assert.equal(status.hidden, false);
+    assert.match(status.textContent, /启动中/);
+    vm.runInContext('renderVPNControls({role:"client", enabled:true, state:"reconnecting", last_error:"authentication rejected"})', context);
+    assert.match(status.textContent, /重连中.*authentication rejected/);
+    vm.runInContext('renderVPNControls({role:"client", enabled:true, state:"connected"})', context);
+    assert.match(status.textContent, /已连接/);
+    assert.doesNotMatch(status.textContent, /authentication rejected/);
+  }
+});
+
 test("server VPN account rows expose rename, disable and delete without revealing passwords", async () => {
   const { context, elements } = await page();
   context.vpnAccounts = {path:"/private/vpn-server-accounts.json",revision:"v1",accounts:[{username:"alice",disabled:false}]};

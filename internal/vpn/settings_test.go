@@ -51,6 +51,39 @@ func TestIntegratedVPNPrepareIsOfflineAndValidatesBeforeTUN(t *testing.T) {
 	}
 }
 
+func TestIntegratedVPNCertificateVerificationOptIn(t *testing.T) {
+	fs := integratedSettings(t)
+	fs.Set("vpn-mode", "only")
+	for _, transport := range []string{"quic", "tcp", "wss", "udp"} {
+		t.Run(transport, func(t *testing.T) {
+			fs.Set("vpn-server", transport+"://vpn.invalid:8444/vpn")
+			fs.Set("vpn-tls-ca", "")
+			fs.Set("vpn-tls-skip-verify", "false")
+			strict, err := Prepare("client", fs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			config, err := strict.Config.normalized(false)
+			if err != nil || config.TLS.InsecureSkipVerify {
+				t.Fatal("certificate verification was disabled by default", err)
+			}
+			fs.Set("vpn-tls-ca", filepath.Join(t.TempDir(), "missing.pem"))
+			if _, err := Prepare("client", fs); transport != "udp" && err == nil {
+				t.Fatal("strict TLS accepted a missing CA")
+			}
+			fs.Set("vpn-tls-skip-verify", "true")
+			skip, err := Prepare("client", fs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			config, err = skip.Config.normalized(false)
+			if err != nil || config.TLS.InsecureSkipVerify != (transport != "udp") || skip.Fingerprint == strict.Fingerprint {
+				t.Fatal("explicit opt-in failed or affected UDP", err)
+			}
+		})
+	}
+}
+
 func TestVPNNoiseSettingsAndLimits(t *testing.T) {
 	fs := integratedSettings(t)
 	fs.Set("vpn-mode", "both")

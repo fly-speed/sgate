@@ -57,6 +57,7 @@ function updateNavigationRole(role) {
   $("admin-nav").classList.toggle("sectioned-nav", configured);
   $("proxy-nav").hidden = !configured;
   $("vpn-nav").hidden = !configured;
+  $("vpn-wizard-nav").hidden = role !== "client";
   $("tunnel-accounts-nav").hidden = role !== "server";
 }
 
@@ -242,6 +243,8 @@ function renderConfigFields(fields, runtime, role) {
       saveButton,
       original: input.value,
       secret: field.secret,
+      description: field.description,
+      overridden,
       dirty: false,
     };
     input.addEventListener("input", () => {
@@ -1311,17 +1314,7 @@ async function runVPNAccountAction(action, change) {
     }
     renderVPNAccounts(data);
     updateVPNRestartPending(data);
-    if (data.config_changed && data.previous_config_revision === revision && data.config_revision) {
-      revision = data.config_revision;
-      const entry = configInputs.find(e => e.key === (state.role === "server" ? "vpn-accounts-file" : "vpn-credentials-file"));
-      if (entry) {
-        if (!entry.dirty) entry.input.value = data.config_value;
-        entry.original = data.config_value;
-        entry.dirty = entry.input.value !== entry.original;
-        updateConfigSaveButton(entry);
-      }
-      localText($("pending-label"), () => Object.keys(configEdits()).length ? t("有未保存修改") : t(data.live_applied ? "已保存" : "已保存 · 待应用"));
-    }
+    syncVPNAccountConfig(data);
     if (action === "save") {
       invalidateVPNProbe();
       notice(() => t(data.live_applied ? "VPN 账号变更已立即生效。"
@@ -1341,6 +1334,27 @@ async function runVPNAccountAction(action, change) {
     }
   }
 }
+
+function syncSavedVPNFields(fields, pending) {
+  for (const entry of configInputs) {
+    if (!Object.hasOwn(fields, entry.key)) continue;
+    entry.original = fields[entry.key];
+    if (!entry.dirty) entry.input.value = entry.original;
+    entry.dirty = entry.input.value !== entry.original;
+    updateConfigSaveButton(entry, configSaving || serviceRestarting);
+  }
+  updateProxyMappingMode();
+  invalidateVPNProbe();
+  localText($("pending-label"), () => (Object.keys(configEdits()).length ? t("有未保存修改 · ") : "") +
+    t(pending ? "已保存 · 待应用" : "配置文件已同步"));
+}
+
+function syncVPNAccountConfig(data) {
+  if (!data.config_changed || data.previous_config_revision !== revision || !data.config_revision) return;
+  revision = data.config_revision;
+  const key = state.role === "server" ? "vpn-accounts-file" : "vpn-credentials-file";
+  syncSavedVPNFields({[key]: data.config_value}, !data.live_applied);
+}
 $("vpn-accounts-refresh").addEventListener("click", () => runVPNAccountAction("load"));
 $("vpn-account-test").addEventListener("click", () => runVPNAccountAction("test"));
 $("vpn-account-form").addEventListener("submit", (event) => {
@@ -1348,6 +1362,394 @@ $("vpn-account-form").addEventListener("submit", (event) => {
   runVPNAccountAction("save", {action:state.role === "server" ? "create" : "save",
     username:$("vpn-account-name").value,password:$("vpn-account-password").value});
 });
+
+const vpnWizardLabels = {
+  "vpn-mode": "运行模式",
+  "vpn-server": "VPN 服务端地址",
+  "vpn-tls-skip-verify": "信任服务端证书（跳过校验）",
+  "vpn-key-file": "共享密钥文件",
+  "vpn-tls-ca": "自定义 CA 证书文件",
+  "vpn-network": "VPN 子网",
+  "vpn-mtu": "VPN MTU",
+  "vpn-dns": "VPN DNS",
+  "vpn-dns-service": "macOS 网络服务",
+};
+let vpnWizard = null;
+
+function setVPNWizardPasswordVisible(visible) {
+  $("vpn-wizard-password").type = visible ? "text" : "password";
+  localText($("vpn-wizard-toggle-password"), () => t(visible ? "隐藏密码" : "显示密码"));
+}
+
+function showVPNWizardStep(step) {
+  vpnWizard.step = step;
+  setVPNWizardPasswordVisible(false);
+  const titles = ["连接参数", "VPN 账号", "测试与应用", "配置完成"];
+  localText($("vpn-wizard-step"), () => (Math.min(step + 1, 3)) + " / 3 · " + t(titles[step]));
+  $("vpn-wizard-parameters").hidden = step !== 0;
+  $("vpn-wizard-credentials").hidden = step !== 1;
+  $("vpn-wizard-finish").hidden = step !== 2;
+  $("vpn-wizard-back").hidden = step === 0 || step === 3;
+  $("vpn-wizard-next").hidden = step >= 2;
+  $("vpn-wizard-test").hidden = $("vpn-wizard-apply").hidden = step !== 2;
+  $("vpn-wizard-apply-start").hidden = step !== 2;
+  $("vpn-wizard-connection").hidden = !vpnWizard.watchConnection || step < 2;
+  $("vpn-wizard-overview").hidden = step !== 3;
+  $("vpn-wizard-result").hidden = true;
+}
+
+function vpnWizardResult(message, bad = false) {
+  const result = $("vpn-wizard-result");
+  localText(result, message);
+  result.hidden = false;
+  result.classList.toggle("bad", bad);
+}
+
+function renderVPNWizardImport(kind, heading) {
+  const panel = document.createElement("div");
+  panel.className = "vpn-wizard-import";
+  const file = document.createElement("input");
+  file.type = "file";
+  localAttr(file, "aria-label", () => t(kind === "key" ? "选择共享密钥文件" : "选择 CA 证书文件"));
+  const button = document.createElement("button");
+  button.type = "button";
+  localText(button, () => t(kind === "key" ? "导入共享密钥" : "上传 CA 证书"));
+  button.className = "secondary";
+  panel.append(file);
+  let secret, method;
+  if (kind === "key") {
+    secret = document.createElement("input");
+    secret.type = "password";
+    secret.autocomplete = "new-password";
+    secret.maxLength = 64;
+    localAttr(secret, "aria-label", () => t("新的共享密钥"));
+    localAttr(secret, "placeholder", () => t("输入 64 个十六进制字符"));
+    method = document.createElement("select");
+    localAttr(method, "aria-label", () => t("共享密钥导入方式"));
+    for (const [value, title] of [["manual", "手工输入共享密钥"], ["file", "导入共享密钥文件"]]) {
+      const option = document.createElement("option");
+      option.value = value;
+      localText(option, () => t(title));
+      method.append(option);
+    }
+    const updateMethod = () => {
+      const manual = method.value === "manual";
+      file.hidden = manual;
+      secret.hidden = !manual;
+      if (manual) file.value = "";
+      else secret.value = "";
+    };
+    method.value = "manual";
+    method.addEventListener("change", updateMethod);
+    heading.append(method);
+    panel.replaceChildren(secret, file);
+    updateMethod();
+  }
+  panel.append(button);
+  vpnWizard.imports.set(kind, {file, secret, method, panel});
+  button.addEventListener("click", () => runVPNWizard(kind));
+  return panel;
+}
+
+function openVPNWizard() {
+  if (vpnWizard?.busy) return;
+  const container = $("vpn-wizard-fields");
+  container.replaceChildren();
+  container.classList.toggle("vpn-wizard-ca-hidden", false);
+  const connection = document.createElement("div");
+  connection.className = "vpn-wizard-connection-fields";
+  container.append(connection);
+  vpnWizard = {revision, fields: new Map(), imports: new Map(), account: null, busy: false};
+  $("vpn-wizard-user").value = $("vpn-wizard-password").value = "";
+  $("vpn-wizard-account-form").hidden = true;
+  for (const [key, title] of Object.entries(vpnWizardLabels)) {
+    if (key === "vpn-dns-service" && vpnConfigSupport?.os !== "darwin") continue;
+    const entry = configInputs.find(item => item.key === key);
+    if (!entry) continue;
+    const row = document.createElement("div");
+    const label = document.createElement(key === "vpn-key-file" ? "div" : "label");
+    const name = document.createElement("strong");
+    const help = document.createElement("small");
+    const checkbox = key === "vpn-tls-skip-verify";
+    const fileField = key === "vpn-key-file" || key === "vpn-tls-ca";
+    const input = document.createElement(entry.rule.choices && !checkbox ? "select" : "input");
+    localText(name, () => t(title) + (entry.overridden ? " · " + t("命令行优先") : ""));
+    localText(help, () => t(entry.description));
+    help.id = "vpn-wizard-help-" + key;
+    input.setAttribute("aria-describedby", help.id);
+    if (checkbox) {
+      input.type = "checkbox";
+      input.checked = /^(true|1|t)$/i.test(entry.original);
+      label.className = "vpn-wizard-checkbox";
+      row.className = "vpn-wizard-verification";
+    } else if (entry.rule.choices) {
+      if (key === "vpn-mode" && !entry.overridden) {
+        const prompt = document.createElement("option");
+        prompt.value = "disabled";
+        prompt.disabled = true;
+        localText(prompt, () => t("请选择启用 VPN 的运行模式。"));
+        input.append(prompt);
+      }
+      for (const value of entry.rule.choices) {
+        if (key === "vpn-mode" && value === "disabled" && !entry.overridden) continue;
+        const option = document.createElement("option");
+        option.value = value;
+        localText(option, () => t(({disabled: "关闭", both: "代理与 VPN 共存", only: "仅 VPN"})[value] || value));
+        input.append(option);
+      }
+    } else {
+      input.autocomplete = "off";
+      input.spellcheck = false;
+    }
+    input.value = key === "vpn-mode" && entry.overridden ? appliedVPNMode : entry.original;
+    input.disabled = entry.overridden;
+    if (key === "vpn-key-file") {
+      label.className = "vpn-wizard-key-heading";
+      input.type = "hidden";
+      input.hidden = true;
+    }
+    input.addEventListener("input", () => { $("vpn-wizard-result").hidden = true; });
+    vpnWizard.fields.set(key, {input, entry, row});
+    label.append(name, input, help);
+    row.append(label);
+    if (["vpn-mode", "vpn-server", "vpn-tls-skip-verify"].includes(key)) {
+      connection.append(row);
+    } else {
+      container.append(row);
+    }
+    if (key === "vpn-server") {
+      const examples = document.createElement("details");
+      examples.className = "vpn-wizard-examples";
+      const summary = document.createElement("summary");
+      const title = document.createElement("span");
+      localText(title, () => t("地址示例") + " · QUIC / UDP / TCP / WSS");
+      const arrow = document.createElement("span");
+      arrow.className = "vpn-wizard-examples-arrow";
+      arrow.setAttribute("aria-hidden", "true");
+      arrow.textContent = "»";
+      summary.append(title, arrow);
+      examples.append(summary);
+      for (const address of ["quic://vpn.example.com:8444/vpn", "udp://vpn.example.com:8445/vpn",
+        "tcp://vpn.example.com:8444/vpn", "wss://vpn.example.com:443/vpn"]) {
+        const sample = document.createElement("code");
+        sample.className = "vpn-wizard-example";
+        sample.textContent = address;
+        examples.append(sample);
+      }
+      connection.append(examples);
+    }
+    if (fileField) {
+      row.className = "vpn-wizard-file-field";
+    }
+    if (key === "vpn-key-file") {
+      localText(help, () => t("共享密钥须与服务端一致。") + " " + t(entry.description));
+      if (!entry.overridden) row.append(renderVPNWizardImport("key", label));
+    }
+    if (key === "vpn-tls-ca") {
+      const address = vpnWizard.fields.get("vpn-server");
+      const verification = vpnWizard.fields.get("vpn-tls-skip-verify");
+      const updateCAHelp = () => {
+        const udp = !address?.entry.overridden && address?.input.value.trim().toLowerCase().startsWith("udp://");
+        const skip = !verification?.entry.overridden && verification?.input.checked;
+        if (verification) verification.row.hidden = udp;
+        row.hidden = !udp && !!skip;
+        container.classList.toggle("vpn-wizard-ca-hidden", row.hidden);
+        localText(help, () => t(udp
+          ? "纯 UDP 使用共享密钥认证，无需 CA 证书。"
+          : "QUIC、TCP 和 WSS 使用 TLS。系统已信任服务端证书时无需上传；使用自签名或私有 CA 时，须提供可信的 PEM 证书，可上传、填写现有路径或复用已配置的 tls-ca。"));
+        const caImport = vpnWizard.imports.get("ca");
+        if (caImport) {
+          caImport.panel.hidden = udp || skip;
+          if (caImport.panel.hidden) caImport.file.value = "";
+        }
+      };
+      if (!entry.overridden) row.append(renderVPNWizardImport("ca"));
+      address?.input.addEventListener("input", updateCAHelp);
+      verification?.input.addEventListener("input", updateCAHelp);
+      updateCAHelp();
+    }
+    if (fileField) row.append(help);
+  }
+  showVPNWizardStep(0);
+  renderVPNWizardConnection(vpnControlHealth);
+  if (!vpnWizard.fields.has("vpn-server")) vpnWizardResult(() => t("请先在配置页重新加载配置。"), true);
+}
+
+async function importVPNWizardFile(kind) {
+  const run = epoch;
+  const {file, secret} = vpnWizard.imports.get(kind);
+  const selected = file.hidden ? null : file.files[0];
+  let content = secret && !secret.hidden ? secret.value.trim() : "";
+  if (!selected && !content) throw new Error(t(kind === "key" ? "请选择密钥文件或输入共享密钥。" : "请选择 CA 证书文件。"));
+  if (selected) {
+    if (selected.size > (kind === "key" ? 1024 : 256 * 1024)) throw new Error(t("文件过大"));
+    content = (await selected.text()).trim();
+  }
+  if (run !== epoch) return;
+  if (kind === "key" && !/^[0-9a-f]{64}$/i.test(content)) {
+    throw new Error(t("共享密钥必须是 64 个十六进制字符"));
+  }
+  return api("vpn-client-file", {method:"POST", body:JSON.stringify({kind, content})});
+}
+
+function vpnWizardEdits() {
+  const mode = vpnWizard.fields.get("vpn-mode")?.input.value;
+  if (!vpnWizard.fields.has("vpn-server")) throw new Error(t("请先在配置页重新加载配置。"));
+  if (!["both", "only"].includes(mode)) throw new Error(t("请选择启用 VPN 的运行模式。"));
+  const fields = {}, values = {"vpn-mode": mode};
+  for (const [key, {input, entry}] of vpnWizard.fields) {
+    if (entry.overridden) continue;
+    const value = input.type === "checkbox" ? String(input.checked) : input.value;
+    values[key] = value;
+    const error = configValueError(key, value, entry.rule, values);
+    if (error) throw new Error(t(vpnWizardLabels[key]) + " · " + error);
+    const original = input.type === "checkbox" ? String(/^(true|1|t)$/i.test(entry.original)) : entry.original;
+    if (value !== original) fields[key] = value;
+  }
+  const error = configRelationErrors(values).values().next().value;
+  if (error) throw new Error(error);
+  return fields;
+}
+
+function renderVPNWizardAccount(view) {
+  vpnWizard.account = view;
+  const user = $("vpn-wizard-user"), password = $("vpn-wizard-password");
+  user.value = view.accounts[0]?.username || "";
+  password.value = "";
+  setVPNWizardPasswordVisible(false);
+  password.required = !view.accounts.length;
+  localAttr(password, "placeholder", () => password.required ? "" : t("留空保留原密码"));
+  localText($("vpn-wizard-account-status"), () => view.blocked ? t(view.blocked) : view.path);
+  $("vpn-wizard-account-form").hidden = !!view.blocked;
+}
+
+async function runVPNWizard(action) {
+  const wizard = vpnWizard;
+  const start = action === "apply-start";
+  if (!wizard || wizard.busy || vpnAccountsBusy || configSaving || serviceRestarting ||
+      (start && vpnControlBusy) || state.role !== "client") return;
+  const controls = $("vpn-wizard").querySelectorAll("button, input, select");
+  const enabled = Array.from(controls).filter(control => !control.disabled);
+  const run = epoch;
+  const restart = start && vpnIsRunning(vpnControlHealth);
+  let applied = false;
+  if (start) vpnControlBusy = true;
+  wizard.busy = configSaving = true;
+  enabled.forEach(control => control.disabled = true);
+  setConfigBusy(true);
+  $("vpn-wizard-result").hidden = true;
+  try {
+    if (wizard.revision !== revision) throw new Error(t("配置已变化，请重新打开向导。"));
+    if (wizard.imports.has(action)) {
+      const result = await importVPNWizardFile(action);
+      if (run !== epoch) return;
+      wizard.fields.get(action === "key" ? "vpn-key-file" : "vpn-tls-ca").input.value = result.path;
+      const {file, secret} = wizard.imports.get(action);
+      file.value = "";
+      if (secret) secret.value = "";
+      vpnWizardResult(() => t(action === "key" ? "共享密钥已导入。" : "文件已导入，路径已填入向导。"));
+    } else if (action === "account") {
+      showVPNWizardStep(1);
+      $("vpn-wizard-account-form").hidden = true;
+      localText($("vpn-wizard-account-status"), () => "");
+      const view = await api("vpn-accounts");
+      if (run === epoch) renderVPNWizardAccount(view);
+    } else if (action === "credentials") {
+      if (!wizard.account || wizard.account.blocked) return;
+      const username = $("vpn-wizard-user").value.trim(), password = $("vpn-wizard-password").value;
+      if (configByteLength(username) > 128 || configByteLength(password) > 1024) {
+        throw new Error(t("VPN 用户名或密码超过允许长度"));
+      }
+      const data = await api("vpn-accounts", {method:"PUT", body:JSON.stringify({
+        action:"save", username, password, revision:wizard.account.revision,
+      })});
+      if (run !== epoch) return;
+      syncVPNAccountConfig(data);
+      wizard.revision = revision;
+      updateVPNRestartPending(data);
+      renderVPNWizardAccount(data);
+      vpnWizardResult(() => t("VPN 账号已保存，重启 VPN 后生效"));
+    } else {
+      const fields = vpnWizardEdits();
+      if (action === "test") {
+        vpnWizardResult(() => t("正在测试 VPN 连接、认证和数据报回显…"));
+        const result = await api("vpn-test", {method:"POST", body:JSON.stringify({fields})});
+        if (run === epoch) vpnWizardResult(() => vpnTestText(result), !result.ok);
+        return;
+      }
+      const result = await api("config", {method:"PUT", body:JSON.stringify(configPayload(fields, true))});
+      if (run !== epoch) return;
+      wizard.revision = revision = result.revision;
+      syncSavedVPNFields(fields, result.requires_restart);
+      updateVPNRestartPending(result);
+      if (result.runtime) renderRuntime(result.runtime);
+      if (result.service_restart_required) await restartSavedMappings(result);
+      if (run !== epoch) return;
+      wizard.revision = revision;
+      applied = true;
+      if (start) {
+        vpnWizardResult(() => t(restart ? "VPN 配置已应用，正在重启 VPN…" : "VPN 配置已应用，正在启动 VPN…"));
+        if (restart || vpnIsRunning(vpnControlHealth)) {
+          const stopped = await api("vpn-stop", {method:"POST", body:"{}"});
+          if (run !== epoch) return;
+          if (stopped.runtime) renderRuntime(stopped.runtime);
+        }
+        const started = await api("vpn-start", {method:"POST", body:"{}"});
+        if (run !== epoch) return;
+        wizard.watchConnection = true;
+        showVPNWizardStep(3);
+        renderVPNWizardConnection(started.runtime?.vpn || {state:"starting"});
+        if (started.runtime) renderRuntime(started.runtime);
+        return;
+      }
+      showVPNWizardStep(3);
+      vpnWizardResult(() => t("VPN 配置已应用。请前往实时概览查看状态，或启动已停止的 VPN。"));
+    }
+  } catch (error) {
+    if (run === epoch) {
+      const detail = Object.entries(error.fieldErrors || {}).map(([key, value]) => key + " · " + t(value));
+      vpnWizardResult(() => [...(start && applied ? [t("VPN 配置已应用，启动或重启失败")] : []),
+        errorText(error), ...detail].join(" · "), true);
+    }
+  } finally {
+    wizard.busy = configSaving = false;
+    if (start) vpnControlBusy = false;
+    enabled.forEach(control => control.disabled = false);
+    setConfigBusy(serviceRestarting);
+  }
+}
+
+$("vpn-wizard-next").addEventListener("click", () => {
+  if (vpnWizard.step === 0) {
+    for (const {file, secret} of vpnWizard.imports.values()) {
+      if (file.value || secret?.value.trim()) {
+        vpnWizardResult(() => t("请先导入所选文件或输入的密钥，或清除输入。"), true);
+        return;
+      }
+    }
+    try { vpnWizardEdits(); }
+    catch (error) { vpnWizardResult(() => errorText(error), true); return; }
+    return runVPNWizard("account");
+  }
+  if (!$("vpn-wizard-account-form").hidden &&
+      ($("vpn-wizard-password").value || $("vpn-wizard-user").value !== (vpnWizard.account.accounts[0]?.username || ""))) {
+    vpnWizardResult(() => t("请先保存输入的 VPN 凭据，或清除未保存的修改。"), true);
+    return;
+  }
+  showVPNWizardStep(2);
+});
+$("vpn-wizard-back").addEventListener("click", () => showVPNWizardStep(vpnWizard.step - 1));
+$("vpn-wizard-account-form").addEventListener("submit", event => {
+  event.preventDefault();
+  runVPNWizard("credentials");
+});
+$("vpn-wizard-test").addEventListener("click", () => runVPNWizard("test"));
+$("vpn-wizard-apply").addEventListener("click", () => runVPNWizard("apply"));
+$("vpn-wizard-apply-start").addEventListener("click", () => runVPNWizard("apply-start"));
+$("vpn-wizard-overview").addEventListener("click", () => showAdminTab("overview"));
+$("vpn-wizard-toggle-password").addEventListener("click", () =>
+  setVPNWizardPasswordVisible($("vpn-wizard-password").type === "password"));
+
 function showConfigSaveError(error, selected = null) {
   const errors = {...(error.fieldErrors || {})};
   const mode = configInputs.find(row => row.key === "vpn-mode");
@@ -1458,6 +1860,12 @@ function renderSignedOut() {
   activeConfigSection = "";
   vpnAccountsView = null;
   vpnAccountsBusy = false;
+  vpnWizard = null;
+  $("vpn-wizard-user").value = $("vpn-wizard-password").value = "";
+  setVPNWizardPasswordVisible(false);
+  $("vpn-wizard-fields").replaceChildren();
+  $("vpn-wizard-account-form").hidden = true;
+  if ($("vpn-wizard").hidden === false) showAdminTab("overview");
   $("vpn-account-name").value = $("vpn-account-password").value = "";
   $("vpn-account-list").replaceChildren();
   $("vpn-account-form").hidden = true;
@@ -2134,6 +2542,7 @@ $("login-form").addEventListener("submit", async (e) => {
 });
 $("logout").addEventListener("click", logoutAdmin);
 function showAdminTab(tab, section = "") {
+  if (tab !== "vpn-wizard") setVPNWizardPasswordVisible(false);
   document.querySelectorAll("[data-tab]").forEach(button => {
     const selected = !button.hidden && !button.closest?.("[hidden]") &&
       button.dataset.tab === tab && (button.dataset.configSection || "") === section;
@@ -2150,6 +2559,7 @@ function showAdminTab(tab, section = "") {
     account: "账号与会话",
     "tunnel-accounts": "客户端账号",
     "vpn-accounts": "VPN 账号",
+    "vpn-wizard": "VPN 配置向导",
   }[tab]));
   if (tab === "configuration" && configRole) {
     activeConfigSection = section;
@@ -2166,6 +2576,7 @@ document.querySelectorAll("[data-tab]").forEach(button => button.addEventListene
   showAdminTab(tab, button.dataset.configSection);
   if (tab === "tunnel-accounts") loadTunnelAccounts().catch(e => notice(() => errorText(e), true));
   if (tab === "vpn-accounts") runVPNAccountAction("load");
+  if (tab === "vpn-wizard") openVPNWizard();
   drawChart();
 }));
 $("reload-config").addEventListener("click", () =>
@@ -2793,13 +3204,29 @@ $("tunnel-account-create").addEventListener("submit", (event) => {
 let vpnControlBusy = false;
 let vpnControlHealth = null;
 let vpnRecoveryPrompted = false;
+function vpnIsRunning(v) {
+  return v?.enabled && !["stopped", "failed", "disabled"].includes(v.state);
+}
+
+function renderVPNWizardConnection(v) {
+  localText($("vpn-wizard-apply-start"), () => t(vpnIsRunning(v)
+    ? "保存、应用并重启 VPN" : "保存、应用并启动 VPN"));
+  if (!vpnWizard?.watchConnection || !v) return;
+  const status = $("vpn-wizard-connection");
+  const states = {starting:"启动中", connecting:"连接中", connected:"已连接",
+    reconnecting:"重连中", failed:"启动失败", stopped:"已停止", disabled:"已关闭"};
+  localText(status, () => "VPN · " + t(states[v.state] || v.state) + (v.last_error ? " · " + t(v.last_error) : ""));
+  status.classList.toggle("bad", v.state === "failed" || !!v.last_error);
+}
+
 function renderVPNControls(v) {
   vpnControlHealth = v;
+  renderVPNWizardConnection(v);
   const group = $("vpn-controls");
   if (!group) return;
   group.hidden = v?.role !== "client";
   const recovery = v?.role === "client" && !!v.recovery_pending;
-  const running = v?.enabled && !["stopped", "failed", "disabled"].includes(v.state);
+  const running = vpnIsRunning(v);
   $("vpn-start").disabled = vpnControlBusy || !v?.enabled || running || recovery;
   $("vpn-stop").disabled = vpnControlBusy || (!running && !recovery);
   localText($("vpn-stop"), () => t(recovery ? "清理上次 VPN" : "停止 VPN"));

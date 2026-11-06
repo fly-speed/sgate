@@ -57,6 +57,9 @@ type Config struct {
 	Assigned func(netip.Addr)
 	Stats    *Stats
 	Logf     func(string, ...any)
+
+	// Explicit opt-in from the integrated client settings.
+	skipCertificateVerification bool
 }
 
 func (c Config) normalized(server bool) (Config, error) {
@@ -169,9 +172,10 @@ func (c Config) normalized(server bool) (Config, error) {
 	c.TLS = c.TLS.Clone()
 	c.TLS.MinVersion = tls.VersionTLS13
 	c.TLS.NextProtos = []string{Protocol}
-	if c.TLS.InsecureSkipVerify {
+	if c.TLS.InsecureSkipVerify && (server || !c.skipCertificateVerification) {
 		return c, errors.New("VPN certificate verification cannot be disabled")
 	}
+	c.TLS.InsecureSkipVerify = !server && c.Transport != "udp" && c.skipCertificateVerification
 	if c.Live == nil {
 		var err error
 		c.Live, err = NewLiveSettings(LiveFromConfig(c))

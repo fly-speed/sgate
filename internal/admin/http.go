@@ -135,6 +135,8 @@ func (h *Handler) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		h.tunnelAccounts(w, r)
 	case r.URL.Path == "/api/client-key" && (r.Method == "GET" || r.Method == "PUT"):
 		h.clientKey(w, r)
+	case r.URL.Path == "/api/vpn-client-file" && r.Method == "POST":
+		h.importVPNClientFile(w, r)
 	case r.URL.Path == "/api/vpn-accounts" && (r.Method == "GET" || r.Method == "PUT"):
 		h.vpnAccounts(w, r)
 	case r.URL.Path == "/api/stats" && r.Method == "GET":
