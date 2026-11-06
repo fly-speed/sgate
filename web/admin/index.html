@@ -103,6 +103,14 @@
           ></header
         ><div id="notice" role="status" hidden></div>
         <section id="overview" class="tab"
+          ><div id="vpn-controls" hidden>
+            <div class="vpn-control-actions">
+              <button id="vpn-start" type="button" class="primary" data-i18n="启动 VPN">启动 VPN</button>
+              <button id="vpn-stop" type="button" class="secondary" data-i18n="停止 VPN">停止 VPN</button>
+            </div>
+            <p id="vpn-recovery-warning" role="status" hidden data-i18n="上次 VPN 的网络设置可能尚未清理，请确认后再启动 VPN。">上次 VPN 的网络设置可能尚未清理，请确认后再启动 VPN。</p>
+            <small class="muted" data-i18n="客户端启动后需手动启动 VPN；停止时恢复路由和 DNS。">客户端启动后需手动启动 VPN；停止时恢复路由和 DNS。</small>
+          </div
           ><div class="section-heading"
             ><div><h2><span data-i18n="流量脉搏">流量脉搏</span></h2><p class="muted"><span data-i18n="隧道流量 · 每秒更新">隧道流量 · 每秒更新</span></p></div
             ><span class="subtle-tag"><span data-i18n="最近 60 秒">最近 60 秒</span></span></div
@@ -120,17 +128,10 @@
               ><p><span data-i18n="统计持续时间">统计持续时间</span></p><strong id="uptime">—</strong
               ><small><span data-i18n="进程启动后累计，代理重启不清零">进程启动后累计，代理重启不清零</span></small></article
             ></div
-          ><p id="memory-summary" class="muted"></p
-          ><p id="quic-health" class="muted"></p
-          ><p id="quic-summary" class="muted"></p
-          ><p id="vpn-summary" class="muted"></p
-          ><p id="vpn-queue-summary" class="muted"></p
-          ><div id="vpn-clients" hidden></div
-          ><div id="vpn-controls" hidden>
-            <button id="vpn-start" type="button" class="secondary" data-i18n="启动 VPN">启动 VPN</button>
-            <button id="vpn-stop" type="button" class="secondary" data-i18n="停止 VPN">停止 VPN</button>
-            <p id="vpn-recovery-warning" role="status" hidden data-i18n="上次 VPN 的网络设置可能尚未清理，请确认后再启动 VPN。">上次 VPN 的网络设置可能尚未清理，请确认后再启动 VPN。</p>
-            <small class="muted" data-i18n="客户端启动后需手动启动 VPN；停止时恢复路由和 DNS。">客户端启动后需手动启动 VPN；停止时恢复路由和 DNS。</small>
+          ><div class="overview-status">
+            <p id="memory-summary" class="muted"></p>
+            <p id="quic-health" class="muted"></p>
+            <p id="vpn-summary" class="muted"></p>
           </div
           ><article class="chart-card"
             ><div class="chart-header"
@@ -172,6 +173,9 @@
               ><span data-i18n="正在采样白噪音…">正在采样白噪音…</span></p
             >
             <p id="noise-activity" class="muted traffic-observation"></p></article
+          ><p id="quic-summary" class="muted"></p
+          ><p id="vpn-queue-summary" class="muted"></p
+          ><div id="vpn-clients" hidden></div
           ><div class="info-grid"
             ><article class="info-card"
               ><h3><span data-i18n="统计口径">统计口径</span></h3
