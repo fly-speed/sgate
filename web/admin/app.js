@@ -2592,12 +2592,20 @@ function renderChartSeries(metric) {
   }
 }
 // 绘制与命中使用同一套 CSS 像素坐标，不受高分屏 canvas 缩放影响。
-function chartGeometry(w, h) {
-  const left = 67,
+function chartGeometry(w, h, c = $("traffic-chart").getContext("2d")) {
+  const metric = chartMetric();
+  const max = Math.max(
+    1,
+    ...chartSamples().flatMap((point) => metric.keys.map((key) => point[key]).filter(Number.isFinite)),
+  ) * 1.18;
+  const labels = Array.from({ length: 5 }, (_, i) => units(max * (1 - i / 4), true));
+  c.font = "10px -apple-system, sans-serif";
+  const labelWidth = Math.max(...labels.map((label) => c.measureText(label).width));
+  const left = Math.max(67, Math.ceil(labelWidth) + 20),
     top = 12,
     right = w - 32,
     bottom = h - 32;
-  return { left, top, right, bottom, height: bottom - top, width: right - left };
+  return { left, top, right, bottom, height: bottom - top, width: right - left, max, labels };
 }
 // 统一使用采样时间映射横坐标；后台5秒采样和请求延迟不会压缩时间。
 function chartTimeRange(samples = chartSamples()) {
@@ -2746,14 +2754,8 @@ function drawChart() {
   canvas.height = Math.round(h * ratio);
   const c = canvas.getContext("2d");
   c.scale(ratio, ratio);
-  const geometry = chartGeometry(w, h);
-  const { left, top, right, bottom, height, width } = geometry;
-  const max =
-    Math.max(
-      1,
-      ...chartSamples().flatMap((v) => metric.keys.map((key) => v[key]).filter(Number.isFinite)),
-    ) * 1.18;
-  c.font = "10px -apple-system, sans-serif";
+  const geometry = chartGeometry(w, h, c);
+  const { left, top, right, bottom, height, width, max, labels } = geometry;
   for (let i = 0; i < 5; i++) {
     const y = top + (height * i) / 4;
     c.strokeStyle = "#eaf0f2";
@@ -2764,7 +2766,7 @@ function drawChart() {
     c.stroke();
     c.fillStyle = "#8a98a3";
     c.textAlign = "right";
-    c.fillText(units(max * (1 - i / 4), true), left - 12, y + 3);
+    c.fillText(labels[i], left - 12, y + 3);
   }
   c.setLineDash([]);
   drawChartTimeAxis(c, geometry);

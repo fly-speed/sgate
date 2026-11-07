@@ -854,6 +854,7 @@ test("noise and business charts use independent scales instead of the total traf
   const labels = [],
     arcs = [];
   const drawing = {
+    measureText(value) { return { width: value.length * 6 }; },
     scale() {},
     setLineDash() {},
     beginPath() {},
@@ -953,6 +954,7 @@ test("hover tooltip follows selected metric, refresh and scaled pointer coordina
   const canvas = context.document.getElementById("traffic-chart");
   const arcs = [];
   const drawing = {
+    measureText(value) { return { width: value.length * 6 }; },
     scale() {},
     setLineDash() {},
     beginPath() {},
@@ -1805,7 +1807,7 @@ test("TCP and QUIC curves use independent counters, IP filtering and protocol se
 test("combined transport chart draws four colors and shows all four hover rates", async () => {
   const {context,elements}=await page();
   const canvas=context.document.getElementById("traffic-chart"),colors=[];
-  const drawing={scale(){},setLineDash(){},beginPath(){},moveTo(){},lineTo(){},stroke(){colors.push(this.strokeStyle)},closePath(){},fill(){},fillText(){},arc(){},createLinearGradient(){return {addColorStop(){}}}};
+  const drawing={measureText(value){return {width:value.length*6}},scale(){},setLineDash(){},beginPath(){},moveTo(){},lineTo(){},stroke(){colors.push(this.strokeStyle)},closePath(){},fill(){},fillText(){},arc(){},createLinearGradient(){return {addColorStop(){}}}};
   canvas.clientWidth=900;canvas.clientHeight=250;canvas.getContext=()=>drawing;
   const tooltip=context.document.getElementById("traffic-tooltip");
   tooltip.style={};tooltip.offsetWidth=230;tooltip.offsetHeight=150;
@@ -2785,4 +2787,38 @@ test("VPN protocol filters combine with IP and preserve reconnect gaps for each 
   elements.get("traffic-source").value="proxy";
   vm.runInContext("renderTrafficScope()",context);
   assert.equal(elements.get("traffic-vpn-transport").hidden,true);
+});
+
+test("bandwidth axis labels fit inside the canvas at narrow widths and high pixel ratios", async () => {
+  const { context, elements } = await page();
+  const canvas = elements.get("traffic-chart");
+  const labels = [];
+  const drawing = {
+    measureText(value) { return { width: value.length * 6.5 }; },
+    scale() {}, setLineDash() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {},
+    closePath() {}, fill() {}, arc() {},
+    createLinearGradient() { return { addColorStop() {} }; },
+    fillText(value, x) {
+      if (value.endsWith("/s")) labels.push({ value, x, align: this.textAlign });
+    },
+  };
+  canvas.getContext = () => drawing;
+  canvas.clientHeight = 220;
+  for (const width of [240, 900]) {
+    canvas.clientWidth = width;
+    for (const ratio of [1, 2]) {
+      context.window.devicePixelRatio = ratio;
+      for (const rate of [800, 800 * 1024, 800 * 1024 * 1024]) {
+        labels.length = 0;
+        context.rateSample = rate;
+        vm.runInContext('points=[{time_ms:60000,tx:rateSample,rx:0}];drawChart()', context);
+        assert.equal(labels.length, 5);
+        for (const label of labels) {
+          assert.equal(label.align, "right");
+          assert.ok(label.x - drawing.measureText(label.value).width >= 8, label.value + " clipped");
+        }
+        assert.equal(canvas.width, width * ratio);
+      }
+    }
+  }
 });
