@@ -2,7 +2,7 @@
 
 **Encrypted TCP port forwarding and an independent IPv4 VPN**
 
-Version `1.5.1` · [简体中文](README.md)
+Version `1.5.2` · [简体中文](README.md)
 
 Use sgate to reach selected TCP services such as SSH, databases, and internal web apps, or enable the IPv4 VPN to route traffic from multiple applications through a virtual network interface. The two modes can run together and are configurable from the web interface.
 
@@ -23,9 +23,9 @@ The client runs on **macOS, Linux, and Windows**. The server runs on **macOS and
 On **macOS or Ubuntu**, choose the release archive for your system and architecture. Use `arm64` for Apple Silicon or ARM64 Ubuntu, and `amd64` for Intel Macs or x86-64 Ubuntu. This example installs the Apple Silicon build under your home directory.
 
 ```sh
-shasum -a 256 -c sgate-1.5.1-macos-arm64.tar.gz.sha256  # On Ubuntu, use sha256sum -c
-tar -xzf sgate-1.5.1-macos-arm64.tar.gz
-cd sgate-1.5.1-macos-arm64
+shasum -a 256 -c sgate-1.5.2-macos-arm64.tar.gz.sha256  # On Ubuntu, use sha256sum -c
+tar -xzf sgate-1.5.2-macos-arm64.tar.gz
+cd sgate-1.5.2-macos-arm64
 PREFIX="$HOME/.local/sgate" ./install.sh
 ```
 

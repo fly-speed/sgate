@@ -6,7 +6,7 @@ import (
 	"io"
 )
 
-const Version = "1.5.1"
+const Version = "1.5.2"
 
 // BuildTime is injected by the release build as a UTC RFC 3339 timestamp.
 var BuildTime = "unknown"
