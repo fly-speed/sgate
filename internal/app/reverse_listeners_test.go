@@ -118,7 +118,7 @@ type reverseLeaseHTTP struct{ *mastergin.GinService }
 
 func (s reverseLeaseHTTP) Managed() bool { return true }
 func (s reverseLeaseHTTP) Configure(c HTTPConfig) (HTTPWorker, error) {
-	return s.GinService.Configure(mastergin.ServerConfig{Addresses: c.Addresses, TLSConfig: c.TLS, Handler: c.Handler, WrapListener: c.WrapListener, OnStop: c.OnStop})
+	return s.GinService.Configure(mastergin.ServerConfig{AllowUnusedListeners: c.AllowUnusedListeners, Addresses: c.Addresses, TLSConfig: c.TLS, Handler: c.Handler, WrapListener: c.WrapListener, OnStop: c.OnStop})
 }
 func (s reverseLeaseHTTP) ReverseListener(_ string, address string) (net.Listener, error) {
 	return s.LeaseTCP(address)
@@ -231,5 +231,56 @@ func TestReverseTunnelPortConflictLeavesFilesUnchanged(t *testing.T) {
 	}
 	if _, err = c.load(""); !errors.Is(err, admin.ErrReverseTunnelPortConflict) {
 		t.Fatal("CLI listen override conflict accepted", err)
+	}
+}
+
+func TestVPNOnlyInheritedReversePortsStayInactive(t *testing.T) {
+	c := newController(t, "server", "listen = "+onlineAddress(t)+"\ntarget = localhost:22\n")
+	httpAddress := c.worker.listener.Addr().String()
+	if err := c.worker.stop(); err != nil {
+		t.Fatal(err)
+	}
+	c.worker = nil
+	framework, err := mastergin.Init(httpAddress+",127.0.0.1:0", mastergin.WithContext(c.ctx), mastergin.WithManaged(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer framework.Close()
+	framework.Alone = false
+	rawAddress := framework.Addresses()[1]
+	framework.GET("/*path", gin.WrapH(framework.Handler()))
+	d := c.current
+	d.vpnOnly = true
+	d.service = reverseLeaseHTTP{framework}
+	c.worker, err = d.startProxy(c.ctx, c.stats)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { framework.Run(); close(done) }()
+	defer func() { framework.Close(); <-done }()
+	client := &http.Client{Timeout: time.Second, Transport: &http.Transport{Proxy: nil, DisableKeepAlives: true}}
+	response, err := client.Get("http://" + httpAddress + "/tunnel")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatal("VPN-only admitted proxy", response.StatusCode)
+	}
+	conn, err := net.DialTimeout("tcp", rawAddress, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(time.Second))
+	conn.Write([]byte("GET /admin/ HTTP/1.1\r\nHost: test\r\n\r\n"))
+	var b [1]byte
+	n, err := conn.Read(b[:])
+	if n != 0 || err == nil {
+		t.Fatal("unused reverse port returned data", n, err)
+	}
+	if timeout, ok := err.(net.Error); ok && timeout.Timeout() {
+		t.Fatal("unused reverse port did not close", err)
 	}
 }

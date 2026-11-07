@@ -15,14 +15,17 @@ import (
 )
 
 type ServerConfig struct {
-	Addresses         string
-	TLSConfig         *tls.Config
-	Handler           http.Handler
-	WrapListener      func(net.Listener) net.Listener
-	OnStop            func()
-	ReadHeaderTimeout time.Duration
-	IdleTimeout       time.Duration
-	MaxHeaderBytes    int
+	// AllowUnusedListeners leaves unmatched inherited sockets without a lease.
+	// Connections on these sockets are closed by their listener pools.
+	AllowUnusedListeners bool
+	Addresses            string
+	TLSConfig            *tls.Config
+	Handler              http.Handler
+	WrapListener         func(net.Listener) net.Listener
+	OnStop               func()
+	ReadHeaderTimeout    time.Duration
+	IdleTimeout          time.Duration
+	MaxHeaderBytes       int
 }
 type workerKey struct{}
 
@@ -97,14 +100,15 @@ func (s *GinService) configureLocked(config ServerConfig) (*Worker, error) {
 		s.addresses = config.Addresses
 	}
 	// Unclaimed inherited ports must never silently become HTTP endpoints.
+	allowUnused := !s.Alone && config.AllowUnusedListeners
 	for _, pool := range s.pools {
-		if !pool.raw && !matchesHTTPAddress(config.Addresses, pool.listeners[0].Addr().String(), !s.Alone) {
+		if !allowUnused && !pool.raw && !matchesHTTPAddress(config.Addresses, pool.listeners[0].Addr().String(), !s.Alone) {
 			return nil, errors.New("inherited listener is neither HTTP nor reserved TCP: " + pool.listeners[0].Addr().String())
 		}
 	}
 	w := &Worker{service: s, config: config, connections: make(map[*ownedConn]struct{}), done: make(chan struct{})}
 	for i, pool := range s.pools {
-		if pool.raw {
+		if pool.raw || (allowUnused && !matchesHTTPAddress(config.Addresses, pool.listeners[0].Addr().String(), true)) {
 			continue
 		}
 		if err := w.addListener(pool, s.Servers[i].Engine); err != nil {

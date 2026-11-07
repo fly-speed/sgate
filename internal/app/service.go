@@ -22,9 +22,10 @@ type HTTPWorker interface {
 	Close() error
 }
 type HTTPConfig struct {
-	Addresses    string
-	TLS          *tls.Config
-	Handler      http.Handler
-	WrapListener func(net.Listener) net.Listener
-	OnStop       func()
+	AllowUnusedListeners bool
+	Addresses            string
+	TLS                  *tls.Config
+	Handler              http.Handler
+	WrapListener         func(net.Listener) net.Listener
+	OnStop               func()
 }

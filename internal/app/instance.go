@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"time"
@@ -231,16 +232,18 @@ func (d definition) startService(stats *tunnel.Stats) (*instance, error) {
 	stopHTTP := onStop
 	onStop = func() { i.stopQUIC(); stopHTTP() }
 	w, e := d.service.Configure(HTTPConfig{
-		Addresses:    d.listen,
-		TLS:          tlsConfig,
-		Handler:      handler,
-		WrapListener: stats.Listener,
-		OnStop:       onStop,
+		AllowUnusedListeners: d.vpnOnly,
+		Addresses:            d.listen,
+		TLS:                  tlsConfig,
+		Handler:              handler,
+		WrapListener:         stats.Listener,
+		OnStop:               onStop,
 	})
 	if e != nil {
 		i.stopQUIC()
 		s.Close()
-		return nil, e
+		return nil, fmt.Errorf("configure HTTP listeners (listen=%q accounts-file=%q active-reverse-listeners=%v vpn-only=%t): %w",
+			d.listen, d.accountsFile, reverseAddresses(cfg.Accounts), d.vpnOnly, e)
 	}
 	i.listener, i.service = w.PrimaryListener(), w
 	go func() {
