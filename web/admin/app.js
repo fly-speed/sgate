@@ -1504,6 +1504,10 @@ function renderVPNWizardImport(kind, heading) {
     updateMethod();
   }
   panel.append(button);
+  if (kind === "key" && vpnWizard.server) {
+    button.disabled = true;
+    vpnWizard.fields.get("vpn-key-file").upload = button;
+  }
   vpnWizard.imports.set(kind, {file, secret, method, panel});
   button.addEventListener("click", () => runVPNWizard(kind));
   return panel;
@@ -1582,7 +1586,7 @@ function openVPNWizard() {
     const entry = configInputs.find(item => item.key === key);
     if (!entry) continue;
     const row = document.createElement("div");
-    const keyImport = !server && key === "vpn-key-file";
+    const keyImport = key === "vpn-key-file";
     const label = document.createElement(keyImport ? "div" : "label");
     const name = document.createElement("strong");
     const help = document.createElement("small");
@@ -1629,7 +1633,7 @@ function openVPNWizard() {
     }
     input.addEventListener("input", () => { $("vpn-wizard-result").hidden = true; });
     vpnWizard.fields.set(key, {input, entry, row});
-    if (server && vpnServerWizardFiles.has(key)) {
+    if (server && vpnServerWizardFiles.has(key) && !keyImport) {
       const id = "vpn-wizard-input-" + key;
       input.id = id;
       const titleLabel = document.createElement("label");
@@ -1668,11 +1672,11 @@ function openVPNWizard() {
       connection.append(examples);
     }
     if (fileField) {
-      row.className = "vpn-wizard-file-field";
+      row.className = server ? "vpn-wizard-server-key" : "vpn-wizard-file-field";
     }
     if (key === "vpn-key-file") {
       localText(help, () => t("共享密钥须与服务端一致。") + " " + t(entry.description));
-      if (keyImport && !entry.overridden) row.append(renderVPNWizardImport("key", label));
+      if (keyImport && (server || !entry.overridden)) row.append(renderVPNWizardImport("key", label));
     }
     if (key === "vpn-tls-ca") {
       const address = vpnWizard.fields.get("vpn-server");
@@ -1720,6 +1724,12 @@ async function importVPNWizardFile(kind) {
   if (run !== epoch) return;
   if (kind === "key" && !/^[0-9a-f]{64}$/i.test(content)) {
     throw new Error(t("共享密钥必须是 64 个十六进制字符"));
+  }
+  if (vpnWizard.server) {
+    const current = vpnWizard.serverFiles["vpn-key-file"];
+    if (!current?.revision) throw new Error(t("VPN 文件或路径已变化，或文件不可覆盖，请重新打开向导"));
+    return api("vpn-server-files", {method:"PUT",
+      body:JSON.stringify({field:"vpn-key-file", revision:current.revision, content})});
   }
   return api("vpn-client-file", {method:"POST", body:JSON.stringify({kind, content})});
 }
@@ -1820,10 +1830,15 @@ async function runVPNWizard(action, details) {
       const result = await importVPNWizardFile(action);
       if (run !== epoch) return;
       wizard.fields.get(action === "key" ? "vpn-key-file" : "vpn-tls-ca").input.value = result.path;
+      if (wizard.server) {
+        wizard.serverFiles["vpn-key-file"] = result;
+        localText($("pending-label"), () => t("已保存 · 待应用"));
+      }
       const {file, secret} = wizard.imports.get(action);
       file.value = "";
       if (secret) secret.value = "";
-      vpnWizardResult(() => t(action === "key" ? "共享密钥已导入。" : "文件已导入，路径已填入向导。"));
+      vpnWizardResult(() => t(wizard.server ? "服务端 VPN 文件已覆盖，请保存并应用配置。" :
+        action === "key" ? "共享密钥已导入。" : "文件已导入，路径已填入向导。"));
     } else if (action === "account") {
       showVPNWizardStep(1);
       $("vpn-wizard-account-form").hidden = true;

@@ -2436,6 +2436,40 @@ test("server VPN wizard validates listeners, creates accounts, and reports liste
   assert.match(elements.get("vpn-wizard-connection").textContent, /启动失败.*address already in use/);
 });
 
+test("server VPN wizard replaces its configured shared key through manual entry and file import", async () => {
+  const { context, elements } = await page();
+  context.wizardFields = [{key:"vpn-key-file", value:"shared.key"}];
+  context.document.getElementById("vpn-wizard").querySelectorAll = () => [];
+  const calls = [];
+  context.api = async (path, options) => {
+    calls.push([path, options ? JSON.parse(options.body) : null]);
+    assert.equal(path, "vpn-server-files");
+    if (!options) return {"vpn-key-file":{path:"/srv/shared.key", revision:"k1"}};
+    return {path:"/srv/shared.key", revision:calls.length === 2 ? "k2" : "k3"};
+  };
+  await vm.runInContext('state = {authenticated:true, role:"server"}; renderConfigFields(wizardFields, {}, "server"); openVPNWizard();', context);
+  const key = vm.runInContext('vpnWizard.imports.get("key")', context);
+  assert.equal(vm.runInContext('vpnWizard.fields.get("vpn-key-file").input.hidden', context), true);
+  assert.equal(key.method.value, "manual");
+  assert.equal(key.file.hidden, true);
+  assert.equal(key.secret.hidden, false);
+  key.secret.value = "ab".repeat(32);
+  await vm.runInContext('runVPNWizard("key")', context);
+  assert.equal(key.secret.value, "");
+  key.method.value = "file";
+  key.method.listeners.change();
+  assert.equal(key.secret.hidden, true);
+  assert.equal(key.file.hidden, false);
+  key.file.files = [{size:65, text:async () => "CD".repeat(32) + "\n"}];
+  await vm.runInContext('runVPNWizard("key")', context);
+  assert.deepEqual(calls, [
+    ["vpn-server-files", null],
+    ["vpn-server-files", {field:"vpn-key-file", revision:"k1", content:"ab".repeat(32)}],
+    ["vpn-server-files", {field:"vpn-key-file", revision:"k2", content:"CD".repeat(32)}],
+  ]);
+  assert.match(elements.get("vpn-wizard-result").textContent, /已覆盖/);
+});
+
 test("VPN wizard imports pasted and uploaded keys and adapts CA guidance to UDP", async () => {
   const { context, elements } = await page();
   context.wizardFields = [

@@ -644,6 +644,11 @@ header h1 {
   align-content: start;
   gap: 8px;
 }
+.vpn-wizard-server-key {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
 @container (min-width: 556px) {
   .vpn-wizard-file-field {
     grid-row: span 3;
