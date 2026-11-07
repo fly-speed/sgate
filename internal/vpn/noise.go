@@ -130,6 +130,7 @@ func (p *peer) sendNoise(now time.Time, c Config, pacer *noisePacer) error {
 			return err
 		}
 		c.Stats.noiseTX.Add(uint64(size))
+		p.noiseTX.Add(uint64(size))
 		if ended := time.Now(); ended.Sub(began) >= noiseSlowWrite {
 			p.noteNoisePressure(ended)
 			now = ended

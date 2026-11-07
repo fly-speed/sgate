@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="586" viewBox="0 0 1080 586" role="img" aria-labelledby="title desc">
+  <title id="title">sgate 软件架构</title>
+  <desc id="desc">浏览器分别管理客户端和服务端。两个进程各自包含 Web 管理、TCP 代理和 IPv4 VPN。代理与 VPN 分别使用独立的隧道入口。</desc>
+  <defs>
+    <marker id="proxy-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+      <path d="M0 0l8 4-8 4z" fill="#087e68"/>
+    </marker>
+    <marker id="vpn-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+      <path d="M0 0l8 4-8 4z" fill="#4668a0"/>
+    </marker>
+    <style>
+      text { font-family: system-ui, "PingFang SC", "Microsoft YaHei", sans-serif; fill: #172f3b; }
+      .title { font-size: 26px; font-weight: 750; }
+      .process { font-size: 22px; font-weight: 700; }
+      .heading { font-size: 19px; font-weight: 700; }
+      .detail { font-size: 16px; fill: #375562; }
+      .center { text-anchor: middle; }
+      .management { stroke: #778993; stroke-width: 2; stroke-dasharray: 5 5; fill: none; }
+      .proxy-line { stroke: #087e68; marker-start: url(#proxy-arrow); marker-end: url(#proxy-arrow); }
+      .vpn-line { stroke: #4668a0; marker-start: url(#vpn-arrow); marker-end: url(#vpn-arrow); }
+      .proxy-line, .vpn-line { stroke-width: 2; fill: none; }
+    </style>
+  </defs>
+  <rect width="1080" height="586" fill="#fff"/>
+  <text x="28" y="43" class="title">sgate 软件架构</text>
+  <text x="28" y="70" class="detail">两个进程，两类业务隧道，各自提供 Web 管理入口</text>
+
+  <rect x="418" y="92" width="244" height="47" rx="9" fill="#f0f3f5" stroke="#bac7ce"/>
+  <text x="540" y="122" class="heading center">浏览器 · 管理控制台</text>
+
+  <rect x="28" y="164" width="348" height="357" rx="14" fill="#f8fafb" stroke="#b9cbd4"/>
+  <rect x="704" y="164" width="348" height="357" rx="14" fill="#f8fafb" stroke="#b9cbd4"/>
+  <text x="48" y="199" class="process">sgate-client</text>
+  <text x="744" y="199" class="process">sgate-server</text>
+
+  <path class="management" d="M418 115H356V251H336 M662 115H724V251H744"/>
+  <rect x="48" y="216" width="288" height="68" rx="8" fill="#edf2f5" stroke="#c5d2d8"/>
+  <rect x="744" y="216" width="288" height="68" rx="8" fill="#edf2f5" stroke="#c5d2d8"/>
+  <text x="64" y="243" class="heading">Web 管理 · 独立监听</text>
+  <text x="64" y="266" class="detail">映射配置、VPN 启停、统计</text>
+  <text x="760" y="243" class="heading">Web 管理 · /admin/</text>
+  <text x="760" y="266" class="detail">目标与账号配置、监听状态、统计</text>
+
+  <rect x="48" y="305" width="308" height="82" rx="8" fill="#edf7f4" stroke="#afd1c6"/>
+  <rect x="724" y="305" width="308" height="82" rx="8" fill="#edf7f4" stroke="#afd1c6"/>
+  <text x="64" y="334" class="heading">TCP 代理</text>
+  <text x="64" y="360" class="detail">监听本地映射、连接反向目标</text>
+  <text x="740" y="334" class="heading">TCP 代理</text>
+  <text x="740" y="360" class="detail">连接正向目标、提供反向监听</text>
+  <text x="540" y="331" class="heading center">加密代理隧道</text>
+  <path class="proxy-line" d="M361 345H719"/>
+  <text x="540" y="369" class="detail center">WS / WSS / QUIC</text>
+
+  <rect x="48" y="408" width="308" height="88" rx="8" fill="#eff4fc" stroke="#b7cbe8"/>
+  <rect x="724" y="408" width="308" height="88" rx="8" fill="#eff4fc" stroke="#b7cbe8"/>
+  <text x="64" y="438" class="heading">独立 IPv4 VPN</text>
+  <text x="64" y="464" class="detail">TUN 接入、路由与 DNS</text>
+  <text x="740" y="438" class="heading">独立 IPv4 VPN</text>
+  <text x="740" y="464" class="detail">认证、地址分配、转发与 NAT</text>
+  <text x="540" y="434" class="heading center">加密 IP 隧道</text>
+  <path class="vpn-line" d="M361 448H719"/>
+  <text x="540" y="472" class="detail center">QUIC DATAGRAM · DTLS/UDP · TLS/TCP · WSS</text>
+
+  <path class="management" d="M30 553h30"/>
+  <text x="70" y="559" class="detail">管理请求</text>
+  <path d="M185 553h30" stroke="#087e68" stroke-width="2"/>
+  <text x="225" y="559" class="detail">代理数据</text>
+  <path d="M340 553h30" stroke="#4668a0" stroke-width="2"/>
+  <text x="380" y="559" class="detail">VPN 数据</text>
+</svg>

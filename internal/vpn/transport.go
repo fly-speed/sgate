@@ -23,20 +23,25 @@ type networkSetupError struct{ err error }
 func (e *networkSetupError) Error() string { return "configure VPN network: " + e.err.Error() }
 
 type peer struct {
-	account          string
-	accountMessage   string
-	accountProof     []byte
-	accountRevoked   atomic.Bool
-	conn             connection
-	control          controlChannel
-	id               string
-	ip               netip.Addr
-	queue            *packetQueue
-	padding          bool
-	flow             *datagramFlow
-	started          time.Time
-	lastBusiness     atomic.Int64
-	noisePausedUntil atomic.Uint64
+	trafficGeneration string
+	trafficTX         atomic.Uint64
+	trafficRX         atomic.Uint64
+	noiseTX           atomic.Uint64
+	noiseRX           atomic.Uint64
+	account           string
+	accountMessage    string
+	accountProof      []byte
+	accountRevoked    atomic.Bool
+	conn              connection
+	control           controlChannel
+	id                string
+	ip                netip.Addr
+	queue             *packetQueue
+	padding           bool
+	flow              *datagramFlow
+	started           time.Time
+	lastBusiness      atomic.Int64
+	noisePausedUntil  atomic.Uint64
 }
 
 func (p *peer) enqueue(packet []byte, stats *Stats) {
@@ -94,6 +99,7 @@ func (p *peer) run(ctx context.Context, c Config, receive func([]byte) error) er
 				return err
 			}
 			c.Stats.tx.Add(uint64(len(packet)))
+			p.trafficTX.Add(uint64(len(packet)))
 			p.businessActivity()
 			return nil
 		}
@@ -194,6 +200,7 @@ func (p *peer) run(ctx context.Context, c Config, receive func([]byte) error) er
 			if len(data) >= 2 && data[0] == 1 && data[1] == 1 {
 				if p.padding && len(data) > 2 && len(data) <= fragmentPayload+2 {
 					c.Stats.noiseRX.Add(uint64(len(data) - 2))
+					p.noiseRX.Add(uint64(len(data) - 2))
 				} else {
 					c.Stats.drops.Add(1)
 				}
@@ -600,7 +607,7 @@ func (s *Server) accept(ctx context.Context, conn connection) {
 		return
 	}
 	flow, _ := conn.Context().Value(flowContextKey{}).(*datagramFlow)
-	p := &peer{conn: conn, control: control, id: identity, ip: ip, account: account, accountMessage: h.Proof, accountProof: accountProof, queue: newPacketQueue(s.cfg.QueueMaxAge, s.cfg.Live), padding: h.Padding, flow: flow}
+	p := &peer{trafficGeneration: time.Now().UTC().Format(time.RFC3339Nano), conn: conn, control: control, id: identity, ip: ip, account: account, accountMessage: h.Proof, accountProof: accountProof, queue: newPacketQueue(s.cfg.QueueMaxAge, s.cfg.Live), padding: h.Padding, flow: flow}
 	old := s.peers[ip]
 	if (old != nil && old.id != identity) || (old == nil && len(s.peers) >= s.cfg.Live.Snapshot().MaxClients) {
 		s.mu.Unlock()
@@ -654,6 +661,7 @@ func (s *Server) accept(ctx context.Context, conn connection) {
 		}
 		if err == nil {
 			s.cfg.Stats.rx.Add(uint64(n))
+			p.trafficRX.Add(uint64(n))
 		}
 		return err
 	})

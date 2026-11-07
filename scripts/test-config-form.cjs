@@ -1788,11 +1788,11 @@ test("TCP and QUIC curves use independent counters, IP filtering and protocol se
   assert.equal(elements.get("traffic-quic-legend").hidden,false);
   assert.equal(elements.get("traffic-legend-label-0").textContent,"TCP 发送");
   assert.equal(elements.get("traffic-legend-label-2").textContent,"QUIC 发送");
-  elements.get("traffic-metric").value="quic";
+  elements.get("traffic-transport").value="quic";
   assert.deepEqual(JSON.parse(vm.runInContext("JSON.stringify(chartMetric().keys)",context)),["quicTX","quicRX"]);
   vm.runInContext("renderChartSeries(chartMetric())",context);
   assert.equal(elements.get("traffic-quic-legend").hidden,true);
-  elements.get("traffic-metric").value="tcp";
+  elements.get("traffic-transport").value="tcp";
   assert.deepEqual(JSON.parse(vm.runInContext("JSON.stringify(chartMetric().keys)",context)),["tcpTX","tcpRX"]);
   elements.get("traffic-ip").value="127.0.0.1";
   vm.runInContext('points[0].byIP={"127.0.0.1":{...points[0],tcpTX:7,quicTX:9}}',context);
@@ -1816,7 +1816,7 @@ test("combined transport chart draws four colors and shows all four hover rates"
   assert.equal(elements.get("traffic-tooltip-rx").textContent,"20 B/s");
   assert.equal(elements.get("traffic-tooltip-quic-tx").textContent,"30 B/s");
   assert.equal(elements.get("traffic-tooltip-quic-rx").textContent,"40 B/s");
-  elements.get("traffic-metric").value="quic";
+  elements.get("traffic-transport").value="quic";
   colors.length=0;
   vm.runInContext("drawChart()",context);
   assert.equal(elements.get("traffic-tooltip-quic-tx-row").hidden,true);
@@ -1853,6 +1853,47 @@ test("VPN status and IP bandwidth use independent counters and survive a VPN res
   assert.match(status,/permission denied/);
   assert.doesNotMatch(status,/undefined/);
   assert.equal(vm.runInContext('trafficRates({time_ms:2000,tx_bytes:0,rx_bytes:0,health:{vpn:{stats:{tx_ip_bytes:0}}}},{time_ms:1000,tx_bytes:0,rx_bytes:0,health:{vpn:{stats:{tx_ip_bytes:100}}}}).vpnTX',context), null);
+});
+
+test("overview combines proxy, VPN IP and VPN padding without a rate spike on VPN restart", async () => {
+  const { context, elements } = await page();
+  context.before = { time_ms: 1000, tx_bytes: 100, rx_bytes: 200,
+    health: { vpn: { enabled: true, generation: "old", stats: {
+      tx_ip_bytes: 1000, rx_ip_bytes: 2000, noise_tx_bytes: 50, noise_rx_bytes: 80,
+    } } } };
+  context.after = { time_ms: 2000, tx_bytes: 110, rx_bytes: 220,
+    health: { vpn: { enabled: true, generation: "old", stats: {
+      tx_ip_bytes: 1100, rx_ip_bytes: 2200, noise_tx_bytes: 55, noise_rx_bytes: 88,
+    } } } };
+  const totals = JSON.parse(vm.runInContext("JSON.stringify(trafficTotals(after))", context));
+  assert.deepEqual(totals, { tx: 1265, rx: 2508 });
+  const rates = JSON.parse(vm.runInContext("JSON.stringify(trafficRates(after, before))", context));
+  assert.equal(rates.totalTX, 115);
+  assert.equal(rates.totalRX, 228);
+  assert.equal(rates.tx, 10);
+  vm.runInContext('points = [trafficRates(after, before)]; $("traffic-metric").value = "total"', context);
+  assert.equal(vm.runInContext("chartMetric().keys.join(',')", context), "tx,rx");
+  elements.get("traffic-source").value = "vpn";
+  assert.equal(vm.runInContext("chartMetric().keys.join(',')", context), "vpnTotalTX,vpnTotalRX");
+  assert.equal(rates.vpnTotalTX, 105);
+  assert.equal(rates.vpnTotalRX, 208);
+  elements.get("traffic-ip").value = "127.0.0.1";
+  vm.runInContext("renderTrafficScope()", context);
+  assert.equal(elements.get("traffic-ip").hidden, true);
+  assert.equal(elements.get("traffic-transport").hidden, true);
+  assert.equal(vm.runInContext("chartSamples().length", context), 1);
+  elements.get("traffic-metric").value = "business";
+  assert.equal(vm.runInContext("chartMetric().keys.join(',')", context), "vpnTX,vpnRX");
+  elements.get("traffic-source").value = "proxy";
+  vm.runInContext("renderTrafficScope()", context);
+  assert.equal(elements.get("traffic-ip").hidden, false);
+  assert.equal(elements.get("traffic-transport").hidden, true);
+  assert.equal(vm.runInContext("chartMetric().keys.join(',')", context), "businessTX,businessRX");
+
+  context.after.health.vpn.generation = "new";
+  const restarted = JSON.parse(vm.runInContext("JSON.stringify(trafficRates(after, before))", context));
+  assert.equal(restarted.totalTX, 10);
+  assert.equal(restarted.totalRX, 20);
 });
 
 test("VPN-only configuration displays saved mappings read-only and respects CLI overrides", async () => {
@@ -1991,7 +2032,7 @@ test("VPN padding counters are independent of IP traffic and expose old peer sup
  const rates=JSON.parse(vm.runInContext('JSON.stringify(trafficRates(after,before))',context));
  assert.equal(rates.vpnTX,0);assert.equal(rates.vpnNoiseTX,3000);assert.equal(rates.vpnNoiseRX,4000);
  assert.match(vm.runInContext('vpnObservationText({enabled:true,state:"connected",noise_rate:10240,noise_traffic:true,noise_idle:true,stats:{noise_unsupported_connections:1}})',context),/更新两端/);
- vm.runInContext('$("traffic-metric").value="vpn-noise"',context);
+ vm.runInContext('$("traffic-source").value="vpn"; $("traffic-metric").value="noise"',context);
  assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(chartMetric().keys)',context)),["vpnNoiseTX","vpnNoiseRX"]);
 });
 
@@ -2665,4 +2706,83 @@ test("proxy mapping controls follow the VPN mode draft, applied mode and CLI ove
   vm.runInContext('renderConfigFields(modeFields, {vpn_mode:"only",cli_overrides:["vpn-mode"]}, "client")',context);
   choose("both");
   assert.equal(field("proxies").readOnly,true);
+});
+
+test("server VPN chart filters virtual IPs with public addresses and gaps on reconnect", async () => {
+  const { context, elements } = await page();
+  context.drawChart = () => {};
+  context.before = {time_ms:1000, health:{vpn:{role:"server",generation:"vpn1",clients:[
+    {vpn_ip:"10.77.0.2",public_ip:"203.0.113.1",generation:"a",stats:{tx_ip_bytes:100,rx_ip_bytes:200,noise_tx_bytes:10,noise_rx_bytes:20}},
+    {vpn_ip:"10.77.0.3",public_ip:"203.0.113.1",generation:"b",stats:{tx_ip_bytes:500,rx_ip_bytes:600,noise_tx_bytes:50,noise_rx_bytes:60}},
+  ]}}};
+  context.after = JSON.parse(JSON.stringify(context.before));
+  context.after.time_ms = 2000;
+  for (const client of context.after.health.vpn.clients) {
+    client.stats.tx_ip_bytes += 100;
+    client.stats.rx_ip_bytes += 200;
+    client.stats.noise_tx_bytes += 10;
+    client.stats.noise_rx_bytes += 20;
+  }
+  vm.runInContext('previous=after; $("traffic-source").value="vpn"; points=[{time_ms:2000,vpnTotalTX:999,byVPNIP:vpnClientTrafficRates(after,before)}]; renderTrafficPeers(after)',context);
+  const select=elements.get("traffic-vpn-ip");
+  assert.equal(select.hidden,false);
+  assert.equal(select.children.length,3);
+  assert.equal(select.children[1].textContent,"10.77.0.2 (203.0.113.1)");
+  assert.equal(select.children[2].textContent,"10.77.0.3 (203.0.113.1)");
+  select.value="10.77.0.2";
+  select.listeners.change();
+  assert.ok(elements.get("traffic-ip-summary").textContent.includes("10.77.0.2 (203.0.113.1)"));
+  assert.equal(vm.runInContext("chartSamples()[0].vpnTotalTX",context),110);
+  assert.equal(vm.runInContext("chartSamples()[0].vpnTX",context),100);
+  assert.equal(vm.runInContext("chartSamples()[0].vpnNoiseRX",context),20);
+  context.after.health.vpn.clients[0].generation="reconnected";
+  vm.runInContext("points[0].byVPNIP=vpnClientTrafficRates(after,before)",context);
+  assert.equal(vm.runInContext("chartSamples()[0].vpnTotalTX",context),undefined);
+  select.value="10.77.0.3";
+  assert.equal(vm.runInContext("chartSamples()[0].vpnTotalTX",context),110);
+  select.value="";
+  assert.equal(vm.runInContext("chartSamples()[0].vpnTotalTX",context),999);
+  context.after.health.vpn.role="client";
+  vm.runInContext("renderTrafficPeers(after)",context);
+  assert.equal(select.hidden,true);
+});
+
+test("VPN protocol filters combine with IP and preserve reconnect gaps for each payload metric", async () => {
+  const { context, elements } = await page();
+  context.drawChart = () => {};
+  const clients = ["tcp", "wss", "udp", "quic", "quic"].map((transport, i) => ({
+    vpn_ip: "10.77.0." + (i + 2), public_ip: "203.0.113.1", transport, generation: "session" + i,
+    stats: {tx_ip_bytes: 0, rx_ip_bytes: 0, noise_tx_bytes: 0, noise_rx_bytes: 0},
+  }));
+  context.before = {time_ms:1000,health:{vpn:{role:"server",generation:"vpn",clients}}};
+  context.after = JSON.parse(JSON.stringify(context.before));
+  context.after.time_ms = 2000;
+  context.after.health.vpn.clients.forEach((client, i) => {
+    client.stats = {tx_ip_bytes:100*(i+1),rx_ip_bytes:200*(i+1),noise_tx_bytes:10*(i+1),noise_rx_bytes:20*(i+1)};
+  });
+  vm.runInContext('previous=after; $("traffic-source").value="vpn"; points=[{time_ms:2000,vpnRole:"server",byVPNIP:vpnClientTrafficRates(after,before)}]; renderTrafficPeers(after)',context);
+  assert.equal(elements.get("traffic-vpn-transport").hidden,false);
+  for (const [transport, total] of [["tcp",110],["wss",220],["udp",330],["quic",990]]) {
+    elements.get("traffic-vpn-transport").value=transport;
+    assert.equal(vm.runInContext("chartSamples()[0].vpnTotalTX",context),total);
+  }
+  elements.get("traffic-vpn-ip").value="10.77.0.5";
+  assert.equal(vm.runInContext("chartSamples()[0].vpnTX",context),400);
+  assert.equal(vm.runInContext("chartSamples()[0].vpnNoiseRX",context),80);
+  elements.get("traffic-vpn-transport").value="tcp";
+  assert.equal(vm.runInContext("chartSamples()[0].vpnTotalTX",context),0);
+  elements.get("traffic-vpn-transport").value="quic";
+  context.after.health.vpn.clients[3].generation="new";
+  vm.runInContext("points[0].byVPNIP=vpnClientTrafficRates(after,before)",context);
+  assert.equal(vm.runInContext("chartSamples()[0].vpnTX",context),null);
+  elements.get("traffic-vpn-ip").value="";
+  assert.equal(vm.runInContext("chartSamples()[0].vpnTotalTX",context),null);
+  vm.runInContext('previous={health:{vpn:{role:"client"}}}; renderTrafficScope(); points=[{time_ms:2000,vpnRole:"client",vpnTransport:"wss",vpnTX:100,vpnRX:200,vpnNoiseTX:10,vpnNoiseRX:20,vpnTotalTX:110,vpnTotalRX:220}]',context);
+  elements.get("traffic-vpn-transport").value="wss";
+  assert.equal(vm.runInContext("chartSamples()[0].vpnTotalTX",context),110);
+  elements.get("traffic-vpn-transport").value="udp";
+  assert.equal(vm.runInContext("chartSamples()[0].vpnTotalTX",context),0);
+  elements.get("traffic-source").value="proxy";
+  vm.runInContext("renderTrafficScope()",context);
+  assert.equal(elements.get("traffic-vpn-transport").hidden,true);
 });

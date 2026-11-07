@@ -2078,6 +2078,8 @@ function renderSignedOut() {
   previous = null;
   points = [];
   $("traffic-ip").value = "";
+  $("traffic-vpn-ip").value = "";
+  $("traffic-vpn-transport").value = "all";
   renderTrafficPeers({ by_ip: [] });
   chartPointer = null;
   $("traffic-tooltip").hidden = true;
@@ -2244,17 +2246,21 @@ async function poll(run) {
   try {
     const data = await api("stats");
     if (run !== epoch) return;
+    if (!previous) $("traffic-source").value = data.health?.vpn?.mode === "only" ? "vpn" : "proxy";
     const rates = trafficRates(data, previous);
-    if (rates) rates.byIP = peerTrafficRates(data, previous);
-    renderTrafficPeers(data);
+    if (rates) {
+      rates.byIP = peerTrafficRates(data, previous);
+      rates.byVPNIP = vpnClientTrafficRates(data, previous);
+    }
     if (!rates && previous) points = []; // 重启或计数回退后清除上一进程的时间序列。
     previous = data;
     if (rates) {
       points.push(rates);
       points = points.filter((point) => point.time_ms >= rates.time_ms - 60000).slice(-120);
     }
-    localText($("tx-rate"), () => rates ? units(rates.tx, true) : t("采样中"));
-    localText($("rx-rate"), () => rates ? units(rates.rx, true) : t("采样中"));
+    renderTrafficPeers(data);
+    localText($("tx-rate"), () => rates ? units(rates.totalTX, true) : t("采样中"));
+    localText($("rx-rate"), () => rates ? units(rates.totalRX, true) : t("采样中"));
     renderVPNControls(data.health?.vpn);
     observeVPNRestart(data.health?.vpn);
     localText($("vpn-queue-summary"),()=>vpnQueueObservationText(data.health?.vpn));
@@ -2263,8 +2269,11 @@ async function poll(run) {
     if($("quic-summary")) localText($("quic-summary"), () => quicObservationText(data));
     localText($("noise-observation"), () => noiseObservationText(data, rates));
     localText($("noise-activity"), () => noiseActivityText(data.noise_activity));
-    localText($("tx-total"), () => t("累计发送 ") + units(data.tx_bytes));
-    localText($("rx-total"), () => t("累计接收 ") + units(data.rx_bytes));
+    const total = trafficTotals(data);
+    localText($("tx-total"), () => t("累计发送 ") + units(total.tx));
+    localText($("rx-total"), () => t("累计接收 ") + units(total.rx));
+    const totalScope = $("traffic-total-scope");
+    if (totalScope) totalScope.hidden = !data.health?.vpn?.enabled;
     localText($("noise-totals"), () => (t("噪音负载累计：发送 ") +
       units(data.noise_tx_bytes || 0) +
       t(" · 接收 ") +
@@ -2295,6 +2304,42 @@ function peerTrafficRates(data, last) {
   }
   return rates;
 }
+function vpnClientTrafficRates(data, last) {
+  const before = new Map((last?.health?.vpn?.clients || []).map((client) => [client.vpn_ip, client]));
+  const rates = Object.create(null);
+  for (const client of data.health?.vpn?.clients || []) {
+    const old = before.get(client.vpn_ip);
+    rates[client.vpn_ip] = { time_ms: data.time_ms, transport: client.transport };
+    if (!old || !client.generation || client.generation !== old.generation || client.transport !== old.transport ||
+        data.health.vpn.generation !== last?.health?.vpn?.generation) continue;
+    const sample = trafficRates(
+      { time_ms: data.time_ms, tx_bytes: 0, rx_bytes: 0, health: { vpn: client } },
+      { time_ms: last.time_ms, tx_bytes: 0, rx_bytes: 0, health: { vpn: old } },
+    );
+    Object.assign(rates[client.vpn_ip], sample);
+  }
+  return rates;
+}
+function vpnClientLabel(client) {
+  return client.vpn_ip + " (" + (client.public_ip || t("未知对端")) + ")";
+}
+function renderVPNPeers(data) {
+  const select = $("traffic-vpn-ip");
+  const selected = select.value || "";
+  select.replaceChildren();
+  const option = (value, label) => {
+    const node = document.createElement("option");
+    node.value = value;
+    localText(node, label);
+    select.append(node);
+  };
+  option("", () => t("全部 VPN 客户端"));
+  const clients = data?.health?.vpn?.clients || [];
+  for (const client of clients) option(client.vpn_ip, () => vpnClientLabel(client));
+  if (selected && !clients.some((client) => client.vpn_ip === selected))
+    option(selected, () => selected + t("（已离线）"));
+  select.value = selected;
+}
 function peerLabel(ip) {
   return ip === "__other__" ? t("其他 IP（超出统计上限）")
     : ip === "__unknown__" ? t("未知对端") : ip;
@@ -2315,12 +2360,29 @@ function renderTrafficPeers(data) {
   if (selected && !peers.some((peer) => peer.ip === selected))
     option(selected, () => peerLabel(selected) + t("（已离线）"));
   select.value = selected;
+  renderVPNPeers(data);
   renderTrafficScope(data);
 }
 function renderTrafficScope(data = previous) {
-  const isVPN = ["vpn","vpn-noise"].includes($("traffic-metric").value);
+  const isVPN = $("traffic-source").value === "vpn";
+  $("traffic-vpn-transport").hidden = !isVPN;
+  $("traffic-vpn-ip").hidden = !isVPN || data?.health?.vpn?.role !== "server";
+  $("traffic-ip").hidden = isVPN;
   $("traffic-ip").disabled = isVPN;
-  if (isVPN) { localText($("traffic-ip-summary"), () => chartMetric().title); return; }
+  $("traffic-transport").hidden = isVPN || ["noise", "business"].includes($("traffic-metric").value);
+  if (isVPN) {
+    const ip = $("traffic-vpn-ip").hidden ? "" : $("traffic-vpn-ip").value;
+    const client = data?.health?.vpn?.clients?.find((client) => client.vpn_ip === ip);
+    const transport = $("traffic-vpn-transport").value || "all";
+    const stats = transport === "all" || client?.transport === transport ? client?.stats : null;
+    const protocolLabel = transport === "all" ? "" : " · " + transport.toUpperCase();
+    localText($("traffic-ip-summary"), () => ip
+      ? (client ? vpnClientLabel(client) : ip + t("（已离线）")) +
+        t(" · 累计发送 ") + units((stats?.tx_ip_bytes || 0) + (stats?.noise_tx_bytes || 0)) +
+        t(" · 累计接收 ") + units((stats?.rx_ip_bytes || 0) + (stats?.noise_rx_bytes || 0))
+      + protocolLabel : chartMetric().title + protocolLabel);
+    return;
+  }
   const ip = $("traffic-ip").value;
   const peer = data?.by_ip?.find((peer) => peer.ip === ip);
   localText($("traffic-ip-summary"), () => ip
@@ -2329,10 +2391,35 @@ function renderTrafficScope(data = previous) {
     : t("全部连接 IP"));
 }
 function chartSamples() {
-  if (["vpn","vpn-noise"].includes($("traffic-metric").value)) return points;
+  if ($("traffic-source").value === "vpn") {
+    const ip = $("traffic-vpn-ip").hidden ? "" : $("traffic-vpn-ip").value;
+    const transport = $("traffic-vpn-transport").value || "all";
+    return points.map((point) => vpnChartSample(point, ip, transport));
+  }
   const ip = $("traffic-ip").value;
   if (!ip) return points;
   return points.map((point) => point.byIP?.[ip] || { time_ms: point.time_ms });
+}
+function vpnChartSample(point, ip, transport) {
+  const sample = ip ? point.byVPNIP?.[ip] : point;
+  if (transport === "all") return sample || { time_ms: point.time_ms };
+  const samples = ip ? (sample ? [sample] : null)
+    : point.vpnRole === "server" ? Object.values(point.byVPNIP || {}) : [point];
+  const result = { time_ms: point.time_ms };
+  if (!samples || samples.some((sample) => !(sample.transport || sample.vpnTransport))) return result;
+  const matching = samples.filter((sample) => (sample.transport || sample.vpnTransport) === transport);
+  for (const key of ["vpnTX", "vpnRX", "vpnNoiseTX", "vpnNoiseRX", "vpnTotalTX", "vpnTotalRX"]) {
+    result[key] = matching.every((sample) => Number.isFinite(sample[key]))
+      ? matching.reduce((sum, sample) => sum + sample[key], 0) : null;
+  }
+  return result;
+}
+function trafficTotals(data) {
+  const vpn = data.health?.vpn?.stats;
+  return {
+    tx: data.tx_bytes + (vpn?.tx_ip_bytes ?? 0) + (vpn?.noise_tx_bytes ?? 0),
+    rx: data.rx_bytes + (vpn?.rx_ip_bytes ?? 0) + (vpn?.noise_rx_bytes ?? 0),
+  };
 }
 // 独立计算细分负载速率，不能从总流量曲线的高度推断噪音有无。
 function trafficRates(data, last) {
@@ -2364,12 +2451,22 @@ function trafficRates(data, last) {
     const next = data.health?.vpn?.stats?.[field], before = last.health?.vpn?.stats?.[field];
     vpnRates[key] = Number.isFinite(next) && Number.isFinite(before) && next >= before && data.health?.vpn?.generation === last.health?.vpn?.generation ? (next - before) / seconds : null;
   }
+  const tx = rate("tx_bytes"), rx = rate("rx_bytes");
+  const vpnTotal = (ip, noise) => ip == null && noise == null ? null : (ip ?? 0) + (noise ?? 0);
+  const vpnTotalTX = vpnTotal(vpnRates.vpnTX, vpnRates.vpnNoiseTX);
+  const vpnTotalRX = vpnTotal(vpnRates.vpnRX, vpnRates.vpnNoiseRX);
   return {
     ...vpnRates,
     ...transports,
+    vpnTotalTX,
+    vpnTotalRX,
+    vpnRole: data.health?.vpn?.role,
+    vpnTransport: data.health?.vpn?.transport,
+    totalTX: (tx ?? 0) + (vpnTotalTX ?? 0),
+    totalRX: (rx ?? 0) + (vpnTotalRX ?? 0),
     time_ms: data.time_ms,
-    tx: rate("tx_bytes"),
-    rx: rate("rx_bytes"),
+    tx,
+    rx,
     noiseTX: rate("noise_tx_bytes"),
     noiseRX: rate("noise_rx_bytes"),
     businessTX: rate("business_tx_bytes"),
@@ -2443,19 +2540,28 @@ function noiseActivityText(activity) {
   );
 }
 function chartMetric() {
-  switch ($("traffic-metric").value) {
-    case "tcp":
-      return { keys: ["tcpTX", "tcpRX"], labels: ["TCP 发送", "TCP 接收"], title: t("TCP 网络带宽") };
-    case "quic":
-      return { keys: ["quicTX", "quicRX"], labels: ["QUIC 发送", "QUIC 接收"], title: t("QUIC 流带宽") };
-    case "vpn-noise":
-      return { keys:["vpnNoiseTX","vpnNoiseRX"], labels:["VPN 噪音发送","VPN 噪音接收"],title:t("VPN 白噪音负载带宽（全部客户端）") };
-    case "vpn":
-      return { keys: ["vpnTX", "vpnRX"], labels: ["VPN IP 发送", "VPN IP 接收"], title: t("VPN IP 负载带宽（全部客户端）") };
+  const metric = $("traffic-metric").value;
+  if ($("traffic-source").value === "vpn") {
+    switch (metric) {
+      case "noise":
+        return { keys: ["vpnNoiseTX", "vpnNoiseRX"], labels: ["VPN 噪音发送", "VPN 噪音接收"], title: t("VPN 白噪音负载带宽") };
+      case "business":
+        return { keys: ["vpnTX", "vpnRX"], labels: ["VPN IP 发送", "VPN IP 接收"], title: t("VPN IP 负载带宽") };
+      default:
+        return { keys: ["vpnTotalTX", "vpnTotalRX"], title: t("VPN 流量带宽") };
+    }
+  }
+  switch (metric) {
     case "noise":
       return { keys: ["noiseTX", "noiseRX"], title: t("白噪音负载带宽") };
     case "business":
       return { keys: ["businessTX", "businessRX"], title: t("业务负载带宽") };
+  }
+  switch ($("traffic-transport").value) {
+    case "tcp":
+      return { keys: ["tcpTX", "tcpRX"], labels: ["TCP 发送", "TCP 接收"], title: t("TCP 网络带宽") };
+    case "quic":
+      return { keys: ["quicTX", "quicRX"], labels: ["QUIC 发送", "QUIC 接收"], title: t("QUIC 流带宽") };
     default:
       if (chartSamples().some((point) => Object.hasOwn(point, "tcpTX")))
         return { keys: ["tcpTX", "tcpRX", "quicTX", "quicRX"],
@@ -2697,12 +2803,13 @@ function drawChart() {
   }
   drawChartHover(c, geometry, metric, max);
 }
-$("traffic-metric").addEventListener("change", () => { renderTrafficScope(); drawChart(); });
-$("traffic-ip").addEventListener("change", () => {
-  clearChartHover();
-  renderTrafficScope();
-  drawChart();
-});
+for (const id of ["traffic-source", "traffic-metric", "traffic-transport", "traffic-ip", "traffic-vpn-ip", "traffic-vpn-transport"]) {
+  $(id).addEventListener("change", () => {
+    if (id === "traffic-ip" || id === "traffic-vpn-ip") clearChartHover();
+    renderTrafficScope();
+    drawChart();
+  });
+}
 $("login-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   localText($("auth-error"), () => "");

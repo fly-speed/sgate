@@ -126,9 +126,10 @@
               ><small><span data-i18n="TCP 含握手及同端口管理连接；QUIC 按已接入连接计数">TCP 含握手及同端口管理连接；QUIC 按已接入连接计数</span></small></article
             ><article class="metric"
               ><p><span data-i18n="统计持续时间">统计持续时间</span></p><strong id="uptime">—</strong
-              ><small><span data-i18n="进程启动后累计，代理重启不清零">进程启动后累计，代理重启不清零</span></small></article
+              ><small><span data-i18n="进程启动后计时">进程启动后计时</span></small></article
             ></div
           ><div class="overview-status">
+            <p id="traffic-total-scope" class="muted" hidden><span data-i18n="总流量包含代理、VPN IP 和 VPN 白噪音。VPN 停止或重建时，其累计部分清零。">总流量包含代理、VPN IP 和 VPN 白噪音。VPN 停止或重建时，其累计部分清零。</span></p>
             <p id="memory-summary" class="muted"></p>
             <p id="quic-health" class="muted"></p>
             <p id="vpn-summary" class="muted"></p>
@@ -136,15 +137,25 @@
           ><article class="chart-card"
             ><div class="chart-header"
               ><h3 id="traffic-chart-title"><span data-i18n="实时网络带宽">实时网络带宽</span></h3
-              ><select id="traffic-ip" aria-label="连接 IP" data-i18n-aria-label="连接 IP"><option value="" data-i18n="全部连接 IP">全部连接 IP</option></select
+              ><select id="traffic-source" aria-label="流量来源" data-i18n-aria-label="流量来源">
+                <option value="proxy" data-i18n="代理流量">代理流量</option>
+                <option value="vpn" data-i18n="VPN 流量">VPN 流量</option></select
               ><select id="traffic-metric" aria-label="图表流量类型" data-i18n-aria-label="图表流量类型">
-                <option value="total" data-i18n="总流量">总流量</option
-                ><option value="tcp">TCP</option
-                ><option value="quic">QUIC</option
-                ><option value="vpn">VPN IP</option
-                ><option value="vpn-noise" data-i18n="VPN 白噪音">VPN 白噪音</option
-                ><option value="noise" data-i18n="白噪音负载">白噪音负载</option
-                ><option value="business" data-i18n="业务负载">业务负载</option> </select
+                <option value="total" data-i18n="全部流量">全部流量</option>
+                <option value="noise" data-i18n="白噪音流量">白噪音流量</option>
+                <option value="business" data-i18n="业务流量">业务流量</option></select
+              ><select id="traffic-transport" aria-label="代理传输协议" data-i18n-aria-label="代理传输协议">
+                <option value="all" data-i18n="全部协议">全部协议</option>
+                <option value="tcp">TCP</option>
+                <option value="quic">QUIC</option></select
+              ><select id="traffic-vpn-transport" hidden aria-label="VPN 传输协议" data-i18n-aria-label="VPN 传输协议">
+                <option value="all" data-i18n="全部协议">全部协议</option>
+                <option value="tcp">TCP</option>
+                <option value="wss">WSS</option>
+                <option value="udp">UDP</option>
+                <option value="quic">QUIC</option></select
+              ><select id="traffic-vpn-ip" hidden aria-label="VPN 客户端" data-i18n-aria-label="VPN 客户端"><option value="" data-i18n="全部 VPN 客户端">全部 VPN 客户端</option></select
+              ><select id="traffic-ip" aria-label="连接 IP" data-i18n-aria-label="连接 IP"><option value="" data-i18n="全部连接 IP">全部连接 IP</option></select
               ><div class="legend"
                 ><span id="traffic-legend-dot-0" class="tx-dot"></span><span id="traffic-legend-label-0" data-i18n="发送">发送</span><span id="traffic-legend-dot-1" class="rx-dot"></span><span id="traffic-legend-label-1" data-i18n="接收">接收</span><span id="traffic-quic-legend" hidden><i class="quic-tx-dot"></i><span id="traffic-legend-label-2">QUIC 发送</span><i class="quic-rx-dot"></i><span id="traffic-legend-label-3">QUIC 接收</span></span></div
               ></div

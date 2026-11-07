@@ -6,13 +6,22 @@ import (
 	"sort"
 )
 
-// ClientSnapshot contains only authenticated session metadata. PublicIP is the
+type ClientTraffic struct {
+	TX      uint64 `json:"tx_ip_bytes"`
+	RX      uint64 `json:"rx_ip_bytes"`
+	NoiseTX uint64 `json:"noise_tx_bytes"`
+	NoiseRX uint64 `json:"noise_rx_bytes"`
+}
+
+// ClientSnapshot contains authenticated session metadata and traffic. PublicIP is the
 // source address observed by the server, which may be a NAT or relay address.
 type ClientSnapshot struct {
-	PublicIP      string `json:"public_ip"`
-	RemoteAddress string `json:"remote_address"`
-	VPNIP         string `json:"vpn_ip"`
-	Transport     string `json:"transport"`
+	Generation    string        `json:"generation"`
+	Stats         ClientTraffic `json:"stats"`
+	PublicIP      string        `json:"public_ip"`
+	RemoteAddress string        `json:"remote_address"`
+	VPNIP         string        `json:"vpn_ip"`
+	Transport     string        `json:"transport"`
 }
 
 func (s *Server) Clients() []ClientSnapshot {
@@ -41,7 +50,14 @@ func (s *Server) Clients() []ClientSnapshot {
 				transport = "wss"
 			}
 		}
-		clients = append(clients, ClientSnapshot{PublicIP: host, RemoteAddress: remote, VPNIP: ip.String(), Transport: transport})
+		clients = append(clients, ClientSnapshot{
+			Generation: p.trafficGeneration,
+			Stats: ClientTraffic{
+				TX: p.trafficTX.Load(), RX: p.trafficRX.Load(),
+				NoiseTX: p.noiseTX.Load(), NoiseRX: p.noiseRX.Load(),
+			},
+			PublicIP: host, RemoteAddress: remote, VPNIP: ip.String(), Transport: transport,
+		})
 	}
 	sort.Slice(clients, func(i, j int) bool { return clients[i].VPNIP < clients[j].VPNIP })
 	return clients
