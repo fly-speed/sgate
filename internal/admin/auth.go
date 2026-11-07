@@ -116,8 +116,8 @@ func validName(s string) bool {
 	return true
 }
 func makeAccount(name, password string) (account, error) {
-	if !validName(name) || utf8.RuneCountInString(password) < 12 || len(password) > 256 {
-		return account{}, errors.New("用户名需为 3～64 位字母、数字或 _ . @ -；密码至少 12 个字符、最多 256 字节")
+	if !validName(name) || utf8.RuneCountInString(password) < 6 || len(password) > 256 {
+		return account{}, errors.New("用户名需为 3～64 位字母、数字或 _ . @ -；密码至少 6 个字符、最多 256 字节")
 	}
 	salt := make([]byte, 16)
 	if _, e := rand.Read(salt); e != nil {

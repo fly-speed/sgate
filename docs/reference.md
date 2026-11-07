@@ -175,7 +175,7 @@ python3 scripts/test-merged-standalone.py --client bin/sgate-client --server bin
 
 登录后点击右上角“退出登录”，服务端立即删除当前登录对应的持久化会话文件并清除浏览器 Cookie。页面停止流量刷新、清空配置草稿与密码输入，返回登录页；旧 Cookie 不能恢复该会话。其他浏览器的登录会话继续有效。
 
-首次打开界面会主动进入“创建首个管理员”，没有预设账号和密码。程序生成一次性初始化令牌，日志只提示 `setup-token-file` 路径；从该文件读取令牌，在页面输入用户名、至少 12 个字符的密码及令牌即可创建账号。创建成功后令牌文件删除，后续直接登录。管理密码与代理的 `-password` 分开保存。账号文件存用户名、随机盐及 PBKDF2-HMAC-SHA256 密码哈希（600,000 次迭代，参照 [OWASP 密码存储建议](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)），不保存明文密码。
+首次打开界面会主动进入“创建首个管理员”，没有预设账号和密码。程序生成一次性初始化令牌，日志只提示 `setup-token-file` 路径；从该文件读取令牌，在页面输入用户名、至少 6 个字符的密码及令牌即可创建账号。创建成功后令牌文件删除，后续直接登录。管理密码与代理的 `-password` 分开保存。账号文件存用户名、随机盐及 PBKDF2-HMAC-SHA256 密码哈希（600,000 次迭代，参照 [OWASP 密码存储建议](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)），不保存明文密码。
 
 管理配置示例见 [客户端](../sgate-client.cf)、[服务端](../sgate-server.cf)。下表是兼容的独立管理文件键名；合并配置使用 `admin_` 前缀并将 `-` 换为 `_`：
 
