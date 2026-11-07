@@ -27,7 +27,7 @@ func (h *Handler) syncMappingListeners(
 	if !exists {
 		return content, nil, nil
 	}
-	addresses := []string{values["listen"]}
+	addresses := strings.FieldsFunc(strings.ReplaceAll(current, "|", ":"), func(r rune) bool { return r == ',' || r == ';' || r == ' ' || r == '\t' })
 	if len(mappings) > 0 {
 		addresses = nil
 		for _, mapping := range mappings {

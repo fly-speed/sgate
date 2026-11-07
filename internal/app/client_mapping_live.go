@@ -15,16 +15,24 @@ func (d definition) clientRoutes(singleAddress string) []clientProxy {
 	if d.client == nil {
 		return nil
 	}
-	configured := d.listen
-	if _, port, _ := net.SplitHostPort(configured); port == "0" {
-		configured = singleAddress
+	var routes []clientProxy
+	seen := map[string]bool{}
+	for _, configured := range strings.Split(d.listen, ",") {
+		configured = strings.TrimSpace(configured)
+		if _, port, _ := net.SplitHostPort(configured); port == "0" {
+			configured = singleAddress
+		}
+		address, err := net.ResolveTCPAddr("tcp", configured)
+		if err != nil {
+			return nil
+		}
+		_, port, _ := net.SplitHostPort(address.String())
+		if !seen[port] {
+			routes = append(routes, clientProxy{Listen: address.String(), Server: d.client.URL, Addr: d.client.Addr, AllowReverse: d.client.AllowReverse, port: port, config: *d.client})
+			seen[port] = true
+		}
 	}
-	address, err := net.ResolveTCPAddr("tcp", configured)
-	if err != nil {
-		return nil
-	}
-	_, port, _ := net.SplitHostPort(address.String())
-	return []clientProxy{{Listen: address.String(), Server: d.client.URL, Addr: d.client.Addr, AllowReverse: d.client.AllowReverse, port: port, config: *d.client}}
+	return routes
 }
 
 func sameClientAddresses(a, b string) bool {

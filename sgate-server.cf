@@ -119,9 +119,9 @@ service sgate-server {
     # Send padding during application traffic; true preserves the original behavior, false pauses it during traffic in either direction.
     noise-traffic = "false"
     # Send padding when application connections exist but neither direction has data; use the interval and size settings above.
-    noise-idle = "true"
+    noise-idle = "false"
     # Send padding when the tunnel is online with no application connections; true sends, false pauses. Heartbeats are unaffected.
-    noise-empty = "true"
+    noise-empty = "false"
     # A connection is idle after this duration without application data in either direction. Units: ms/s/m/h. 0 uses 1s; new unused connections are idle immediately.
     noise-idle-after = 1s
 

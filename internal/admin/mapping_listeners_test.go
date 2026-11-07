@@ -11,7 +11,7 @@ import (
 
 func TestMappingListenersSavedTogetherAndRolledBack(t *testing.T) {
 	h, cfg := adminFixture(t)
-	original := "service client {\n # keep listener comment\n master_service = 127.0.0.1:9000 # keep inline\n listen = 127.0.0.1:9000\n password = 'existing-proxy-secret'\n proxies =\n}\n"
+	original := "service client {\n # keep listener comment\n master_service = 127.0.0.1:9000 # keep inline\n password = 'existing-proxy-secret'\n proxies =\n}\n"
 	if err := os.WriteFile(h.view.AppConfigPath, []byte(original), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestMappingListenersSavedTogetherAndRolledBack(t *testing.T) {
 	check("127.0.0.1|2022", 1)
 	save([]proxyMapping{mapping("[::1]:2022")}, nil, false, 200)
 	check("[::1]|2022", 1)
-	save([]proxyMapping{}, map[string]string{"listen": "127.0.0.1:9003"}, false, 200)
+	save([]proxyMapping{}, map[string]string{"master_service": "127.0.0.1|9003"}, false, 200)
 	check("127.0.0.1|9003", 0)
 	before, _ := os.ReadFile(h.view.AppConfigPath)
 	save(routes, map[string]string{"master_service": "127.0.0.1|9009"}, false, 400)

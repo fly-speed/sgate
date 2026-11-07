@@ -541,8 +541,8 @@ def run(args, secure):
     for role in ["server", "client"]:
         binary = str(pathlib.Path(getattr(args, role)).resolve())
         cfg = case / f"app/{role}.conf"
-        listen_key = "master_service" if role == "server" else "listen"
-        listen_value = ", ".join(f"{'' if getattr(args, role + '_wildcard', False) else '127.0.0.1'}|{p}" for p in addresses[role]) if role == "server" else "127.0.0.1:1"
+        listen_key = "master_service"
+        listen_value = ", ".join(f"{'' if getattr(args, role + '_wildcard', False) else '127.0.0.1'}|{p}" for p in addresses[role])
         settings = f"{listen_key} = {listen_value}\nkey-file = {key}\npassword = isolated-proxy-password\nnoise-interval-min = 10ms\nnoise-interval-max = 30ms\nnoise-min-bytes = 128\nnoise-max-bytes = 512\n"
         if role == "client":
             settings += f'server = {wire}://127.0.0.1:{relay.port if relay else addresses["server"][0]}/tunnel\n'
@@ -688,7 +688,7 @@ scan_subdir = 0
                     "-alone",
                     "-config",
                     str(services[role]),
-                    "-master_service" if role == "server" else "-listen",
+                    "-master_service",
                     f"{'' if role == 'server' and getattr(args, 'server_wildcard', False) else '127.0.0.1'}:{addresses[role][0]}",
                     "-noise-min-bytes",
                     "256",
@@ -943,7 +943,7 @@ scan_subdir = 0
         before = configs["client"].read_bytes()
         old = pid("client")
         if args.mode == "managed":
-            a.apply(lambda text: text.replace("listen = 127.0.0.1:1", "listen = 127.0.0.1:2"), 409)
+            a.apply(lambda text: "\n".join("master_service = 127.0.0.1|1" if line.strip().startswith("master_service =") else line for line in text.split("\n")), 409)
             assert configs["client"].read_bytes() == before
             assert pid("client") == old
         if args.merged:

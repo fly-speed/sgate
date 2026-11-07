@@ -79,7 +79,6 @@ service web-client {
 
     # Connections and authentication
     # Local TCP listen address for application connections; retain the existing address.
-    listen = "127.0.0.1:1088"
     # Server WebSocket URL; retain the existing scheme, address, port and path.
     server = "ws://i18n.webcool.cn:8088/tunnel"
     # Server-side backend; a nonempty value overrides addr in the server URL. Supports IP:port or domain:port.

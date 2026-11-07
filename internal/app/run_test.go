@@ -46,8 +46,8 @@ func appFlags(role string) *flag.FlagSet {
 	fs.Duration("noise-interval-max", 0, "")
 	cli.ByteSizeVar(fs, new(int), "noise-min-bytes", 1024, "")
 	cli.ByteSizeVar(fs, new(int), "noise-max-bytes", 10240, "")
+	fs.String("master_service", "127.0.0.1|0", "")
 	if role == "client" {
-		fs.String("listen", "127.0.0.1:0", "")
 		fs.String("proxies", "", "")
 		fs.String("proxies-file", "", "")
 		fs.String("username", "", "")
@@ -61,7 +61,6 @@ func appFlags(role string) *flag.FlagSet {
 		fs.Duration("reconnect-max", 10*time.Second, "")
 		fs.Duration("offline-timeout", 2*time.Minute, "")
 	} else {
-		fs.String("master_service", "127.0.0.1|0", "")
 		fs.String("target", "", "")
 		fs.String("accounts-file", "", "")
 		fs.String("allowed-targets", "", "")
@@ -160,10 +159,7 @@ func TestApplyRestartAndBindRollback(t *testing.T) {
 				t.Fatal(e)
 			}
 			defer occupied.Close()
-			listenKey := "listen"
-			if role == "server" {
-				listenKey = "master_service"
-			}
+			listenKey := "master_service"
 			setConfig(t, c, listenKey, occupied.Addr().String())
 			if e = c.apply(); e == nil || !strings.Contains(e.Error(), "已恢复") {
 				t.Fatal("missing rollback", e)

@@ -184,7 +184,7 @@ func TestClientReversePermissionSingleFallbackDoesNotInheritOrApplyPendingEdits(
 			address := onlineAddress(t)
 			routes := []clientProxy{{Listen: address, Server: "ws://127.0.0.1:1/tunnel", AllowReverse: test.mapping}}
 			raw, _ := json.Marshal(routes)
-			client := startOnlineController(t, "listen = "+address+"\nserver = ws://127.0.0.1:1/tunnel\nallow-reverse = "+fmt.Sprint(test.global)+"\nproxies = '"+string(raw)+"'\n", false)
+			client := startOnlineController(t, "master_service = "+address+"\nserver = ws://127.0.0.1:1/tunnel\nallow-reverse = "+fmt.Sprint(test.global)+"\nproxies = '"+string(raw)+"'\n", false)
 			if test.pending != "" {
 				setConfig(t, client, "allow-reverse", test.pending)
 			}

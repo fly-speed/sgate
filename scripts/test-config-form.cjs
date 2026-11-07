@@ -691,7 +691,7 @@ test("relationship validation catches reconnect, sizes, heartbeat, TLS and share
   assert.equal(vm.runInContext("configRelationErrors(values).size", context), 0);
 });
 
-test("server shared HTTP accepts wildcard addresses while client HTTPS rules remain", async () => {
+test("management allows wildcard HTTP and selects HTTPS with a complete certificate pair", async () => {
   const { context } = await page();
   context.values = {
     listen: "0.0.0.0:8081",
@@ -705,7 +705,11 @@ test("server shared HTTP accepts wildcard addresses while client HTTPS rules rem
   assert.equal(vm.runInContext('configRelationErrors(values).has("tls-key")', context), true);
   context.values = { admin_listen: "0.0.0.0:9081", admin_tls_cert: "", admin_tls_key: "" };
   vm.runInContext('configRole = "client"', context);
-  assert.equal(vm.runInContext('configRelationErrors(values).has("admin_listen")', context), true);
+  assert.equal(vm.runInContext("configRelationErrors(values).size", context), 0);
+  context.values.admin_tls_cert = "cert.pem";
+  assert.equal(vm.runInContext('configRelationErrors(values).has("admin_tls_key")', context), true);
+  context.values.admin_tls_key = "key.pem";
+  assert.equal(vm.runInContext("configRelationErrors(values).size", context), 0);
 });
 
 test(

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Test role selection through the real Makefile without Go or root privileges."""
 import pathlib
+import json
 import shutil
 import subprocess
 import tempfile
@@ -75,6 +76,7 @@ class InstallTests(unittest.TestCase):
         self.install("install")
         self.check_role("client")
         self.check_role("server")
+        self.assertEqual(json.loads((self.target / "conf/sgate-proxies.json").read_text()), [])
 
     def test_each_role_needs_only_its_own_inputs(self):
         for role, other in [("server", "client"), ("client", "server")]:

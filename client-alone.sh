@@ -18,7 +18,7 @@ if [ ! -x "$binary" ]; then
 fi
 
 exec "$binary" -alone \
-    -listen 127.0.0.1:9000 \
+    -master_service '127.0.0.1|9000' \
     -server ws://127.0.0.1:8081/tunnel \
     -addr 127.0.0.1:8080 \
     -key-file "${SGATE_KEY_FILE:-$key_file}" \

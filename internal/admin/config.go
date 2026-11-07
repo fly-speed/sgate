@@ -92,13 +92,9 @@ func (c Config) validate() error {
 		return errors.New("both management TLS files are required")
 	}
 	if !c.shared {
-		host, _, e := net.SplitHostPort(c.Listen)
+		_, _, e := net.SplitHostPort(c.Listen)
 		if e != nil {
 			return e
-		}
-		ip := net.ParseIP(host)
-		if (ip == nil || !ip.IsLoopback()) && c.TLSCert == "" {
-			return errors.New("management listening outside loopback requires TLS")
 		}
 	}
 	paths := []string{c.UsersFile, c.SessionDir, c.SetupTokenFile}

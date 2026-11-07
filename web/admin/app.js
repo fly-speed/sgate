@@ -620,17 +620,6 @@ function configRelationErrors(values) {
     fail(["vpn-server"], t("VPN 模式需要独立的 VPN 服务端地址"));
   if (has("path") && (values.path === "/admin" || values.path.startsWith("/admin/")))
     fail(["path"], t("隧道路径不能占用 /admin 管理入口"));
-  const loopback = (address) => /^(localhost|127(?:\.\d+){3}|\[::1\]):/i.test(address);
-  if (
-    configRole === "client" &&
-    has("admin_listen", "admin_tls_cert") &&
-    !loopback(values.admin_listen) &&
-    !values.admin_tls_cert
-  )
-    fail(
-      ["admin_listen", "admin_tls_cert", "admin_tls_key"],
-      t("管理界面监听非回环地址时必须配置 HTTPS 证书与私钥"),
-    );
   if (has("admin_users_file", "admin_session_dir", "admin_setup_token_file")) {
     const keys = ["admin_users_file", "admin_session_dir", "admin_setup_token_file"];
     if (new Set(keys.map((key) => values[key])).size < 3)
@@ -738,7 +727,7 @@ function renderProxyMappings(group, field, overridden, readOnly = false) {
     (overridden ? t(" 当前映射来源受命令行覆盖，保存配置不会移除启动时的覆盖参数。") : "") +
     " " + t("每个映射可使用独立账号密码；关闭独立认证则继承公共凭据。测试使用本行认证和地址，密钥、TLS 和 send-addr 沿用生效设置。密码不会回显，留空保留已保存密码。") +
     " " + t("配置 proxies-file 后映射保存在独立 JSON 文件；留空继续使用内联 proxies。更改文件路径时自动迁移当前映射，已有文件则加载其映射。") +
-    " " + t("保存后自动在线更新映射并同步 master_service，未修改映射的连接继续保留。清空时使用单代理 listen；托管模式端口变化会自动通过 acl_master 重启客户端，并中断当前业务连接。")));
+    " " + t("保存后自动在线更新映射并同步 master_service，未修改映射的连接继续保留。清空时使用单代理 master_service；托管模式端口变化会自动通过 acl_master 重启客户端，并中断当前业务连接。")));
   const saveButton = document.createElement("button");
   saveButton.type = "button";
   saveButton.className = "secondary config-save";

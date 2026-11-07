@@ -252,13 +252,13 @@ func argumentOptions(role string) map[string]configRule {
 	clientOnly := " vpn-credentials-file vpn-server vpn-client-ip vpn-tls-ca vpn-tls-skip-verify vpn-routes vpn-dns vpn-dns-service vpn-block-ipv6 quic-mode username proxies proxies-file server addr send-addr allow-reverse tls-ca reconnect-min reconnect-max offline-timeout "
 	serverOnly := " vpn-accounts-file vpn-quic-listen vpn-udp-listen vpn-tcp-listen vpn-tls-cert vpn-tls-key vpn-max-clients vpn-egress-interface vpn-allow-private quic-listen accounts-file target allowed-targets path tls-cert tls-key session-ttl max-sessions "
 	for key, rule := range configRules {
-		if (strings.Contains(key, "_") && !(role == "server" && key == "master_service")) || key == "master_args" || strings.HasPrefix(key, "app_") {
+		if (strings.Contains(key, "_") && key != "master_service") || key == "master_args" || strings.HasPrefix(key, "app_") {
 			continue
 		}
 		if role == "client" && strings.Contains(serverOnly, " "+key+" ") {
 			continue
 		}
-		if role == "server" && (key == "listen" || strings.Contains(clientOnly, " "+key+" ")) {
+		if key == "listen" || (role == "server" && strings.Contains(clientOnly, " "+key+" ")) {
 			continue
 		}
 		rule.Options = nil

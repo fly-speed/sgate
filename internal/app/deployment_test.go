@@ -377,10 +377,7 @@ func runManagementDeployment(t *testing.T, cb, sb string, secure bool, mode stri
 			// 客户端也经 /admin 完成登录、保存、应用及进程重启回归。
 			d.base += "/admin"
 		}
-		listenKey := "listen"
-		if role == "server" {
-			listenKey = "master_service"
-		}
+		listenKey := "master_service"
 		common := listenKey + " = " + business + "\nkey-file = " + strconv.Quote(key) + ("\n" +
 			"password = deployment-test-password\n" +
 			"noise-interval-min = 20ms\n" +

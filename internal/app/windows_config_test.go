@@ -14,7 +14,7 @@ func TestWindowsStandaloneSampleLoadsProxyAndAdminSettings(t *testing.T) {
 	if err := cli.Parse(fs, []string{"-config", path}); err != nil {
 		t.Fatal(err)
 	}
-	if fs.Lookup("listen").Value.String() != "127.0.0.1:9000" || fs.Lookup("vpn-mode").Value.String() != "disabled" || fs.Lookup("admin-enabled").Value.String() != "true" {
+	if fs.Lookup("master_service").Value.String() != "127.0.0.1|9000" || fs.Lookup("vpn-mode").Value.String() != "disabled" || fs.Lookup("admin-enabled").Value.String() != "true" {
 		t.Fatal("unsafe Windows sample defaults")
 	}
 	cfg, err := admin.LoadConfig(path)

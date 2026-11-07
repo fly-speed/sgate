@@ -73,8 +73,8 @@ func (d definition) startProxy(ctx context.Context, stats *tunnel.Stats) (*insta
 	if len(d.proxies) > 0 && d.tcp == nil {
 		return nil, errors.New("multi-proxy requires the go-service TCP lifecycle")
 	}
-	if len(d.proxies) > 0 && d.tcp.Managed() {
-		if err := validateProxyListeners(d.proxies, d.tcp.Addresses()); err != nil {
+	if d.tcp != nil && d.tcp.Managed() && !d.vpnOnly {
+		if err := validateProxyListeners(d.clientRoutes(d.listen), d.tcp.Addresses()); err != nil {
 			return nil, err
 		}
 	}

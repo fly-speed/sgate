@@ -29,7 +29,7 @@ def main():
         (root / "key").write_text(os.urandom(32).hex())
         config = root / "client.cf"
         config.write_text(f"""service isolated-vpn-web {{
- listen = 127.0.0.1:0
+ master_service = 127.0.0.1|0
  key-file = {root}/key
  vpn-mode = only
  vpn-server = quic://127.0.0.1:8444/vpn

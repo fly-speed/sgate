@@ -187,7 +187,7 @@ func TestManagementRepeatedSaveRestartDuplexResources(t *testing.T) {
 			client := newController(
 				t,
 				"client",
-				"listen = "+temporaryAddress(t)+"\nserver = "+scheme+"://"+server.worker.listener.Addr().String()+"/tunnel\n"+ca+noise,
+				"master_service = "+temporaryAddress(t)+"\nserver = "+scheme+"://"+server.worker.listener.Addr().String()+"/tunnel\n"+ca+noise,
 				"-noise-interval-min",
 				"0",
 				"-noise-interval-max",
@@ -323,7 +323,7 @@ func TestManagementRepeatedSaveRestartDuplexResources(t *testing.T) {
 					before, _ := os.ReadFile(client.path)
 					oldAddress := client.worker.listener.Addr().String()
 					generation := client.generation
-					caAPI.save(t, func(s string) string { return replaceSetting(s, "listen", occupied.Addr().String()) }, 409)
+					caAPI.save(t, func(s string) string { return replaceSetting(s, "master_service", occupied.Addr().String()) }, 409)
 					occupied.Close()
 					after, _ := os.ReadFile(client.path)
 					if !bytes.Equal(before, after) || client.generation != generation ||

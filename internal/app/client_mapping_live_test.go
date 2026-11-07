@@ -141,7 +141,7 @@ func TestOnlineMappingsKeepUnchangedConnectionsAndRollback(t *testing.T) {
 			defer web.Close()
 			endpoint := "ws" + strings.TrimPrefix(web.URL, "http") + "/tunnel"
 			first, second, fallback := onlineAddress(t), onlineAddress(t), onlineAddress(t)
-			text := "listen = " + fallback + "\nserver = " + endpoint + "\nnoise-interval-min = 1ms\nnoise-interval-max = 3ms\n"
+			text := "master_service = " + fallback + "\nserver = " + endpoint + "\nnoise-interval-min = 1ms\nnoise-interval-max = 3ms\n"
 			if tlsMode {
 				ca := filepath.Join(t.TempDir(), "ca.pem")
 				os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: web.Certificate().Raw}), 0600)

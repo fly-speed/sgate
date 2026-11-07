@@ -16,7 +16,6 @@ type clientOptions struct {
 	adminEnabled      bool
 	vpnDiagnose       bool
 	adminConfig       string
-	listen            string
 	server            string
 	proxies           string
 	proxiesFile       string
@@ -59,7 +58,7 @@ func parseClientOptions() (clientOptions, error) {
 		"",
 		"separate Web management configuration (disabled when empty)",
 	)
-	flag.StringVar(&options.listen, "listen", "127.0.0.1:9000", "local TCP listen address")
+	flag.String("master_service", "127.0.0.1|9000", "single-proxy TCP listeners for standalone and acl_master modes (IP|port, comma-separated)")
 	flag.String("quic-mode", "native", "QUIC protocol: native or legacy")
 	flag.StringVar(&options.server, "server", "", "server ws://, wss:// or quic:// URL (required unless proxies is set)")
 	flag.StringVar(&options.proxiesFile, "proxies-file", "", "external JSON mapping file; relative to the application config; created on startup if missing; overrides inline proxies")

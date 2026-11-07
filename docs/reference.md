@@ -72,7 +72,7 @@ QUIC 独立资源配置、监听自动恢复、健康检查与新指标已提供
 
 ## acl_master 托管
 
-客户端接入 [go-service](https://github.com/acl-dev/go-service) 的 TCP 描述符接口；服务端按 [gin-service](https://github.com/acl-dev/gin-service) 示例统一使用 `Init → 注册路由 → Run`，独立启动和 acl_master 托管均经过这一生命周期。服务端不再有直接调用 `net/http.ListenAndServe` 的独立分支。两端识别框架的 `-f`、`-n`、`-t`、`-s` 等参数，继承 FD 5 状态通道及 FD 6 起的监听套接字；服务端支持多个监听、HTTPS/WSS，证书继续由 `tls-cert`、`tls-key` 指定。服务端两种启动方式统一读取 `master_service`（`IP|端口`，多项用逗号分隔）：alone 模式自行监听，托管模式继承 acl_master 的句柄。服务端仅接受 master_service 配置及 -master_service 参数，不再接受 listen 或 -listen。反向 TCP 映射在 `master_service` 中的保留端口不会成为 HTTP/WSS 入口。
+客户端接入 [go-service](https://github.com/acl-dev/go-service) 的 TCP 描述符接口；服务端按 [gin-service](https://github.com/acl-dev/gin-service) 示例统一使用 `Init → 注册路由 → Run`，独立启动和 acl_master 托管均经过这一生命周期。服务端不再有直接调用 `net/http.ListenAndServe` 的独立分支。两端识别框架的 `-f`、`-n`、`-t`、`-s` 等参数，继承 FD 5 状态通道及 FD 6 起的监听套接字；服务端支持多个监听、HTTPS/WSS，证书继续由 `tls-cert`、`tls-key` 指定。客户端单代理与服务端两种启动方式统一读取 `master_service`（`IP|端口`，多项用逗号分隔）：alone 模式自行监听，托管模式继承 acl_master 的句柄。两端仅接受 `master_service` 配置及 `-master_service` 参数，不再接受旧的顶层 `listen` 或 `-listen`。反向 TCP 映射在 `master_service` 中的保留端口不会成为 HTTP/WSS 入口。
 
 服务端入口 `cmd/sgate-server/main.go` 直接执行 `gin-service.Init → setRoute → Run`，不再经过工厂回调。`routes.go` 集中列出 WebSocket、管理页面、登录、配置、统计与服务重启入口；`options.go` 仅定义启动参数，`service.go` 仅适配共用的生命周期接口。`internal/app/server.go` 管理业务配置和资源，`sharedServer` 只负责切换当前代理及证书。隧道路径热更新通过兜底路由交给当前代理校验，避免运行中修改 Gin 路由树。
 
@@ -108,7 +108,7 @@ master_stop_kill = false
 master_stop_wait = true
 ```
 
-会话和重放状态属于单个进程，因此限制为一个工作进程；不支持把同一个隧道会话分配给多个独立工作进程。监听端口由 `master_service` 决定，客户端应用 `listen` 和 `-listen` 不会重新绑定或覆盖继承端口；其它应用参数仍按“命令行高于配置文件”处理。工作目录由 `.cf` 的 `master_home` 决定，业务相对路径按这个目录解析，管理配置的存储、静态目录及证书路径继续相对管理配置文件解析。运行身份由 acl_master/服务账户设置；模板内再次降权和 chroot 模式会明确拒绝。
+会话和重放状态属于单个进程，因此限制为一个工作进程；不支持把同一个隧道会话分配给多个独立工作进程。监听端口由 `master_service` 决定，其它应用参数仍按“命令行高于配置文件”处理。工作目录由 `.cf` 的 `master_home` 决定，业务相对路径按这个目录解析，管理配置的存储、静态目录及证书路径继续相对管理配置文件解析。运行身份由 acl_master/服务账户设置；模板内再次降权和 chroot 模式会明确拒绝。
 
 启用 Web 管理后，可以继续校验、保存并重启代理，PID 和实际监听端口保持不变，登录会话及本进程累计带宽保持有效。界面会显示监听由 acl_master 管理；若应用新配置尝试修改有效 `listen`，会拒绝并还原本次保存。更换监听地址请修改 `.cf` 的 `master_service`，再通过 `master_ctl` 停止并重新启动该服务。框架停止、重启和 Web 代理重启都会中断当前业务连接，恢复后可以建立新连接。
 
@@ -190,7 +190,7 @@ python3 scripts/test-merged-standalone.py --client bin/sgate-client --server bin
 | `setup-token-file` | 首次建号令牌文件 |
 | `tls-cert` / `tls-key` | 客户端独立管理 HTTPS 证书/私钥；服务端使用代理 TLS 配置 |
 
-服务端共享管理入口默认允许在任意监听地址使用 HTTP/WS，不再强制非回环地址配置 TLS；配置代理的 `tls-cert`、`tls-key` 即使用 HTTPS/WSS。客户端独立管理入口绑定非回环地址时仍需配置管理 HTTPS 证书。账号、会话、令牌与配置备份文件按 `0600` 创建；管理员账号和登录会话继续与代理配置分开存储。持久 Cookie 使用 HttpOnly、SameSite=Strict，HTTPS 下同时使用 Secure。会话有效期固定，不随访问延长；进程重启或浏览器重开后，在原有效期内仍可登录。到期立即拒绝访问，后台最多每分钟清理过期文件。退出会删除对应会话；修改管理员账号/密码需要当前密码，并使全部旧会话失效。管理超时及存储路径修改后，需要重启整个程序；客户端管理监听和证书也需整进程重启。服务端代理证书可通过“保存并重启代理”更新，新 TLS 连接使用新证书；共享监听地址或 HTTP/HTTPS 模式变更需仅保存后重启整个进程，应用操作会拒绝并回滚此类变更。合并 `.cf` 中的框架参数及 `admin_` 参数变更可“仅保存”，但“保存并重启代理”会拒绝并回滚这些变更，避免误报已经生效；随后使用 `master_ctl` 或手工重启整个程序。
+服务端共享管理入口默认允许在任意监听地址使用 HTTP/WS，不再强制非回环地址配置 TLS；配置代理的 `tls-cert`、`tls-key` 即使用 HTTPS/WSS。客户端独立管理入口同样允许在任意监听地址使用 HTTP；配置完整的 `admin_tls_cert`、`admin_tls_key` 后自动使用 HTTPS，二者均为空时使用 HTTP；只填写其中一项或证书无法加载时拒绝启动。账号、会话、令牌与配置备份文件按 `0600` 创建；管理员账号和登录会话继续与代理配置分开存储。持久 Cookie 使用 HttpOnly、SameSite=Strict，HTTPS 下同时使用 Secure。会话有效期固定，不随访问延长；进程重启或浏览器重开后，在原有效期内仍可登录。到期立即拒绝访问，后台最多每分钟清理过期文件。退出会删除对应会话；修改管理员账号/密码需要当前密码，并使全部旧会话失效。管理超时及存储路径修改后，需要重启整个程序；客户端管理监听和证书也需整进程重启。服务端代理证书可通过“保存并重启代理”更新，新 TLS 连接使用新证书；共享监听地址或 HTTP/HTTPS 模式变更需仅保存后重启整个进程，应用操作会拒绝并回滚此类变更。合并 `.cf` 中的框架参数及 `admin_` 参数变更可“仅保存”，但“保存并重启代理”会拒绝并回滚这些变更，避免误报已经生效；随后使用 `master_ctl` 或手工重启整个程序。
 
 配置页以表单管理当前 `-config` 指定文件中的配置项，每项单独一行，按服务框架、代理与通道、Web 管理分组，显示文件中的中文说明及命令行优先标记。每行右侧的保存图标默认灰色不可点，值发生修改后启用，改回原值或保存成功后重新禁用；点击仅保存该项，不重启代理，也不覆盖其他行的未保存编辑；整页保存和应用按钮继续保留。保存时只替换修改的值，保留原有注释和未编辑的内容。代理密码及可能含密码或密钥的 `master_args`、`master_env` 使用密码输入框隐藏；不编辑则保留原值，输入新值则替换。页面不提供原始文件编辑器。保存前做语法、参数及密钥/证书校验，再备份至 `.bak` 并原子替换；旧版本编辑会被拒绝，避免覆盖其他操作。可选择“保存配置”或“保存并应用”；标注为即时生效的字段保存即更新，其他参数通过应用/重启生效。命令行显式参数在重启后仍优先，页面显示优先项名称及实际监听地址。
 
@@ -318,7 +318,7 @@ openssl rand -hex 32 > sgate.key
 
 ```sh
 ./bin/sgate-client \
-  -listen 127.0.0.1:15432 \
+  -master_service 127.0.0.1:15432 \
   -server ws://SERVER_IP:8080/tunnel \
   -key-file sgate.key -password 'your-password'
 ```
@@ -351,7 +351,7 @@ python3 scripts/test-merged-deployment.py \
 
 ```sh
 ./bin/sgate-server -config sgate-server.cf
-./bin/sgate-client -config sgate-client.cf -listen 127.0.0.1:2901
+./bin/sgate-client -config sgate-client.cf -master_service 127.0.0.1:2901
 ```
 
 合并配置为一个 `service 名称 { ... }` 块，UTF-8 文本，每行一个 `key = value`（不超过 4095 字节），支持空行、以 `#` 或 `;` 开头的整行注释。例如：
@@ -380,7 +380,7 @@ admin_enabled = false
 
 部署时把所需 `.cf` 安装到 acl_master 的服务配置目录，权限设为 `0600`，并保留程序对该目录的写权限以使用 Web 保存功能。升级前先停止旧服务，再安装新版程序和合并配置，最后启动；管理参数相对路径以安装后的 `.cf` 目录为基准，部署到不同目录时应改为原存储位置的绝对路径，以继续使用已有账号和会话。原业务地址、密码和证书路径保持不变；Web 客户端原密码为空，部署前仍须填写或通过 `-password` 提供。
 
-`master_args` 可留空，也可直接写覆盖项，例如 `master_args = -noise-interval-min 1s -noise-interval-max 3s`。托管监听仍由 `master_service` 决定；客户端 `-listen` 只在独立运行时改变实际绑定端口；服务端统一使用 `-master_service`。不要再将 `master_args` 指向已删除的 `conf/*.conf`。
+`master_args` 可留空，也可直接写覆盖项，例如 `master_args = -noise-interval-min 1s -noise-interval-max 3s`。托管监听仍由 `master_service` 决定；两端统一使用 `-master_service`。不要再将 `master_args` 指向已删除的 `conf/*.conf`。
 
 ### 配置白噪音与重连回归
 
@@ -440,7 +440,7 @@ GOMAXPROCS=4 go test ./internal/tunnel -run '^TestConfigBinaryNoiseSoak$' \
   -tls-cert server.crt -tls-key server.key
 
 ./bin/sgate-client \
-  -listen 127.0.0.1:15432 \
+  -master_service 127.0.0.1:15432 \
   -server wss://gateway.example.com:8443/tunnel \
   -key-file sgate.key -password 'your-password'
 ```
@@ -528,7 +528,7 @@ location /tunnel {
 
 | 参数 | 默认值 | 含义 |
 | --- | --- | --- |
-| `-listen` | `127.0.0.1:9000` | 应用客户端连接的本地 TCP 地址 |
+| `-master_service` | `127.0.0.1\|9000` | 应用客户端连接的本地 TCP 地址 |
 | `-server` | 必填 | 完整 `ws://` 或 `wss://` URL |
 | `-addr` | 空 | 服务端连接的可选后端 `host:port`；非空覆盖 URL 同名参数，空值保留 URL 选择 |
 | `-send-addr` | `true` | 是否携带目标地址；`false` 忽略独立 addr 并移除 URL addr，使用服务端默认后端 |
@@ -880,7 +880,7 @@ python3 -B scripts/diagnose-network-memory-parallel.py \
 proxies = '[{"listen":"127.0.0.1:9001","server":"wss://gateway.example.com:8081/tunnel?addr=127.0.0.1:22"},{"listen":"127.0.0.1:9002","server":"wss://gateway.example.com:8081/tunnel?addr=backend.example.com:8088"}]'
 ```
 
-`proxies` 留空时保留原 `listen/server/addr` 单代理行为；非空时使用数组中的监听地址和远程 URL，顶层 `listen/server/addr` 不参与映射。每项必填 `listen` 和 `server`，可选 `addr` 覆盖该项 URL 中的地址。每个本地端口必须唯一且不能为 0，最多 64 项。远程地址仍须在服务端 `allowed-targets` 中；未携带 addr 时使用服务端默认后端。所有映射共用顶层密钥、密码、CA、心跳、重连和随机白噪音设置；`send-addr=false` 对所有映射生效。每个映射拥有独立长连接、会话和有界重放缓存，`max-streams/buffer-bytes` 按映射分别限制，管理界面带宽为整个进程汇总。
+`proxies` 留空时保留原 `master_service/server/addr` 单代理行为；非空时使用数组中的监听地址和远程 URL，顶层 `master_service/server/addr` 不参与映射。每项必填 `listen` 和 `server`，可选 `addr` 覆盖该项 URL 中的地址。每个本地端口必须唯一且不能为 0，最多 64 项。远程地址仍须在服务端 `allowed-targets` 中；未携带 addr 时使用服务端默认后端。所有映射共用顶层密钥、密码、CA、心跳、重连和随机白噪音设置；`send-addr=false` 对所有映射生效。每个映射拥有独立长连接、会话和有界重放缓存，`max-streams/buffer-bytes` 按映射分别限制，管理界面带宽为整个进程汇总。
 
 命令行 `-proxies '<JSON数组>'` 覆盖文件中的整个列表，`-proxies ''` 切回单代理设置。独立启动会由 go-service 同时监听所有端口；托管模式还需将 `master_service` 设为相同端口，例如 `127.0.0.1|9001,127.0.0.1|9002`。启动时按端口集合核对继承监听，缺失或多余端口会拒绝启动；acl_master 将通配端口展开为多个网卡监听时，共用同一个映射。管理界面可保存并应用映射；应用会关闭原业务连接并重建各代理，登录会话保持有效。独立模式支持修改监听端口及绑定失败回滚；托管模式修改端口须保存 `.cf` 后通过 master_ctl 重启，原端口上的远程 URL/addr 修改可热应用。
 
@@ -1149,7 +1149,7 @@ proxies-file = 'sgate-proxies.json'
 
 - `proxies-file` 非空时优先于内联 `proxies`。显式命令行 `-proxies`（包括空值）可覆盖配置文件中的 `proxies-file`；同时显式传入两者时，`-proxies-file` 优先。
 - 每条映射的 `username`、`password` 分别覆盖公共凭据；省略的字段继承顶层设置（包括顶层命令行覆盖值）。显式 `username: ""` 使用旧单密码认证，显式空密码不合法。密钥、TLS、心跳及白噪音仍共用。
-- 空数组 `[]` 切回单代理 `listen/server/addr`。启动时文件缺失会自动创建：有内联 `proxies` 时迁移其映射，否则写入 `[]` 并使用单代理配置；相对路径仍按 `.cf` 目录解析，缺失目录以 `0700` 创建，新文件使用 `0600` 权限。已有文件不会覆盖。权限不足、格式错误或凭据非法仍会明确报错。配置校验和在线加载不会自动创建文件。文件最多 1 MiB、64 个映射。
+- 首次安装的映射文件为 `[]`，升级保留已有文件。空数组 `[]` 切回单代理 `master_service/server/addr`。启动时文件缺失会自动创建：有内联 `proxies` 时迁移其映射，否则写入 `[]` 并使用单代理配置；相对路径仍按 `.cf` 目录解析，缺失目录以 `0700` 创建，新文件使用 `0600` 权限。已有文件不会覆盖。权限不足、格式错误或凭据非法仍会明确报错。配置校验和在线加载不会自动创建文件。文件最多 1 MiB、64 个映射。
 - 管理界面的映射表单增加“独立认证”、账号和密码。密码不会回显；已有独立密码留空保留，尚无独立密码时留空继承公共密码。关闭独立认证后继承公共账号密码。修改已保存映射的监听地址时，须重新填写其独立密码。
 - 在界面修改 `proxies-file`：新文件路径自动迁移当前映射，已有文件则载入其映射；清空路径把映射迁回内联配置。保存时同步 `master_service`。映射内容和独立凭据可在线更新，未改变的映射连接保留；托管模式增删监听端口仍自动通过 `master_ctl` 重启客户端。
 - 保存失败会回滚主配置与映射文件，并保留原运行配置。外部编辑 JSON 后需在界面重新加载并保存或应用代理，程序不会自动监视文件变化。

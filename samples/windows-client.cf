@@ -1,7 +1,7 @@
 # Windows standalone client. Start with scripts/start-windows-client.ps1.
 # Configure the proxy endpoint and VPN endpoint separately through the Web UI.
 service sgate-client {
-    listen = 127.0.0.1:9000
+    master_service = 127.0.0.1|9000
     server = ws://127.0.0.1:8081/tunnel
     key-file = sgate.key
     password = 'replace-with-your-password'

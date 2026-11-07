@@ -107,10 +107,7 @@ func TestStandaloneStartModesBinaries(t *testing.T) {
 					if e != nil {
 						t.Fatal(e)
 					}
-					listenKey := "listen"
-					if role == "server" {
-						listenKey = "master_service"
-					}
+					listenKey := "master_service"
 					args := []string{
 						"-" + listenKey,
 						addresses[role],
@@ -147,9 +144,7 @@ func TestStandaloneStartModesBinaries(t *testing.T) {
 							if mode == "alone-shared" {
 								listener = strings.ReplaceAll(addresses[role], ":", "|")
 							}
-							if role == "client" {
-								text = "master_service = " + listener + "\n" + text
-							} else if mode == "alone-shared" {
+							if mode == "alone-shared" {
 								text = strings.Replace(text, "master_service = 127.0.0.1:1", "master_service = "+listener, 1)
 							}
 							text = "service standalone {\n master_args =\n" + text + "}\n"
@@ -161,7 +156,7 @@ func TestStandaloneStartModesBinaries(t *testing.T) {
 							option = "-f"
 						}
 						args = []string{option, config, "-" + listenKey, addresses[role], "-max-streams", "64"}
-						if mode == "alone-shared" && role == "server" {
+						if mode == "alone-shared" {
 							args = []string{option, config, "-max-streams", "64"}
 						}
 					}

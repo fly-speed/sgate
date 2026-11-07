@@ -304,9 +304,19 @@ func TestExpiredSessionsCleanedAndStop(t *testing.T) {
 }
 func TestConfigTLSPathsAndRateLimit(t *testing.T) {
 	h, c := adminFixture(t)
-	c.Listen = "0.0.0.0:9081"
-	if c.validate() == nil {
-		t.Fatal("public HTTP management accepted")
+	for _, address := range []string{"127.0.0.1:9081", "0.0.0.0:9081", "192.168.1.28:9081", "[::]:9081"} {
+		c.Listen = address
+		if err := c.validate(); err != nil {
+			t.Fatal("HTTP management rejected", address, err)
+		}
+	}
+	c.TLSCert = "cert.pem"
+	if err := c.validate(); err == nil {
+		t.Fatal("certificate without private key accepted")
+	}
+	c.TLSKey = "key.pem"
+	if err := c.validate(); err != nil {
+		t.Fatal("HTTPS management rejected", err)
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "admin.conf")

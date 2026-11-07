@@ -48,10 +48,7 @@ func build(role string, fs *flag.FlagSet, stats *tunnel.Stats) (definition, erro
 	if vpnErr != nil {
 		return definition{}, vpnErr
 	}
-	listen := values.optionalText("listen")
-	if role == "server" {
-		listen = strings.ReplaceAll(strings.ReplaceAll(values.text("master_service"), "|", ":"), ";", ",")
-	}
+	listen := strings.ReplaceAll(strings.ReplaceAll(values.text("master_service"), "|", ":"), ";", ",")
 	d := definition{listen: listen, vpn: prepared, vpnOnly: prepared != nil && prepared.Mode == "only"}
 	if d.vpnOnly {
 		secret := prepared.Config.Key

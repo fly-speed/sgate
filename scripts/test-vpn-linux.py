@@ -168,11 +168,11 @@ if sys.argv[1]=='vpn-start': assert call('stats')['health']['vpn']['state']=='st
 call(sys.argv[1],{})
 if sys.argv[1]=='vpn-stop': assert call('stats')['health']['vpn']['state']=='stopped'
 """
-            server_command = [args.server_binary.resolve(), "-alone", "-vpn-mode", "only", "-listen", "127.0.0.1:0",
+            server_command = [args.server_binary.resolve(), "-alone", "-vpn-mode", "only", "-master_service", "127.0.0.1:0",
                               "-key-file", out / "key", "-vpn-quic-listen", "192.0.2.1:8444",
                               "-vpn-tls-cert", out / "tls-cert.pem", "-vpn-tls-key", out / "tls-key.pem",
                               "-vpn-egress-interface", "wan0"]
-            client_command = [args.client_binary.resolve(), "-alone", "-config", client_config, "-vpn-mode", "only", "-listen", "127.0.0.1:0",
+            client_command = [args.client_binary.resolve(), "-alone", "-config", client_config, "-vpn-mode", "only", "-master_service", "127.0.0.1:0",
                               "-key-file", out / "key", "-vpn-server", f"{args.transport}://192.0.2.1:8444/vpn",
                               "-vpn-tls-ca", out / "tls-cert.pem", "-vpn-dns", ""]
         else:

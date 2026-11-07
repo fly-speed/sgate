@@ -161,7 +161,7 @@ func TestVPNServerBuildSupportsMacOSAndLinux(t *testing.T) {
 }
 
 func TestVPNClientStartsStoppedAndApplyDoesNotStartTUN(t *testing.T) {
-	c := newController(t, "client", "listen = 127.0.0.1:0\nvpn-mode = only\nvpn-server = quic://127.0.0.1:8444/vpn\n")
+	c := newController(t, "client", "master_service = 127.0.0.1:0\nvpn-mode = only\nvpn-server = quic://127.0.0.1:8444/vpn\n")
 	check := func() {
 		t.Helper()
 		h := c.workerVPNStatus()
