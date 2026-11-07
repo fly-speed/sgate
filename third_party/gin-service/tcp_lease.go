@@ -50,6 +50,17 @@ func (s *GinService) LeaseTCP(address string) (net.Listener, error) {
 	for _, pool := range pools {
 		pool.raw = true
 	}
+	if !s.Alone {
+		// acl_master can expand one raw service port across multiple interfaces.
+		// Reserve the entire port from HTTP, while only leasing the configured
+		// bind addresses. Unleased interfaces close incoming connections.
+		for _, pool := range s.pools {
+			_, boundPort, _ := net.SplitHostPort(pool.listeners[0].Addr().String())
+			if boundPort == port {
+				pool.raw = true
+			}
+		}
+	}
 	for _, lease := range l.listeners {
 		l.wg.Add(1)
 		go func(lease net.Listener) {

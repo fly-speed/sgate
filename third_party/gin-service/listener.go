@@ -8,7 +8,7 @@ import (
 )
 
 type listenerPool struct {
-	raw       bool // Dedicated TCP lease; never serve HTTP or TLS on this pool.
+	raw       bool // Reserved raw TCP port; never serve HTTP or TLS on this pool.
 	mu        sync.Mutex
 	listeners []net.Listener
 	current   *listenerLease
