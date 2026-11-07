@@ -21,18 +21,11 @@ func SyncReverseListeners(path string, previous []TunnelAccountInfo, accounts []
 		return "", false, err
 	}
 	var current string
-	var configuredListen string
 	exists := false
 	for _, field := range fields {
-		if field.Key == "listen" {
-			configuredListen = field.Value
-		}
 		if field.Key == "master_service" {
 			current, exists = field.Value, true
 		}
-	}
-	if err := ValidateReverseTunnelPorts(accounts, configuredListen); err != nil {
-		return "", false, err
 	}
 	if !exists {
 		return "", false, apply("", false)

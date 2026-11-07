@@ -13,7 +13,7 @@ import (
 )
 
 func TestReverseTLSManagedCertificateFailurePreservesBothFiles(t *testing.T) {
-	c := newController(t, "server", "listen = "+onlineAddress(t)+"\ntarget = localhost:22\n")
+	c := newController(t, "server", "master_service = "+onlineAddress(t)+"\ntarget = localhost:22\n")
 	snapshot, err := c.manageTunnelAccounts(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +43,7 @@ func TestReverseTLSManagedCertificateFailurePreservesBothFiles(t *testing.T) {
 func TestReverseTLSReusesActualTunnelCertificate(t *testing.T) {
 	cert, key := managedCertificate(t)
 	backend := onlineBackend(t, "R")
-	c := newController(t, "server", "listen = "+onlineAddress(t)+"\ntarget = "+backend+"\ntls-cert = "+cert+"\ntls-key = "+key+"\n")
+	c := newController(t, "server", "master_service = "+onlineAddress(t)+"\ntarget = "+backend+"\ntls-cert = "+cert+"\ntls-key = "+key+"\n")
 	snapshot, err := c.manageTunnelAccounts(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -84,7 +84,7 @@ func TestReverseTLSReusesActualTunnelCertificate(t *testing.T) {
 
 func TestReverseTLSManagedRestartValidatesSavedTunnelCertificate(t *testing.T) {
 	cert, key := managedCertificate(t)
-	c := newController(t, "server", "listen = "+onlineAddress(t)+"\ntarget = localhost:22\ntls-cert = "+cert+"\ntls-key = "+key+"\n")
+	c := newController(t, "server", "master_service = "+onlineAddress(t)+"\ntarget = localhost:22\ntls-cert = "+cert+"\ntls-key = "+key+"\n")
 	snapshot, err := c.manageTunnelAccounts(nil)
 	if err != nil {
 		t.Fatal(err)

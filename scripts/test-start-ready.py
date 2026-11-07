@@ -37,6 +37,7 @@ class Echo(socketserver.BaseRequestHandler):
 
 class Backend(socketserver.ThreadingTCPServer):
     daemon_threads = True
+    request_queue_size = 512
 
 
 def run(args, secure):

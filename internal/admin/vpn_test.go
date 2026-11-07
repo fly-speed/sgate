@@ -71,7 +71,7 @@ func TestVPNClientFixedAddressHiddenFromLegacyConfig(t *testing.T) {
 }
 func TestVPNFieldsRejectInjectionAndUnknownRoleKeys(t *testing.T) {
 	original := []byte("service demo {\n listen = 127.0.0.1:9000\n}\n")
-	for _, edits := range []map[string]string{{"vpn-mtu": "12"}, {"vpn-mode": "unexpected"}, {"vpn-dns": "x\nmaster_args = bad"}, {"vpn-listen": "0.0.0.0:8444"}} {
+	for _, edits := range []map[string]string{{"vpn-mtu": "12"}, {"vpn-mode": "unexpected"}, {"vpn-dns": "x\nmaster_args = bad"}, {"vpn-quic-listen": "0.0.0.0:8444"}} {
 		b, err := prepareVPNConfigEdits(original, edits, "client")
 		if err != nil {
 			t.Fatal(err)
@@ -196,7 +196,7 @@ func TestLegacyServerVPNConfigCanEnableBothModesFromWeb(t *testing.T) {
 					t.Fatal(err)
 				}
 				legacy := "vpn-server = quic://old.invalid:8444/vpn\nvpn-client-ip = 10.77.0.2\nvpn-tls-ca = client.pem\nvpn-routes = invalid-old-route\nvpn-dns = 1.1.1.1\nvpn-dns-service = Wi-Fi\nvpn-block-ipv6 = true\n"
-				config := "vpn-mode = disabled\nvpn-listen = ''\nvpn-udp-listen = 127.0.0.1:8445\n" + legacy
+				config := "vpn-mode = disabled\nvpn-quic-listen = ''\nvpn-udp-listen = 127.0.0.1:8445\n" + legacy
 				if format == "service" {
 					config = "service server {\n" + config + "}\n"
 				}

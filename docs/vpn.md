@@ -60,9 +60,9 @@ VPN 默认不自动启动，在网页配置启用模式后手动启动。Windows
 
 `vpn-mode` 有三个值：`disabled` 默认关闭，忽略配置文件中其余 `vpn-*` 参数（包括另一端的参数和未使用的无效值）；`both` 同时运行原代理和独立 VPN；`only` 仅 VPN。启用 VPN 时仍严格校验本端适用的配置项；非 VPN 参数、重复项和配置结构错误始终会报错。`only` 不要求代理目标、上游地址或代理账号密码，忽略代理映射/账号文件，客户端界面不加载或编辑代理映射；保留框架的 TCP/HTTP 管理监听，客户端业务 TCP 立即关闭，服务端代理 HTTP 返回 404。托管服务若保留了旧反向代理端口，only 模式只在 HTTP 端口提供管理入口，其余继承端口的连接立即关闭。服务端管理仍位于 `/admin/`。管理端口与 VPN 的 UDP 端口是不同入口。
 
-在**服务端**填写 `vpn-listen = 0.0.0.0:8444`、`vpn-network = 10.77.0.0/24`、`vpn-mtu = 1280`，选择所需模式。`vpn-tls-cert` / `vpn-tls-key` 可分别指定 VPN 证书，留空复用 `tls-cert` / `tls-key`。**客户端**填写 `vpn-server = quic://你的证书域名:8444/vpn`，配置相同子网/MTU、`vpn-dns` 和正确的 `vpn-dns-service`。虚拟 IPv4 地址由服务端认证后自动分配，客户端实时概览显示“虚拟 IP”。客户端表单和示例不再提供 `vpn-client-ip`；旧文件中的该项兼容读取但忽略。自签名证书用 `vpn-tls-ca`（留空复用 `tls-ca`）。两端 `vpn-key-file` 必须指向相同密钥，留空复用 `key-file`。
+在**服务端**填写 `vpn-quic-listen = 0.0.0.0:8444`、`vpn-network = 10.77.0.0/24`、`vpn-mtu = 1280`，选择所需模式。`vpn-tls-cert` / `vpn-tls-key` 可分别指定 VPN 证书，留空复用 `tls-cert` / `tls-key`。**客户端**填写 `vpn-server = quic://你的证书域名:8444/vpn`，配置相同子网/MTU、`vpn-dns` 和正确的 `vpn-dns-service`。虚拟 IPv4 地址由服务端认证后自动分配，客户端实时概览显示“虚拟 IP”。客户端表单和示例不再提供 `vpn-client-ip`；旧文件中的该项兼容读取但忽略。自签名证书用 `vpn-tls-ca`（留空复用 `tls-ca`）。两端 `vpn-key-file` 必须指向相同密钥，留空复用 `key-file`。
 
-VPN 参数统一以 `vpn-` 开头，不使用独立 CLI 示例中的 `role`、`server`、`listen` 等同名项来管理 VPN。`vpn-listen` 不能占用 `quic-listen` 的 UDP 端口。旧 `vpn-client.cf` / `vpn-server.cf` 仍是 OpenVPN 的 TCP 代理示例。
+VPN 参数统一以 `vpn-` 开头，不使用独立 CLI 示例中的 `role`、`server`、`listen` 等同名项来管理 VPN。`vpn-quic-listen` 不能占用 `quic-listen` 的 UDP 端口。旧 `vpn-client.cf` / `vpn-server.cf` 仍是 OpenVPN 的 TCP 代理示例。
 
 切换 `vpn-mode` 失败时，界面会在参数旁及全局提示中显示原因，并保留未保存的修改；不支持的操作系统会即时说明，后端校验失败会指出不适用于本端的 VPN 参数、缺少的证书/私钥或地址等问题。macOS 现已同时支持客户端与独立 VPN 服务端。
 
@@ -143,12 +143,12 @@ Linux 服务端可设置 `vpn-tcp-notsent-lowat`，对新建 TCP/WSS VPN 套接�
 
 ```ini
 # Keep QUIC/UDP available.
-vpn-listen = 0.0.0.0:8444
+vpn-quic-listen = 0.0.0.0:8444
 # TCP and WSS share this separate TLS listener.
 vpn-tcp-listen = 0.0.0.0:8444
 ```
 
-TCP 与 UDP 可使用相同数字端口；该 TCP 端口不能被代理、管理服务或其他进程占用。放行云端及主机防火墙的 **TCP 8444**；原 QUIC 需要的 UDP 规则继续保留。若仅使用可靠传输，可将 `vpn-listen` 留空并保留 `vpn-tcp-listen`。新监听默认留空，升级不会自动开放 TCP 端口。
+TCP 与 UDP 可使用相同数字端口；该 TCP 端口不能被代理、管理服务或其他进程占用。放行云端及主机防火墙的 **TCP 8444**；原 QUIC 需要的 UDP 规则继续保留。若仅使用可靠传输，可将 `vpn-quic-listen` 留空并保留 `vpn-tcp-listen`。新监听默认留空，升级不会自动开放 TCP 端口。
 
 客户端在同一 `vpn-server` 字段中选择一种方式：
 
@@ -212,7 +212,7 @@ sudo /opt/soft/sgate/sbin/sgate-vpn -config /opt/soft/sgate/conf/sgate-vpn-serve
 
 ## macOS 服务端测试
 
-集成模式使用相同的 `sgate-server.cf` 和网页“独立 VPN”分组，设置 `vpn-mode = only` 或 `both`。配置 `vpn-listen`、相同的 `vpn-network` / `vpn-mtu`、证书和密钥；`vpn-egress-interface` 留空按当前到 `1.1.1.1` 的路由识别，也可填写实际物理网卡，例如 `en0`。以 root 启动服务，正常退出使用停止脚本或 SIGTERM。
+集成模式使用相同的 `sgate-server.cf` 和网页“独立 VPN”分组，设置 `vpn-mode = only` 或 `both`。配置 `vpn-quic-listen`、相同的 `vpn-network` / `vpn-mtu`、证书和密钥；`vpn-egress-interface` 留空按当前到 `1.1.1.1` 的路由识别，也可填写实际物理网卡，例如 `en0`。以 root 启动服务，正常退出使用停止脚本或 SIGTERM。
 
 macOS 自动创建新的 `utunN`，配置网关 `10.77.0.1` 和 VPN 子网路由，再启用 IPv4 forwarding。PF 使用标准 `com.apple/*` 挂点下的唯一 `sgate-vpn-<pid>-<随机值>` 子锚点，仅添加该 VPN 子网到指定物理出口的 NAT 和过滤规则。NAT 后的出站包通过唯一标签匹配，避免放行无关的物理出口流量。退出或中途失败会回滚地址/路由，清理自己的 NAT/filter 规则，释放 `pfctl -E` 返回的引用令牌，并恢复原 forwarding 值。
 

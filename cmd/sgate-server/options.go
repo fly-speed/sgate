@@ -14,7 +14,7 @@ func parseOptions(args []string) (string, error) {
 	vpn.RegisterFlags(flag.CommandLine, "server")
 	adminEnabled := flag.Bool("admin-enabled", false, "enable management configured in the same service .cf")
 	adminConfig := flag.String("admin-config", "", "separate Web management configuration (disabled when empty)")
-	flag.String("listen", ":8081", "HTTP listen address")
+	flag.String("master_service", "127.0.0.1|8081", "HTTP/HTTPS listeners for standalone and acl_master modes (IP|port, comma-separated)")
 	flag.String("target", "", "fixed backend TCP host:port (required)")
 	flag.String("allowed-targets", "", "comma-separated host:port allowlist for client addr query (empty disables selection)")
 	flag.String("path", "/tunnel", "WebSocket endpoint")

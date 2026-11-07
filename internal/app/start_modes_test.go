@@ -23,7 +23,7 @@ func TestStandaloneStartModesBinaries(t *testing.T) {
 		t.Skip("set SGATE_ADMIN_CLIENT_BINARY and SGATE_ADMIN_SERVER_BINARY")
 	}
 	for _, secure := range []bool{false, true} {
-		for _, mode := range []string{"implicit-cli", "alone-cli", "alone-config", "alone-merged", "f-merged"} {
+		for _, mode := range []string{"implicit-cli", "alone-cli", "alone-config", "alone-merged", "f-merged", "alone-shared"} {
 			t.Run(fmt.Sprintf("tls=%t/%s", secure, mode), func(t *testing.T) {
 				dir := t.TempDir()
 				key := filepath.Join(dir, "test.key")
@@ -107,8 +107,12 @@ func TestStandaloneStartModesBinaries(t *testing.T) {
 					if e != nil {
 						t.Fatal(e)
 					}
+					listenKey := "listen"
+					if role == "server" {
+						listenKey = "master_service"
+					}
 					args := []string{
-						"-listen",
+						"-" + listenKey,
 						addresses[role],
 						"-key-file",
 						key,
@@ -128,18 +132,27 @@ func TestStandaloneStartModesBinaries(t *testing.T) {
 							args = append(args, "-tls-ca", cert)
 						}
 					}
-					if mode == "alone-config" || strings.HasSuffix(mode, "merged") {
+					if mode == "alone-config" || strings.HasSuffix(mode, "merged") || mode == "alone-shared" {
 						// Explicit CLI listen/max-streams override the file. Running 16 streams
 						// catches accidentally using the file's limit of one stream.
-						text := "listen = 127.0.0.1:1\nmax-streams = 1\n"
+						text := listenKey + " = 127.0.0.1:1\nmax-streams = 1\n"
 						for i := 2; i < len(args); i += 2 {
 							if args[i] == "-max-streams" {
 								continue
 							}
 							text += strings.TrimPrefix(args[i], "-") + " = " + strconv.Quote(args[i+1]) + "\n"
 						}
-						if strings.HasSuffix(mode, "merged") {
-							text = "service standalone {\n master_service = 127.0.0.1|1\n master_args =\n" + text + "}\n"
+						if strings.HasSuffix(mode, "merged") || mode == "alone-shared" {
+							listener := "127.0.0.1|1"
+							if mode == "alone-shared" {
+								listener = strings.ReplaceAll(addresses[role], ":", "|")
+							}
+							if role == "client" {
+								text = "master_service = " + listener + "\n" + text
+							} else if mode == "alone-shared" {
+								text = strings.Replace(text, "master_service = 127.0.0.1:1", "master_service = "+listener, 1)
+							}
+							text = "service standalone {\n master_args =\n" + text + "}\n"
 						}
 						config := filepath.Join(dir, role+".cf")
 						deploymentWrite(t, config, []byte(text))
@@ -147,7 +160,10 @@ func TestStandaloneStartModesBinaries(t *testing.T) {
 						if mode == "f-merged" {
 							option = "-f"
 						}
-						args = []string{option, config, "-listen", addresses[role], "-max-streams", "64"}
+						args = []string{option, config, "-" + listenKey, addresses[role], "-max-streams", "64"}
+						if mode == "alone-shared" && role == "server" {
+							args = []string{option, config, "-max-streams", "64"}
+						}
 					}
 					if mode != "implicit-cli" {
 						args = append(args, "-alone")

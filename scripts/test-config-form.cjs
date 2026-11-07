@@ -2356,7 +2356,7 @@ test("server VPN wizard validates listeners, creates accounts, and reports liste
   const { context, elements } = await page();
   context.wizardFields = [
     {key:"vpn-mode", value:"only", validation:{choices:["disabled","both","only"]}},
-    {key:"vpn-listen", value:"", validation:{type:"listen"}},
+    {key:"vpn-quic-listen", value:"", validation:{type:"listen"}},
     {key:"vpn-udp-listen", value:"", validation:{type:"listen"}},
     {key:"vpn-tcp-listen", value:"", validation:{type:"listen"}},
     {key:"vpn-tls-cert", value:"tls.pem"},

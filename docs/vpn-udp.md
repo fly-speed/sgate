@@ -1,6 +1,6 @@
 # UDP VPN
 
-客户端支持 `udp://主机:端口/vpn`。服务端增加 `vpn-udp-listen`，独立于 QUIC UDP 的 `vpn-listen` 和代理的 `quic-listen`；三者不能使用相同的 UDP 端口。TCP 监听可使用相同数字端口。
+客户端支持 `udp://主机:端口/vpn`。服务端增加 `vpn-udp-listen`，独立于 QUIC UDP 的 `vpn-quic-listen` 和代理的 `quic-listen`；三者不能使用相同的 UDP 端口。TCP 监听可使用相同数字端口。
 
 ```ini
 # Server: keep the existing QUIC/TCP listeners, add a separate UDP listener.
@@ -12,7 +12,7 @@ vpn-server = udp://vpn.example.com:8445/vpn
 
 两端更新二进制及管理页面。放行服务器防火墙和云安全组的 UDP 8445；服务端保存后点击“重启 VPN 使配置生效”。客户端可先用“测试 VPN 连接”，再保存地址：已启动的 VPN 自动切换，已停止的 VPN 保持停止。原有虚拟地址自动分配、路由清理、Windows 控制 APP、白噪音和在线参数调整均复用。
 
-如果只启用 UDP VPN 入口，可设置 `vpn-listen = ''`、`vpn-tcp-listen = ''`。该 VPN 入口不要求证书或 CA；仍使用两端相同的 32 字节共享密钥 `vpn-key-file`，留空复用 `key-file`。其他仍启用的 QUIC/TLS 入口继续校验证书。不要把 UDP 模式理解为明文转发。
+如果只启用 UDP VPN 入口，可设置 `vpn-quic-listen = ''`、`vpn-tcp-listen = ''`。该 VPN 入口不要求证书或 CA；仍使用两端相同的 32 字节共享密钥 `vpn-key-file`，留空复用 `key-file`。其他仍启用的 QUIC/TLS 入口继续校验证书。不要把 UDP 模式理解为明文转发。
 
 独立 CLI 对应 `udp-listen` 和 `server`：
 

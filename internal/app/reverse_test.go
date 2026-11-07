@@ -37,7 +37,7 @@ func reverseAppConnect(t *testing.T, address, marker string) net.Conn {
 
 func TestReverseAccountManagementAndAppLifecycle(t *testing.T) {
 	backend := onlineBackend(t, "R")
-	server := newController(t, "server", "listen = "+onlineAddress(t)+"\ntarget = "+backend+"\n")
+	server := newController(t, "server", "master_service = "+onlineAddress(t)+"\ntarget = "+backend+"\n")
 	snapshot, err := server.manageTunnelAccounts(nil)
 	if err != nil {
 		t.Fatal(err)

@@ -21,6 +21,8 @@ func Parse(fs *flag.FlagSet, args []string) (result error) {
 	if fs.NArg() != 0 {
 		return fmt.Errorf("unexpected positional arguments; use named flags")
 	}
+	explicit := make(map[string]bool)
+	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
 	if *path == "" {
 		if f := fs.Lookup("f"); f != nil && f.Value.String() != "" {
 			*path = f.Value.String()
@@ -28,8 +30,6 @@ func Parse(fs *flag.FlagSet, args []string) (result error) {
 			return nil
 		}
 	}
-	explicit := make(map[string]bool)
-	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
 	// An explicitly supplied inline mapping (including empty) overrides a file
 	// selected on disk. An explicit file option wins when both options are supplied.
 	defer func() {
@@ -72,7 +72,7 @@ func Parse(fs *flag.FlagSet, args []string) (result error) {
 			return fmt.Errorf("configuration line %d: expected key = value", line)
 		}
 		name, value = strings.TrimSpace(name), strings.TrimSpace(value)
-		ignoredVPN := (ignoreVPN && inactiveVPNOption(name)) || ignoredFileOption(fs, name)
+		ignoredVPN := (ignoreVPN && fs.Lookup(name) != nil && inactiveVPNOption(name)) || ignoredFileOption(fs, name)
 		if (name == "config" || fs.Lookup(name) == nil) && !ignoredVPN {
 			return fmt.Errorf("configuration line %d: unknown or unsupported option", line)
 		}
@@ -125,7 +125,7 @@ func ParseSection(fs *flag.FlagSet, path, prefix string) error {
 func applyService(fs *flag.FlagSet, values map[string]string, prefix string, explicit map[string]bool) error {
 	ignoreVPN := prefix == "" && vpnDisabled(fs, values["vpn-mode"], explicit)
 	for key, value := range values {
-		if prefix == "" && ((ignoreVPN && inactiveVPNOption(key)) || ignoredFileOption(fs, key)) {
+		if prefix == "" && ((ignoreVPN && fs.Lookup(key) != nil && inactiveVPNOption(key)) || ignoredFileOption(fs, key)) {
 			continue
 		}
 		name := key
@@ -135,7 +135,7 @@ func applyService(fs *flag.FlagSet, values map[string]string, prefix string, exp
 			}
 			name = strings.ReplaceAll(strings.TrimPrefix(key, prefix), "_", "-")
 		} else {
-			if serviceconfig.FrameworkKey(key) || (strings.HasPrefix(key, "admin_") && key != "admin_enabled") {
+			if (serviceconfig.FrameworkKey(key) && !(key == "master_service" && fs.Lookup(key) != nil)) || (strings.HasPrefix(key, "admin_") && key != "admin_enabled") {
 				continue
 			}
 			if key == "admin_enabled" {

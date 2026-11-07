@@ -174,7 +174,7 @@ func TestManagementRepeatedSaveRestartDuplexResources(t *testing.T) {
 				"noise-interval-max = 15ms\n" +
 				"noise-min-bytes = 1024\n" +
 				"noise-max-bytes = 8192\n")
-			serverText := "listen = " + temporaryAddress(t) + "\ntarget = " + backend.Addr().String() + "\nsession-ttl = 100ms\n" + noise
+			serverText := "master_service = " + temporaryAddress(t) + "\ntarget = " + backend.Addr().String() + "\nsession-ttl = 100ms\n" + noise
 			ca := ""
 			scheme := "ws"
 			if tlsMode {

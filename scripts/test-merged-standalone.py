@@ -101,7 +101,7 @@ def run(args, secure):
                     "-alone",
                     option,
                     str(root / (role + ".cf")),
-                    "-listen",
+                    "-master_service" if role == "server" else "-listen",
                     f"127.0.0.1:{proxy[role]}",
                 ],
                 cwd=root / "work",
@@ -140,6 +140,7 @@ def run(args, secure):
             for role in ["server", "client"]:
                 text = f"service standalone-{role} {{\nmaster_service = 127.0.0.1|1\nmaster_args =\nlisten = 127.0.0.1:1\nkey-file = {root}/key\npassword = standalone-secret\nnoise-interval-min = 10ms\nnoise-interval-max = 30ms\nnoise-min-bytes = 128\nnoise-max-bytes = 512\nadmin_enabled = true\nadmin_listen = 127.0.0.1:{management[role]}\nadmin_web_dir = {helper.ROOT}/web/admin\nadmin_users_file = {role}-users.json\nadmin_session_dir = {role}-sessions\nadmin_setup_token_file = {role}-setup.token\n"
                 if role == "server":
+                    text = text.replace("listen = 127.0.0.1:1\n", "")
                     text += f"target = 127.0.0.1:{backend.getsockname()[1]}\n"
                 else:
                     text += f'server = {"wss" if secure else "ws"}://127.0.0.1:{proxy["server"]}/tunnel\n'
@@ -172,7 +173,7 @@ def run(args, secure):
                 )
                 a.authenticated()
                 assert "standalone-secret" not in a.call("config")["content"]
-                assert "listen" in a.runtime()["cli_overrides"]
+                assert ("master_service" if role == "server" else "listen") in a.runtime()["cli_overrides"]
             helper.eventually(lambda: transfer(-1) is None)
             for wave in range(3):
                 with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:

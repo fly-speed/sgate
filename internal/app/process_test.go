@@ -60,7 +60,11 @@ func TestManagementRealProcessRestartAndExpiry(t *testing.T) {
 			os.WriteFile(key, []byte(hex.EncodeToString(make([]byte, 32))), 0600)
 			business, management := temporaryAddress(t), temporaryAddress(t)
 			appPath, adminPath := filepath.Join(dir, "app.conf"), filepath.Join(dir, "admin.conf")
-			appText := "listen = " + business + "\nkey-file = " + key + "\npassword = process-test-password\n"
+			listenKey := "listen"
+			if role == "server" {
+				listenKey = "master_service"
+			}
+			appText := listenKey + " = " + business + "\nkey-file = " + key + "\npassword = process-test-password\n"
 			if role == "client" {
 				appText += "server = ws://127.0.0.1:1/tunnel\n"
 			} else {

@@ -10,9 +10,9 @@ import (
 )
 
 func TestVPNAccountChangesUpdateRunningServer(t *testing.T) {
-	c := newController(t, "server", "listen = 127.0.0.1:0\ntarget = 127.0.0.1:9\n")
+	c := newController(t, "server", "master_service = 127.0.0.1:0\ntarget = 127.0.0.1:9\n")
 	setConfig(t, c, "vpn-mode", "both")
-	setConfig(t, c, "vpn-listen", "")
+	setConfig(t, c, "vpn-quic-listen", "")
 	setConfig(t, c, "vpn-udp-listen", "127.0.0.1:0")
 	setConfig(t, c, "vpn-manage-network", "false")
 	prepared, err := c.prepareSavedVPN()

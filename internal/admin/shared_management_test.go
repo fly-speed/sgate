@@ -98,7 +98,7 @@ func TestSharedCookieMigrationPreservesExpiryAndLogout(t *testing.T) {
 func TestSharedManagementHidesAndRejectsLegacyPort(t *testing.T) {
 	old, cfg := adminFixture(t)
 	old.view.Role = "server"
-	if err := os.WriteFile(old.view.AppConfigPath, []byte("service server {\nlisten = 127.0.0.1:8081\nadmin_listen = 127.0.0.1:9082\n}\n"), 0600); err != nil {
+	if err := os.WriteFile(old.view.AppConfigPath, []byte("service server {\nmaster_service = 127.0.0.1|8081\nadmin_listen = 127.0.0.1:9082\n}\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	cfg.shared, cfg.Listen = true, ""
@@ -108,10 +108,16 @@ func TestSharedManagementHidesAndRejectsLegacyPort(t *testing.T) {
 	}
 	cookie, csrf := setupAccount(t, h, cfg)
 	config := object(t, request(h, "GET", "/api/config", nil, cookie, "", ""))
+	sharedListen := false
 	for _, raw := range config["fields"].([]any) {
-		if raw.(map[string]any)["key"] == "admin_listen" {
-			t.Fatal("server form still exposes a management port")
+		key := raw.(map[string]any)["key"]
+		if key == "admin_listen" || key == "listen" {
+			t.Fatal("server form still exposes a duplicate listener setting", key)
 		}
+		sharedListen = sharedListen || key == "master_service"
+	}
+	if !sharedListen {
+		t.Fatal("server form hides the shared listener setting")
 	}
 	before, _ := os.ReadFile(h.view.AppConfigPath)
 	w := request(h, "PUT", "/api/config", map[string]any{

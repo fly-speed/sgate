@@ -1419,7 +1419,7 @@ const vpnWizardLabels = {
 };
 const vpnServerWizardLabels = {
   "vpn-mode": "运行模式",
-  "vpn-listen": "QUIC 监听地址",
+  "vpn-quic-listen": "QUIC 监听地址",
   "vpn-udp-listen": "纯 UDP 监听地址",
   "vpn-tcp-listen": "TCP / WSS 监听地址",
   "vpn-tls-cert": "VPN 服务端证书文件",
@@ -1701,7 +1701,7 @@ function openVPNWizard() {
   }
   showVPNWizardStep(0);
   renderVPNWizardConnection(vpnControlHealth);
-  if (!vpnWizard.fields.has(server ? "vpn-listen" : "vpn-server")) {
+  if (!vpnWizard.fields.has(server ? "vpn-quic-listen" : "vpn-server")) {
     vpnWizardResult(() => t("请先在配置页重新加载配置。"), true);
   }
   if (server) return loadVPNServerFiles(vpnWizard);
@@ -1726,7 +1726,7 @@ async function importVPNWizardFile(kind) {
 
 function vpnWizardEdits() {
   const mode = vpnWizard.fields.get("vpn-mode")?.input.value;
-  if (!vpnWizard.fields.has(vpnWizard.server ? "vpn-listen" : "vpn-server")) throw new Error(t("请先在配置页重新加载配置。"));
+  if (!vpnWizard.fields.has(vpnWizard.server ? "vpn-quic-listen" : "vpn-server")) throw new Error(t("请先在配置页重新加载配置。"));
   if (!["both", "only"].includes(mode)) throw new Error(t("请选择启用 VPN 的运行模式。"));
   const fields = {}, values = {"vpn-mode": mode};
   for (const [key, {input, entry, displayedPath}] of vpnWizard.fields) {
@@ -1738,7 +1738,7 @@ function vpnWizardEdits() {
     const original = input.type === "checkbox" ? String(/^(true|1|t)$/i.test(entry.original)) : entry.original;
     if (value !== original && value !== displayedPath) fields[key] = value;
   }
-  if (vpnWizard.server && !["vpn-listen", "vpn-udp-listen", "vpn-tcp-listen"].some(key =>
+  if (vpnWizard.server && !["vpn-quic-listen", "vpn-udp-listen", "vpn-tcp-listen"].some(key =>
     vpnWizard.fields.get(key)?.entry.overridden || values[key])) {
     throw new Error(t("至少配置一个 VPN 监听地址。"));
   }

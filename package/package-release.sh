@@ -46,6 +46,7 @@ GOOS=$goos GOARCH=$arch CGO_ENABLED=0 make -C "$root" client server \
 
 for file in LICENSE sgate-client.cf sgate-server.cf sgate-proxies.json \
     sgate-client-start.sh sgate-client-stop.sh sgate-server-start.sh sgate-server-stop.sh \
+    client-alone.sh server-alone.sh \
     scripts/install.sh scripts/test-vpn-linux.py docs/vpn.md docs/vpn-udp.md \
     web/admin/index.html web/admin/app.css web/admin/i18n.js web/admin/app.js \
     third_party/go-service/LICENSE third_party/gin-service/LICENSE \
@@ -74,6 +75,7 @@ Set PREFIX to override /opt/soft/sgate. Set DESTDIR for an offline staging insta
 The installer preserves existing configuration and keys, and never starts or restarts services.
 For a fresh installation, review conf/ before starting either service.
 The bundled certificate and private key are for testing.
+For foreground command-line tests after installation, run bin/server-alone.sh and bin/client-alone.sh in separate terminals.
 README
 
 COPYFILE_DISABLE=1 tar -czf "$stage/$name.tar.gz" -C "$stage" "$name"

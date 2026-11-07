@@ -65,7 +65,7 @@ func configurationRules() map[string]configRule {
 	add("vpn-udp-send-interval", configRule{Type: "duration", Min: "0", Max: "10000000", Hint: "纯 UDP VPN 每条连接发送大包的最小间隔，0 关闭，最多 10ms。"})
 	add("vpn-mtu", configRule{Type: "integer", Min: "576", Max: "1500", Hint: "IPv4 TUN MTU，默认 1280 字节。"})
 	add("vpn-max-clients", configRule{Type: "integer", Min: "1", Max: "254", Hint: "同时认证客户端数，1～254；在线调整仅限制新接入，不踢现有客户端。"})
-	add("vpn-listen", configRule{Type: "listen", Hint: "VPN 独立 UDP 地址；启用 TCP 监听后可留空，不能与 quic-listen 共用 UDP 端口。"})
+	add("vpn-quic-listen", configRule{Type: "listen", Hint: "VPN 独立 UDP 地址；启用 TCP 监听后可留空，不能与 quic-listen 共用 UDP 端口。"})
 	add("vpn-udp-listen", configRule{Type: "listen", Hint: "纯 UDP VPN 监听，与 QUIC 分开 UDP 端口；业务包不重传，使用共享密钥加密。"})
 	add("vpn-tcp-listen", configRule{Type: "listen", Hint: "可选 TLS/TCP 与 WSS 共用监听，可与 VPN UDP 使用同一数字端口；两种监听至少填写一个。"})
 	add("vpn-tcp-notsent-lowat", configRule{Type: "bytes", Min: "0", Max: "1048576", Hint: "Linux VPN TCP/WSS 套接字未发送数据水位，支持 K/M，0 使用系统默认，最大 1M。"})
@@ -250,15 +250,15 @@ func validateFormAddress(value string, listen bool) error {
 func argumentOptions(role string) map[string]configRule {
 	options := map[string]configRule{}
 	clientOnly := " vpn-credentials-file vpn-server vpn-client-ip vpn-tls-ca vpn-tls-skip-verify vpn-routes vpn-dns vpn-dns-service vpn-block-ipv6 quic-mode username proxies proxies-file server addr send-addr allow-reverse tls-ca reconnect-min reconnect-max offline-timeout "
-	serverOnly := " vpn-accounts-file vpn-listen vpn-udp-listen vpn-tcp-listen vpn-tls-cert vpn-tls-key vpn-max-clients vpn-egress-interface vpn-allow-private quic-listen accounts-file target allowed-targets path tls-cert tls-key session-ttl max-sessions "
+	serverOnly := " vpn-accounts-file vpn-quic-listen vpn-udp-listen vpn-tcp-listen vpn-tls-cert vpn-tls-key vpn-max-clients vpn-egress-interface vpn-allow-private quic-listen accounts-file target allowed-targets path tls-cert tls-key session-ttl max-sessions "
 	for key, rule := range configRules {
-		if strings.Contains(key, "_") || key == "master_args" || strings.HasPrefix(key, "app_") {
+		if (strings.Contains(key, "_") && !(role == "server" && key == "master_service")) || key == "master_args" || strings.HasPrefix(key, "app_") {
 			continue
 		}
 		if role == "client" && strings.Contains(serverOnly, " "+key+" ") {
 			continue
 		}
-		if role == "server" && strings.Contains(clientOnly, " "+key+" ") {
+		if role == "server" && (key == "listen" || strings.Contains(clientOnly, " "+key+" ")) {
 			continue
 		}
 		rule.Options = nil

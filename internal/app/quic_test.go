@@ -74,7 +74,7 @@ func TestQUICFrameworkSharedProxyReplacement(t *testing.T) {
 	cert, key := managedCertificate(t)
 	backend, _ := probeBackend(t)
 	replacement, _ := probeBackend(t)
-	c := newController(t, "server", "listen = "+onlineAddress(t)+"\ntarget = "+backend+"\nquic-listen = 127.0.0.1:0\ntls-cert = "+cert+"\ntls-key = "+key+"\n")
+	c := newController(t, "server", "master_service = "+onlineAddress(t)+"\ntarget = "+backend+"\nquic-listen = 127.0.0.1:0\ntls-cert = "+cert+"\ntls-key = "+key+"\n")
 	address := c.worker.listener.Addr().String()
 	if err := c.worker.stop(); err != nil {
 		t.Fatal(err)

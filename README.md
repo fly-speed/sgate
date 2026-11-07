@@ -39,6 +39,8 @@ PREFIX="$HOME/.local/sgate" ./install.sh
 
 以下用同一台 macOS 或 Ubuntu 机器验证。默认模板让客户端的 `127.0.0.1:9000` 经服务端的 `127.0.0.1:8081` 访问后端 `127.0.0.1:8080`。若示例端口已被占用，请选用空闲端口，并同步修改两端的 `.cf`、客户端的 `conf/sgate-proxies.json` 和下方命令。
 
+服务端两种启动方式统一使用 `master_service = 127.0.0.1|8081`：独立模式由程序监听，托管模式由 acl_master 监听并传入句柄。无需再配置单独的 `listen`；设置 `tls-cert`、`tls-key` 后使用 HTTPS/WSS。
+
 1. 在安装目录的 `conf/sgate-client.cf` 和 `conf/sgate-server.cf` 中，把示例 `password` 改成相同的自选密码。同一安装目录下的两端共用 `conf/sgate.key`。
 2. 分别打开三个终端，运行下面的三个程序（HTTP 后端需要 Python 3）。若用的是系统级安装，将 `$HOME/.local/sgate` 换成实际安装目录，并以有权读取配置的用户运行。
 
@@ -60,6 +62,10 @@ curl --noproxy '*' http://127.0.0.1:9000/
 
 3. 打开客户端管理页 `http://127.0.0.1:9081/` 和服务端管理页 `http://127.0.0.1:8081/admin/`。首次登录按启动日志提示读取初始化令牌文件（由各自的 `admin_setup_token_file` 指定），并创建独立的 Web 管理员账号。
 
+只测试命令行代理时，保持上述 HTTP 后端运行，在源码目录执行 `make build` 后，分别在两个终端运行 `./server-alone.sh` 和 `./client-alone.sh`。安装后对应脚本位于安装目录的 `bin/`。它们以前台 alone 模式运行，按 Ctrl+C 退出；默认使用同一份 `sgate.key` 和测试密码 `sgate-test-password`，将 `127.0.0.1:9000` 转发到 `127.0.0.1:8080`。脚本直接传入命令行参数，不加载 `.cf`，也不启用管理页。
+
+可以追加参数覆盖默认值，例如 `./client-alone.sh -listen 127.0.0.1:9001`。两端均支持通过 `SGATE_PASSWORD`、`SGATE_KEY_FILE` 环境变量或追加的 `-password`、`-key-file` 指定相同的密码和共享密钥。
+
 部署到两台机器时，客户端在「代理配置 → 代理映射」填写服务端地址，服务端填写后端目标，并只开放所需的监听。两端使用相同的共享密钥及匹配的代理凭据。若映射单独指定后端，将它加入服务端 `allowed-targets`。跨公网使用 WSS 或 QUIC 时，配置证书并校验服务端名称。 [部署参考与反向代理](docs/reference.md) · [配置示例](samples/README.md)
 
 客户端可在「代理配置 → 代理连接」的 `key-file` 项下修改共享密钥文件内容。保存新密钥后，使用「保存并应用」让运行中的配置读取它。
@@ -68,7 +74,7 @@ curl --noproxy '*' http://127.0.0.1:9000/
 
 可以使用下方的 [Web 配置向导](#web-配置向导)，也可以在「VPN 参数」页手动配置。
 
-1. **服务端** 在「VPN 配置 → VPN 参数」把 `vpn-mode` 设为 `both`（代理与 VPN 共存）或 `only`（仅 VPN），选择监听地址并应用。TCP 和 WSS 共用 `vpn-tcp-listen`，QUIC 使用 `vpn-listen`，纯 UDP 使用 `vpn-udp-listen`。
+1. **服务端** 在「VPN 配置 → VPN 参数」把 `vpn-mode` 设为 `both`（代理与 VPN 共存）或 `only`（仅 VPN），选择监听地址并应用。TCP 和 WSS 共用 `vpn-tcp-listen`，QUIC 使用 `vpn-quic-listen`，纯 UDP 使用 `vpn-udp-listen`。
 2. **客户端** 选择对应模式，填写 `vpn-server`，例如 `quic://vpn.example.com:8444/vpn`。两端的 VPN 子网、MTU 和共享密钥须匹配。使用私有 CA 时，在客户端设置 `vpn-tls-ca` 或复用 `tls-ca`。服务端在认证后自动分配虚拟 IPv4 地址。
 3. 修改 URL 后，可以直接点保存图标右侧的「测试 VPN 连接」。测试使用当前表单，检查连接、认证和回显，无需保存，也不会接管系统路由。
 4. 保存并应用后，在客户端「实时概览」手动启动 VPN。进程启动或重启后仍需手动启动。停用时点击「停止 VPN」恢复网络设置。发现上次留下的恢复记录时，页面会提示先确认清理。

@@ -22,6 +22,7 @@ class InstallTests(unittest.TestCase):
         names += [str(p.relative_to(ROOT)) for p in (ROOT / "web/admin").iterdir() if p.is_file()]
         names += [str(p.relative_to(ROOT)) for p in ROOT.glob("sgate-*.cf")]
         names += [str(p.relative_to(ROOT)) for p in ROOT.glob("sgate-*-*.sh")]
+        names += ["client-alone.sh", "server-alone.sh"]
         names += [str(p.relative_to(ROOT)) for p in (ROOT / "samples").glob("*.cf")]
         names += [str(p.relative_to(ROOT)) for p in (ROOT / "samples").glob("*.sh")]
         names += ["samples/sgate-vpn-client.conf", "samples/sgate-vpn-server.conf"]
@@ -49,7 +50,7 @@ class InstallTests(unittest.TestCase):
     def check_role(self, role):
         for name in ["sbin/sgate-" + role, "conf/sgate-" + role + ".cf",
                      "conf/sgate-" + role + ".cf.dist", "bin/sgate-" + role + "-start.sh",
-                     "bin/sgate-" + role + "-stop.sh", "samples/ssh-" + role + ".cf",
+                     "bin/sgate-" + role + "-stop.sh", "bin/" + role + "-alone.sh", "samples/ssh-" + role + ".cf",
                      "samples/vpn-" + role + ".cf"]:
             self.assertTrue((self.target / name).is_file(), name)
         for name in ["index.html", "app.css", "i18n.js", "app.js"]:

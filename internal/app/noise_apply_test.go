@@ -55,7 +55,7 @@ func startNoiseClient(t *testing.T, address string) *tunnel.Stats {
 func TestServerNoiseIntervalsApplyToLiveTransport(t *testing.T) {
 	c := newController(t, "server", "target = 127.0.0.1:1\nnoise-interval = 1h\nnoise-min-bytes = 1K\nnoise-max-bytes = 1K\n")
 	address := c.worker.listener.Addr().String()
-	setConfig(t, c, "listen", address)
+	setConfig(t, c, "master_service", address)
 	clientStats := startNoiseClient(t, address)
 	time.Sleep(150 * time.Millisecond)
 	setConfig(t, c, "noise-interval", "100ms")
@@ -113,7 +113,7 @@ func TestServerNoiseIntervalsApplyToLiveTransport(t *testing.T) {
 func TestServerNoiseCommandLineIntervalStillOverridesFile(t *testing.T) {
 	c := newController(t, "server", "target = 127.0.0.1:1\nnoise-interval = 1h\nnoise-max-bytes = 10M\n", "-noise-interval", "80ms", "-noise-max-bytes", "1K")
 	address := c.worker.listener.Addr().String()
-	setConfig(t, c, "listen", address)
+	setConfig(t, c, "master_service", address)
 	startNoiseClient(t, address)
 	waitNoiseBytes(t, c.stats, 2048)
 	setConfig(t, c, "noise-interval", "2h")

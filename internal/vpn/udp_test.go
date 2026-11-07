@@ -24,13 +24,13 @@ func TestUDPOnlySettingsDoNotRequireCertificates(t *testing.T) {
 			os.WriteFile(key, []byte(strings.Repeat("01", 32)), 0600)
 			fs.String("key-file", key, "")
 			fs.Set("vpn-mode", "only")
-			fs.Set("vpn-listen", "")
+			fs.Set("vpn-quic-listen", "")
 			fs.Set("vpn-udp-listen", "127.0.0.1:8445")
 			p, err := Prepare("server", fs)
 			if err != nil || p == nil || p.Config.UDPListen != "127.0.0.1:8445" {
 				t.Fatal(p, err)
 			}
-			fs.Set("vpn-listen", "127.0.0.1:8445")
+			fs.Set("vpn-quic-listen", "127.0.0.1:8445")
 			if _, err = Prepare("server", fs); err == nil {
 				t.Fatal("QUIC enabled without certificate or with conflicting UDP port")
 			}

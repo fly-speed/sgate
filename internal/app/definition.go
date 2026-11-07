@@ -48,7 +48,11 @@ func build(role string, fs *flag.FlagSet, stats *tunnel.Stats) (definition, erro
 	if vpnErr != nil {
 		return definition{}, vpnErr
 	}
-	d := definition{listen: values.text("listen"), vpn: prepared, vpnOnly: prepared != nil && prepared.Mode == "only"}
+	listen := values.optionalText("listen")
+	if role == "server" {
+		listen = strings.ReplaceAll(strings.ReplaceAll(values.text("master_service"), "|", ":"), ";", ",")
+	}
+	d := definition{listen: listen, vpn: prepared, vpnOnly: prepared != nil && prepared.Mode == "only"}
 	if d.vpnOnly {
 		secret := prepared.Config.Key
 		var e error
@@ -90,12 +94,14 @@ func build(role string, fs *flag.FlagSet, stats *tunnel.Stats) (definition, erro
 			return d, nil
 		}
 	}
-	_, port, err := net.SplitHostPort(d.listen)
-	if err != nil {
-		return d, err
-	}
-	if p, err := net.LookupPort("tcp", port); err != nil || p < 0 || p > 65535 {
-		return d, errors.New("invalid listen port")
+	for _, address := range strings.Split(d.listen, ",") {
+		_, port, err := net.SplitHostPort(strings.TrimSpace(address))
+		if err != nil {
+			return d, err
+		}
+		if p, err := net.LookupPort("tcp", port); err != nil || p < 0 || p > 65535 {
+			return d, errors.New("invalid listen port")
+		}
 	}
 	secret, err := cli.LoadKey(values.text("key-file"))
 	if err != nil {
@@ -119,6 +125,10 @@ func build(role string, fs *flag.FlagSet, stats *tunnel.Stats) (definition, erro
 		}
 		d.accountsFile = values.accountPath()
 		if err == nil {
+			d.listen, err = serverHTTPListeners(d.listen, d.server.Accounts)
+			if err != nil {
+				return d, err
+			}
 			err = admin.ValidateReverseTunnelPorts(d.server.Accounts, d.listen)
 		}
 	}

@@ -32,7 +32,7 @@ licenses='go-service'
 for selected in $roles; do
     programs="$programs sgate-$selected"
     configs="$configs sgate-$selected.cf"
-    scripts="$scripts sgate-$selected-start.sh sgate-$selected-stop.sh"
+    scripts="$scripts sgate-$selected-start.sh sgate-$selected-stop.sh $selected-alone.sh"
     sample_configs="$sample_configs ssh-$selected.cf vpn-$selected.cf"
     if [ "$selected" = client ]; then
         configs="$configs sgate-proxies.json"

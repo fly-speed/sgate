@@ -4,8 +4,9 @@ service sgate-server {
     master_disable = no
     # acl_master service type; sock lets the framework manage listening sockets.
     master_type = sock
-    # acl_master listen address in IP|port format; omit the IP to listen on all interfaces.
-    master_service = |1080
+    # Shared HTTP/HTTPS (WS/WSS) listeners in both standalone and acl_master modes.
+    # Use IP|port, comma-separated; omit IP to listen on all interfaces.
+    master_service = 0.0.0.0|8081
     # Enable SO_REUSEPORT; no lets acl_master own and pass listening sockets to child processes.
     master_reuseport = no
     # Maximum child process count; the current configuration uses one process to maintain tunnel sessions.
@@ -60,12 +61,12 @@ service sgate-server {
 # Proxy configuration: loaded by the service template; same-name CLI options take precedence.
     # UTF-8 application configuration. Precedence: explicit CLI options > this file > built-in defaults.
     # Relative application paths resolve from the process working directory.
-    # Standalone proxy listen address; shared management allows HTTP on any interface. Set tls-cert/tls-key for HTTPS/WSS.
-    listen = 127.0.0.1:8081
+    # master_service above also controls standalone proxy listening; no separate listen entry is needed.
+    # Set tls-cert/tls-key for HTTPS/WSS; management shares these listeners.
     # Optional QUIC UDP listener; empty disables QUIC. Requires tls-cert and tls-key below.
     # Use host:port, not acl_master's IP|port syntax. TCP and UDP may share the same port.
-    # Example: 0.0.0.0:1080 matches master_service = |1080 in managed mode;
-    # 127.0.0.1:8081 matches listen above in standalone mode. Restart the process after changes.
+    # Example: 127.0.0.1:8081 shares the port number with master_service above.
+    # Restart the process after changes.
     quic-listen =
     # Default backend TCP address forwarded by the server, in host:port format.
     target = 127.0.0.1:8080
@@ -186,16 +187,16 @@ service sgate-server {
     # IP inactivity threshold; padding does not reset it. Zero uses 1s. LIVE: Web saves apply without VPN reconnection.
     vpn-noise-idle-after = 1s
     # Separate QUIC UDP listener; cannot share a UDP port with quic-listen.
-    vpn-listen = 0.0.0.0:8444
+    vpn-quic-listen = 0.0.0.0:8444
     # Optional shared TLS/TCP and WSS listener; empty disables both transports.
     # To enable: set vpn-tcp-listen = 0.0.0.0:8444 and allow TCP 8444 in the firewall.
     # TCP and UDP may use the same numeric port; other TCP services cannot share it.
-    # Leave vpn-listen empty when only TCP/WSS or raw UDP is intended.
+    # Leave vpn-quic-listen empty when only TCP/WSS or raw UDP is intended.
     # The listener reuses vpn-tls-cert/vpn-tls-key (or tls-cert/tls-key).
     vpn-tcp-listen =
     # Linux TCP/WSS unsent-data low-water mark, 0 uses the system default.
     vpn-tcp-notsent-lowat = 0
-    # Optional raw UDP VPN listener. Use a different UDP port from vpn-listen and quic-listen.
+    # Optional raw UDP VPN listener. Use a different UDP port from vpn-quic-listen and quic-listen.
     # Uses the shared key for DTLS encryption/authentication; IP data has no tunnel ACK or retransmission.
     vpn-udp-listen =
 

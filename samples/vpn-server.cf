@@ -78,8 +78,7 @@ service vpn-server {
     # Relative paths resolve from the process working directory; retain existing addresses, passwords and certificates.
 
     # Connections and authentication
-    # HTTP/HTTPS listen address; HTTP management is allowed on any interface. Retain the existing address.
-    listen = ":1088"
+    # HTTP/HTTPS listening uses master_service above in both startup modes.
     # Default backend TCP address; retain the existing address.
     target = "127.0.0.1:2900"
     # Comma-separated allowed backends selectable through client addr; exact host:port matching, with IPs or domain names.
@@ -199,14 +198,14 @@ service vpn-server {
     # IP inactivity threshold; padding does not reset it. Zero uses 1s. LIVE: Web saves apply without VPN reconnection.
     vpn-noise-idle-after = 1s
     # Separate QUIC UDP listener; cannot share a UDP port with quic-listen.
-    vpn-listen = 0.0.0.0:8444
+    vpn-quic-listen = 0.0.0.0:8444
     # Optional shared TLS/TCP and WSS listener; empty disables both transports.
     # To enable: set vpn-tcp-listen = 0.0.0.0:8444 and allow TCP 8444 in the firewall.
     # TCP and UDP may use the same numeric port; other TCP services cannot share it.
-    # Leave vpn-listen empty when only TCP/WSS or raw UDP is intended.
+    # Leave vpn-quic-listen empty when only TCP/WSS or raw UDP is intended.
     # The listener reuses vpn-tls-cert/vpn-tls-key (or tls-cert/tls-key).
     vpn-tcp-listen = ''
-    # Optional raw UDP VPN listener. Use a different UDP port from vpn-listen and quic-listen.
+    # Optional raw UDP VPN listener. Use a different UDP port from vpn-quic-listen and quic-listen.
     # Uses the shared key for DTLS encryption/authentication; IP data has no tunnel ACK or retransmission.
     vpn-udp-listen = ''
 

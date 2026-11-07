@@ -72,7 +72,7 @@ QUIC 独立资源配置、监听自动恢复、健康检查与新指标已提供
 
 ## acl_master 托管
 
-客户端接入 [go-service](https://github.com/acl-dev/go-service) 的 TCP 描述符接口；服务端按 [gin-service](https://github.com/acl-dev/gin-service) 示例统一使用 `Init → 注册路由 → Run`，独立启动和 acl_master 托管均经过这一生命周期。服务端不再有直接调用 `net/http.ListenAndServe` 的独立分支。两端识别框架的 `-f`、`-n`、`-t`、`-s` 等参数，继承 FD 5 状态通道及 FD 6 起的监听套接字；服务端支持多个监听、HTTPS/WSS，证书继续由 `tls-cert`、`tls-key` 指定。
+客户端接入 [go-service](https://github.com/acl-dev/go-service) 的 TCP 描述符接口；服务端按 [gin-service](https://github.com/acl-dev/gin-service) 示例统一使用 `Init → 注册路由 → Run`，独立启动和 acl_master 托管均经过这一生命周期。服务端不再有直接调用 `net/http.ListenAndServe` 的独立分支。两端识别框架的 `-f`、`-n`、`-t`、`-s` 等参数，继承 FD 5 状态通道及 FD 6 起的监听套接字；服务端支持多个监听、HTTPS/WSS，证书继续由 `tls-cert`、`tls-key` 指定。服务端两种启动方式统一读取 `master_service`（`IP|端口`，多项用逗号分隔）：alone 模式自行监听，托管模式继承 acl_master 的句柄。服务端仅接受 master_service 配置及 -master_service 参数，不再接受 listen 或 -listen。反向 TCP 映射在 `master_service` 中的保留端口不会成为 HTTP/WSS 入口。
 
 服务端入口 `cmd/sgate-server/main.go` 直接执行 `gin-service.Init → setRoute → Run`，不再经过工厂回调。`routes.go` 集中列出 WebSocket、管理页面、登录、配置、统计与服务重启入口；`options.go` 仅定义启动参数，`service.go` 仅适配共用的生命周期接口。`internal/app/server.go` 管理业务配置和资源，`sharedServer` 只负责切换当前代理及证书。隧道路径热更新通过兜底路由交给当前代理校验，避免运行中修改 Gin 路由树。
 
@@ -108,7 +108,7 @@ master_stop_kill = false
 master_stop_wait = true
 ```
 
-会话和重放状态属于单个进程，因此限制为一个工作进程；不支持把同一个隧道会话分配给多个独立工作进程。监听端口由 `master_service` 决定，应用 `listen` 和 `-listen` 不会重新绑定或覆盖继承端口；其它应用参数仍按“命令行高于配置文件”处理。工作目录由 `.cf` 的 `master_home` 决定，业务相对路径按这个目录解析，管理配置的存储、静态目录及证书路径继续相对管理配置文件解析。运行身份由 acl_master/服务账户设置；模板内再次降权和 chroot 模式会明确拒绝。
+会话和重放状态属于单个进程，因此限制为一个工作进程；不支持把同一个隧道会话分配给多个独立工作进程。监听端口由 `master_service` 决定，客户端应用 `listen` 和 `-listen` 不会重新绑定或覆盖继承端口；其它应用参数仍按“命令行高于配置文件”处理。工作目录由 `.cf` 的 `master_home` 决定，业务相对路径按这个目录解析，管理配置的存储、静态目录及证书路径继续相对管理配置文件解析。运行身份由 acl_master/服务账户设置；模板内再次降权和 chroot 模式会明确拒绝。
 
 启用 Web 管理后，可以继续校验、保存并重启代理，PID 和实际监听端口保持不变，登录会话及本进程累计带宽保持有效。界面会显示监听由 acl_master 管理；若应用新配置尝试修改有效 `listen`，会拒绝并还原本次保存。更换监听地址请修改 `.cf` 的 `master_service`，再通过 `master_ctl` 停止并重新启动该服务。框架停止、重启和 Web 代理重启都会中断当前业务连接，恢复后可以建立新连接。
 
@@ -171,7 +171,7 @@ python3 scripts/test-merged-standalone.py --client bin/sgate-client --server bin
 
 管理进程需要界面目录的遍历权限、界面文件的读取权限，以及业务配置所在目录的写入权限（用于临时校验、备份和原子替换）。启动时界面文件不可访问会报告具体路径及系统错误；运行中丢失或不可读时，相应页面请求返回 `503`，管理 API 和已有登录会话仍可使用，恢复文件或权限后刷新即可。配置目录不可写时，保存失败，文件和正在运行的代理保持原状。
 
-默认客户端管理地址为 `http://127.0.0.1:9081/`，同时支持 `/admin`（跳转至 `/admin/`）和 `/admin/`，三个入口共用账号及登录会话；服务端管理地址为代理入口的 `/admin/`，例如 `https://服务器:8080/admin/`，WSS 仍为 `wss://服务器:8080/tunnel`，只需一个 TCP 监听端口。管理界面仍须通过 `admin_enabled = true` 或 `-admin-enabled` 开启。服务端复用代理 `tls-cert`、`tls-key`，不再提供独立管理端口配置；管理地址由独立模式的 `listen` / `-listen` 或托管模式的 `master_service` 决定，路径为 `/admin/`。旧文件中的 `admin_listen` 仅兼容读取并忽略，不参与监听或登录身份计算，也不再显示在服务端配置表单中；有效旧会话会自动迁移 Cookie 名称且不延长有效期。旧 `admin_tls_cert`、`admin_tls_key` 不再加载证书。客户端仍使用独立管理监听。管理参数以 `admin_` 为前缀，连字符改为下划线，例如 `admin_session_timeout = 12h`。业务相对路径仍按进程工作目录解析，管理存储、静态目录和证书路径相对 `.cf` 所在目录解析。合并示例中的 `conf/admin-*-users.json`、`conf/admin-*-sessions` 继续指向原存储位置。现有 SSH、VPN、Web 配置可直接作为 `-config`，无需迁移其地址或密码。
+默认客户端管理地址为 `http://127.0.0.1:9081/`，同时支持 `/admin`（跳转至 `/admin/`）和 `/admin/`，三个入口共用账号及登录会话；服务端管理地址为代理入口的 `/admin/`，例如 `https://服务器:8080/admin/`，WSS 仍为 `wss://服务器:8080/tunnel`，只需一个 TCP 监听端口。管理界面仍须通过 `admin_enabled = true` 或 `-admin-enabled` 开启。服务端复用代理 `tls-cert`、`tls-key`，不再提供独立管理端口配置；管理地址统一由 `master_service` 决定，路径为 `/admin/`。旧文件中的 `admin_listen` 仅兼容读取并忽略，不参与监听或登录身份计算，也不再显示在服务端配置表单中；有效旧会话会自动迁移 Cookie 名称且不延长有效期。旧 `admin_tls_cert`、`admin_tls_key` 不再加载证书。客户端仍使用独立管理监听。管理参数以 `admin_` 为前缀，连字符改为下划线，例如 `admin_session_timeout = 12h`。业务相对路径仍按进程工作目录解析，管理存储、静态目录和证书路径相对 `.cf` 所在目录解析。合并示例中的 `conf/admin-*-users.json`、`conf/admin-*-sessions` 继续指向原存储位置。现有 SSH、VPN、Web 配置可直接作为 `-config`，无需迁移其地址或密码。
 
 登录后点击右上角“退出登录”，服务端立即删除当前登录对应的持久化会话文件并清除浏览器 Cookie。页面停止流量刷新、清空配置草稿与密码输入，返回登录页；旧 Cookie 不能恢复该会话。其他浏览器的登录会话继续有效。
 
@@ -309,7 +309,7 @@ openssl rand -hex 32 > sgate.key
 
 ```sh
 ./bin/sgate-server \
-  -listen :8080 \
+  -master_service :8080 \
   -target 127.0.0.1:5432 \
   -key-file sgate.key -password 'your-password'
 ```
@@ -380,7 +380,7 @@ admin_enabled = false
 
 部署时把所需 `.cf` 安装到 acl_master 的服务配置目录，权限设为 `0600`，并保留程序对该目录的写权限以使用 Web 保存功能。升级前先停止旧服务，再安装新版程序和合并配置，最后启动；管理参数相对路径以安装后的 `.cf` 目录为基准，部署到不同目录时应改为原存储位置的绝对路径，以继续使用已有账号和会话。原业务地址、密码和证书路径保持不变；Web 客户端原密码为空，部署前仍须填写或通过 `-password` 提供。
 
-`master_args` 可留空，也可直接写覆盖项，例如 `master_args = -noise-interval-min 1s -noise-interval-max 3s`。托管监听仍由 `master_service` 决定；业务 `-listen` 只在独立运行时改变实际绑定端口。不要再将 `master_args` 指向已删除的 `conf/*.conf`。
+`master_args` 可留空，也可直接写覆盖项，例如 `master_args = -noise-interval-min 1s -noise-interval-max 3s`。托管监听仍由 `master_service` 决定；客户端 `-listen` 只在独立运行时改变实际绑定端口；服务端统一使用 `-master_service`。不要再将 `master_args` 指向已删除的 `conf/*.conf`。
 
 ### 配置白噪音与重连回归
 
@@ -436,7 +436,7 @@ GOMAXPROCS=4 go test ./internal/tunnel -run '^TestConfigBinaryNoiseSoak$' \
 
 ```sh
 ./bin/sgate-server \
-  -listen :8443 -target 127.0.0.1:5432 -key-file sgate.key -password 'your-password' \
+  -master_service :8443 -target 127.0.0.1:5432 -key-file sgate.key -password 'your-password' \
   -tls-cert server.crt -tls-key server.key
 
 ./bin/sgate-client \
@@ -516,7 +516,7 @@ location /tunnel {
 
 | 参数 | 默认值 | 含义 |
 | --- | --- | --- |
-| `-listen` | `:8081` | HTTP/HTTPS 监听地址 |
+| `-master_service` | `127.0.0.1\|8081` | HTTP/HTTPS 监听地址，两种启动模式共用 |
 | `-target` | 必填 | 未传 `addr` 时默认连接的 `host:port` |
 | `-allowed-targets` | 空 | 客户端 `addr` 可选地址的完整允许列表，逗号分隔；空值禁止选择 |
 | `-path` | `/tunnel` | WebSocket 路径 |

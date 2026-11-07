@@ -39,6 +39,10 @@ To **build from source**, use Go 1.24 or later and run `make build` from the rep
 
 The installation templates forward client port `127.0.0.1:9000` through the server at `127.0.0.1:8081` to an HTTP backend at `127.0.0.1:8080`. If any example port is in use, choose a free port and update both `.cf` files, the client’s `conf/sgate-proxies.json`, and the commands below.
 
+The server uses `master_service = 127.0.0.1|8081` in both startup modes. Standalone mode opens the listener itself; acl_master opens and passes it in managed mode. No separate `listen` entry is needed. Set `tls-cert` and `tls-key` to enable HTTPS/WSS.
+
+For a command-line-only test, run `make build`, start an HTTP backend on `127.0.0.1:8080`, then run `./server-alone.sh` and `./client-alone.sh` in separate terminals. Installed copies are in `bin/`. Both run in the foreground until Ctrl+C, use the shared `sgate.key` and test password `sgate-test-password`, and forward client port `9000` through server port `8081` to the backend. They pass command-line options directly, without loading `.cf` files or enabling management. Append options to override defaults, such as `./client-alone.sh -listen 127.0.0.1:9001`. Set the same `SGATE_PASSWORD` and `SGATE_KEY_FILE` on both ends, or append `-password` and `-key-file`.
+
 1. Set the same new `password` in `conf/sgate-client.cf` and `conf/sgate-server.cf`. Both programs use the same `conf/sgate.key` in this installation.
 2. Start the HTTP backend, server, and client in separate terminals. Replace `$HOME/.local/sgate` with your installation prefix if needed. Use an account that can read the installed configuration and key.
 
@@ -75,7 +79,7 @@ Use the [web setup wizard](#web-setup-wizard) below, or configure the VPN manual
 
 | Transport | Server setting | Behavior |
 | --- | --- | --- |
-| `quic://` | `vpn-listen` | QUIC DATAGRAM uses congestion control and does not retransmit IP datagrams |
+| `quic://` | `vpn-quic-listen` | QUIC DATAGRAM uses congestion control and does not retransmit IP datagrams |
 | `udp://` | `vpn-udp-listen` | DTLS encrypts packets. Handshake and selected control messages can retry. The tunnel leaves payload loss recovery to the inner protocol |
 | `tcp://` | `vpn-tcp-listen` | TLS/TCP delivers data reliably and in order |
 | `wss://` | `vpn-tcp-listen` | WebSocket over TLS provides reliable, ordered delivery |

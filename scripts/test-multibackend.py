@@ -251,6 +251,7 @@ class Case:
             self.configs[role] = config
             application = f"listen = 127.0.0.1:{self.ports[role]}\nkey-file = {self.root}/key\npassword = isolated-target-password\nmax-streams = 128\nnoise-interval-min = 10ms\nnoise-interval-max = 30ms\nnoise-min-bytes = 128\nnoise-max-bytes = 512\nheartbeat = 1s\nheartbeat-timeout = 30s\n"
             if role == "server":
+                application = application.split("\n", 1)[1]
                 application += f"target = {self.targets['A']}\nallowed-targets = {self.targets['B']},{self.targets['C']}\nsession-ttl = 6s\nadmin_enabled = true\nadmin_web_dir = {ROOT}/web/admin\nadmin_listen = 127.0.0.1:9082\nadmin_users_file = {self.root}/users.json\nadmin_session_dir = {self.root}/sessions\nadmin_setup_token_file = {self.root}/setup.token\nadmin_session_timeout = 1h\n"
                 if self.args.tls == "wss":
                     application += f"tls-cert = {self.cert}\ntls-key = {self.root}/tls.key\n"

@@ -541,7 +541,9 @@ def run(args, secure):
     for role in ["server", "client"]:
         binary = str(pathlib.Path(getattr(args, role)).resolve())
         cfg = case / f"app/{role}.conf"
-        settings = f"listen = 127.0.0.1:1\nkey-file = {key}\npassword = isolated-proxy-password\nnoise-interval-min = 10ms\nnoise-interval-max = 30ms\nnoise-min-bytes = 128\nnoise-max-bytes = 512\n"
+        listen_key = "master_service" if role == "server" else "listen"
+        listen_value = ", ".join(f"{'' if getattr(args, role + '_wildcard', False) else '127.0.0.1'}|{p}" for p in addresses[role]) if role == "server" else "127.0.0.1:1"
+        settings = f"{listen_key} = {listen_value}\nkey-file = {key}\npassword = isolated-proxy-password\nnoise-interval-min = 10ms\nnoise-interval-max = 30ms\nnoise-min-bytes = 128\nnoise-max-bytes = 512\n"
         if role == "client":
             settings += f'server = {wire}://127.0.0.1:{relay.port if relay else addresses["server"][0]}/tunnel\n'
             if not args.stress:
@@ -603,7 +605,7 @@ def run(args, secure):
             )
             section = (
                 "\n# Integrated proxy and management settings\n"
-                + settings
+                + ("\n".join(line for line in settings.splitlines() if not line.startswith("master_service =")) + "\n")
                 + "admin_enabled = true\n"
             )
             for line in acfg.read_text().splitlines():
@@ -686,7 +688,7 @@ scan_subdir = 0
                     "-alone",
                     "-config",
                     str(services[role]),
-                    "-listen",
+                    "-master_service" if role == "server" else "-listen",
                     f"{'' if role == 'server' and getattr(args, 'server_wildcard', False) else '127.0.0.1'}:{addresses[role][0]}",
                     "-noise-min-bytes",
                     "256",

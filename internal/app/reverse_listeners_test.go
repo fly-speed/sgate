@@ -38,7 +38,7 @@ func TestReverseManagedSaveSynchronizesBothFilesAndDefersActivation(t *testing.T
 			continue // Managed server restart uses Unix shell scripts.
 		}
 		t.Run(map[bool]string{true: "success", false: "rollback"}[withScripts], func(t *testing.T) {
-			c := newController(t, "server", "listen = "+onlineAddress(t)+"\ntarget = localhost:22\n")
+			c := newController(t, "server", "master_service = "+onlineAddress(t)+"\ntarget = localhost:22\n")
 			address := c.worker.listener.Addr().String()
 			listener := strings.ReplaceAll(address, ":", "|")
 			setConfig(t, c, "master_service", listener)
@@ -126,7 +126,7 @@ func (s reverseLeaseHTTP) ReverseListener(_ string, address string) (net.Listene
 
 func TestReverseInheritedFrameworkSocketEndToEnd(t *testing.T) {
 	backend := onlineBackend(t, "R")
-	c := newController(t, "server", "listen = "+onlineAddress(t)+"\ntarget = "+backend+"\n")
+	c := newController(t, "server", "master_service = "+onlineAddress(t)+"\ntarget = "+backend+"\n")
 	httpAddress := c.worker.listener.Addr().String()
 	snapshot, err := c.manageTunnelAccounts(nil)
 	if err != nil {
@@ -186,7 +186,7 @@ func TestReverseInheritedFrameworkSocketEndToEnd(t *testing.T) {
 }
 
 func TestReverseTunnelPortConflictLeavesFilesUnchanged(t *testing.T) {
-	c := newController(t, "server", "listen = "+onlineAddress(t)+"\ntarget = localhost:22\n")
+	c := newController(t, "server", "master_service = "+onlineAddress(t)+"\ntarget = localhost:22\n")
 	_, port, _ := net.SplitHostPort(c.worker.listener.Addr().String())
 	// A different bind IP could otherwise succeed at the OS level.
 	conflict := []tunnel.ReverseMapping{{Listen: "127.0.0.2:" + port, Target: "localhost:22"}}
@@ -221,7 +221,7 @@ func TestReverseTunnelPortConflictLeavesFilesUnchanged(t *testing.T) {
 		t.Fatal("conflict changed files or restart state")
 	}
 	// Startup/file loading also rejects conflicts against the effective CLI port.
-	c.args = append(c.args, "-listen", "127.0.0.1:1080")
+	c.args = append(c.args, "-master_service", "127.0.0.1:1080")
 	data, err := tunnel.EncodeAccounts([]tunnel.Account{{Username: "alice", Password: "secret", ReverseMappings: []tunnel.ReverseMapping{{Listen: "[::1]:1080", Target: "localhost:22"}}}})
 	if err != nil {
 		t.Fatal(err)
@@ -235,7 +235,7 @@ func TestReverseTunnelPortConflictLeavesFilesUnchanged(t *testing.T) {
 }
 
 func TestVPNOnlyInheritedReversePortsStayInactive(t *testing.T) {
-	c := newController(t, "server", "listen = "+onlineAddress(t)+"\ntarget = localhost:22\n")
+	c := newController(t, "server", "master_service = "+onlineAddress(t)+"\ntarget = localhost:22\n")
 	httpAddress := c.worker.listener.Addr().String()
 	if err := c.worker.stop(); err != nil {
 		t.Fatal(err)

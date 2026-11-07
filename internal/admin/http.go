@@ -661,7 +661,7 @@ func (h *Handler) putConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, exists := input.Fields["admin_listen"]; h.view.Role == "server" && exists {
-		problem(w, 400, "服务端管理与代理共用监听端口，请修改 listen 或 master_service")
+		problem(w, 400, "服务端管理与代理共用监听端口，请修改 master_service")
 		return
 	}
 	current, e := regularRead(h.view.AppConfigPath, 1<<20)

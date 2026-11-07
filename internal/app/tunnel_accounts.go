@@ -81,10 +81,7 @@ func (c *controller) manageTunnelAccounts(change *admin.TunnelAccountChange) (ad
 				current := *c.current.server
 				current.Accounts = slices.Clone(accounts)
 				c.current.server = &current
-				if addresses != "" {
-					if c.controls == nil {
-						c.controls = map[string]string{}
-					}
+				if _, tracked := c.controls["master_service"]; addresses != "" && tracked {
 					c.controls["master_service"] = addresses
 				}
 				return nil

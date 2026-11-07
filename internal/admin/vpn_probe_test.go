@@ -33,7 +33,7 @@ func TestVPNProbeAPIRequiresAuthValidatesDraftsAndDoesNotSave(t *testing.T) {
 			t.Fatal(w.Code, w.Body.String())
 		}
 	}
-	for _, fields := range []map[string]string{{"password": "secret"}, {"vpn-listen": ":8444"}, {"vpn-server": "x\npassword=secret"}} {
+	for _, fields := range []map[string]string{{"password": "secret"}, {"vpn-quic-listen": ":8444"}, {"vpn-server": "x\npassword=secret"}} {
 		if w := request(h, "POST", "/api/vpn-test", map[string]any{"fields": fields}, cookie, csrf, ""); w.Code != 400 {
 			t.Fatal(w.Code)
 		}

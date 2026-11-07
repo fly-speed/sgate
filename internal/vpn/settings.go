@@ -22,46 +22,47 @@ import (
 
 // Setting describes one Web-editable integrated VPN option. Missing options in
 // older service files are offered by the UI and added only when explicitly saved.
-type Setting struct{ Key, Default, Description string }
+// Description is localized Web help; Usage is English command-line help.
+type Setting struct{ Key, Default, Description, Usage string }
 
 func Settings(role string) []Setting {
 	s := []Setting{
-		{"vpn-mode", "disabled", "独立 VPN：disabled 关闭，both 与代理共存，only 仅 VPN（保留框架及管理监听）。应用时会中断 VPN 并恢复/重建网络。"},
-		{"vpn-network", "10.77.0.0/24", "两端一致的 IPv4 VPN 子网，避免与现有网络重叠。"},
-		{"vpn-mtu", "1280", "TUN MTU，576～1500 字节。"},
-		{"vpn-queue-max-age", "0s", "发送队列过期时间，0 关闭过期丢弃（默认）；最多 1m。弱网 TCP 建议保持 0，队列容量仍有上限。"},
-		{"vpn-udp-send-interval", "0s", "纯 UDP VPN 每条连接发送大包的最小间隔，0 关闭，最多 10ms；仅影响本端发送，保存后立即生效。"},
-		{"vpn-tun-name", "", "新建设备名；Linux 默认 sgate0，macOS 自动分配 utunN。"},
-		{"vpn-manage-network", "true", "自动配置路由、DNS 或服务端 NAT；需要管理员权限。"},
-		{"vpn-key-file", "", "VPN 共享密钥文件；留空复用 key-file；不是代理或 Web 账号认证。"},
-		{"vpn-require-account", "false", "要求配置 VPN 专用账号文件并启用账号认证；配置文件路径后自动启用。"},
-		{"vpn-noise-rate", "0", "本端每条 VPN 连接的白噪音负载字节/秒，支持 K/M，0 关闭，上限 10M；与代理 noise-* 参数独立。"},
-		{"vpn-noise-traffic", "true", "业务 IP 数据传输期间允许白噪音；拥塞或有待发送业务时优先业务。"},
-		{"vpn-noise-idle", "true", "VPN 已连接但无业务 IP 数据时允许白噪音；不要求存在业务连接。"},
-		{"vpn-noise-idle-after", "1s", "连续多久没有双向业务 IP 数据视为空闲；0 使用 1s。"},
+		{"vpn-mode", "disabled", "独立 VPN：disabled 关闭，both 与代理共存，only 仅 VPN（保留框架及管理监听）。应用时会中断 VPN 并恢复/重建网络。", "VPN mode: disabled, both (proxy and VPN), or only (VPN with management); applying changes restarts VPN networking"},
+		{"vpn-network", "10.77.0.0/24", "两端一致的 IPv4 VPN 子网，避免与现有网络重叠。", "shared IPv4 VPN subnet; must match on both ends and avoid existing networks"},
+		{"vpn-mtu", "1280", "TUN MTU，576～1500 字节。", "TUN MTU in bytes (576..1500)"},
+		{"vpn-queue-max-age", "0s", "发送队列过期时间，0 关闭过期丢弃（默认）；最多 1m。弱网 TCP 建议保持 0，队列容量仍有上限。", "maximum queued packet age (up to 1m; 0 disables expiry); queue capacity limits still apply"},
+		{"vpn-udp-send-interval", "0s", "纯 UDP VPN 每条连接发送大包的最小间隔，0 关闭，最多 10ms；仅影响本端发送，保存后立即生效。", "minimum interval between large raw UDP VPN packets (up to 10ms; 0 disables); applies immediately"},
+		{"vpn-tun-name", "", "新建设备名；Linux 默认 sgate0，macOS 自动分配 utunN。", "TUN device name (empty uses sgate0 on Linux or an automatically allocated utun device on macOS)"},
+		{"vpn-manage-network", "true", "自动配置路由、DNS 或服务端 NAT；需要管理员权限。", "configure routes, DNS, or server NAT automatically; requires administrator privileges"},
+		{"vpn-key-file", "", "VPN 共享密钥文件；留空复用 key-file；不是代理或 Web 账号认证。", "VPN shared key file; empty reuses key-file; separate from proxy and Web authentication"},
+		{"vpn-require-account", "false", "要求配置 VPN 专用账号文件并启用账号认证；配置文件路径后自动启用。", "require VPN account authentication; also enabled when an account file is configured"},
+		{"vpn-noise-rate", "0", "本端每条 VPN 连接的白噪音负载字节/秒，支持 K/M，0 关闭，上限 10M；与代理 noise-* 参数独立。", "padding payload bytes per second per VPN connection (supports K/M; maximum 10M; 0 disables); separate from proxy noise settings"},
+		{"vpn-noise-traffic", "true", "业务 IP 数据传输期间允许白噪音；拥塞或有待发送业务时优先业务。", "allow VPN padding during application traffic; queued data and congestion take priority"},
+		{"vpn-noise-idle", "true", "VPN 已连接但无业务 IP 数据时允许白噪音；不要求存在业务连接。", "allow VPN padding while connected without IP traffic; no application connection is required"},
+		{"vpn-noise-idle-after", "1s", "连续多久没有双向业务 IP 数据视为空闲；0 使用 1s。", "no bidirectional IP data for this duration means idle (0 uses 1s)"},
 	}
 	if role == "server" {
 		return append(s,
-			Setting{"vpn-accounts-file", "", "VPN 服务端专用账号 JSON 文件，相对路径按本配置目录解析；填写后启用账号认证。"},
-			Setting{"vpn-listen", "0.0.0.0:8444", "独立 QUIC UDP 监听，不能与 quic-listen 共用 UDP 端口；配置 TCP 监听后可留空以关闭 UDP。"},
-			Setting{"vpn-udp-listen", "", "纯 UDP VPN 监听，例如 0.0.0.0:8445；与 QUIC 分开 UDP 端口，业务包不确认或重传，使用共享密钥加密认证。"},
-			Setting{"vpn-tcp-listen", "", "可选 TLS/TCP 与 WSS 共用监听，例如 0.0.0.0:8444；可与 VPN UDP 使用相同数字端口，不能与其他 TCP 服务共用。"},
-			Setting{"vpn-tcp-notsent-lowat", "0", "Linux VPN 服务端 TCP/WSS 套接字的未发送数据水位，支持 K/M，0 使用系统默认，最大 1M；重启 VPN 生效。"},
-			Setting{"vpn-tls-cert", "", "VPN 服务器证书；留空复用 tls-cert。"},
-			Setting{"vpn-tls-key", "", "VPN 证书私钥；留空复用 tls-key。"},
-			Setting{"vpn-max-clients", "64", "最多同时认证客户端数，1～254；降低上限不踢现有客户端，仅限制新连接；各客户端虚拟 IP 唯一。"},
-			Setting{"vpn-egress-interface", "", "macOS/Linux 物理出口网卡；留空按当前路由识别。"},
-			Setting{"vpn-allow-private", "false", "允许访问服务器侧私网；始终禁止客户端互访。"})
+			Setting{"vpn-accounts-file", "", "VPN 服务端专用账号 JSON 文件，相对路径按本配置目录解析；填写后启用账号认证。", "server VPN account JSON file, relative to this configuration; nonempty enables account authentication"},
+			Setting{"vpn-quic-listen", "0.0.0.0:8444", "独立 QUIC UDP 监听，不能与 quic-listen 共用 UDP 端口；配置 TCP 监听后可留空以关闭 UDP。", "QUIC UDP VPN listen address; must use a different UDP port from quic-listen; empty disables QUIC"},
+			Setting{"vpn-udp-listen", "", "纯 UDP VPN 监听，例如 0.0.0.0:8445；与 QUIC 分开 UDP 端口，业务包不确认或重传，使用共享密钥加密认证。", "encrypted raw UDP VPN listen address; must use a separate UDP port from QUIC; payloads are not acknowledged or retransmitted"},
+			Setting{"vpn-tcp-listen", "", "可选 TLS/TCP 与 WSS 共用监听，例如 0.0.0.0:8444；可与 VPN UDP 使用相同数字端口，不能与其他 TCP 服务共用。", "shared TLS/TCP and WSS VPN listen address; empty disables both; may share a numeric port with UDP, but not another TCP service"},
+			Setting{"vpn-tcp-notsent-lowat", "0", "Linux VPN 服务端 TCP/WSS 套接字的未发送数据水位，支持 K/M，0 使用系统默认，最大 1M；重启 VPN 生效。", "Linux server TCP/WSS unsent-data low-water mark (supports K/M; maximum 1M; 0 uses system default); requires a VPN restart"},
+			Setting{"vpn-tls-cert", "", "VPN 服务器证书；留空复用 tls-cert。", "VPN server certificate PEM file; empty reuses tls-cert"},
+			Setting{"vpn-tls-key", "", "VPN 证书私钥；留空复用 tls-key。", "VPN server private key PEM file; empty reuses tls-key"},
+			Setting{"vpn-max-clients", "64", "最多同时认证客户端数，1～254；降低上限不踢现有客户端，仅限制新连接；各客户端虚拟 IP 唯一。", "maximum authenticated VPN clients (1..254); lowering the limit does not disconnect existing clients"},
+			Setting{"vpn-egress-interface", "", "macOS/Linux 物理出口网卡；留空按当前路由识别。", "macOS/Linux outbound network interface; empty detects it from the current route"},
+			Setting{"vpn-allow-private", "false", "允许访问服务器侧私网；始终禁止客户端互访。", "allow access to server-side private networks; communication between VPN clients remains blocked"})
 	}
 	return append(s,
-		Setting{"vpn-credentials-file", "", "VPN 客户端专用凭据 JSON 文件，包含一个账号；相对路径按本配置目录解析。"},
-		Setting{"vpn-server", "", "VPN 服务端 udp://、quic://、tcp:// 或 wss://主机:端口/vpn；UDP 使用共享密钥加密，业务包不重传，其余方式使用 TLS。保存后自动重连，已停止的 VPN 不会自动启动。"},
-		Setting{"vpn-tls-ca", "", "附加信任 CA；留空复用 tls-ca。自签名证书需要显式信任。"},
-		Setting{"vpn-tls-skip-verify", "false", "信任服务端证书（跳过校验）。仅用于 QUIC、TCP、WSS；开启后无法验证服务端身份。"},
-		Setting{"vpn-routes", "0.0.0.0/1,128.0.0.0/1", "逗号分隔 IPv4 路由；服务端外层地址保留物理出口。"},
-		Setting{"vpn-dns", "1.1.1.1", "VPN IPv4 DNS，逗号分隔；留空不改 DNS。"},
-		Setting{"vpn-dns-service", "Wi-Fi", "macOS 网络服务名称；Linux 使用 resolvectl。"},
-		Setting{"vpn-block-ipv6", "true", "首版不转发 IPv6；将公网 IPv6 导入 TUN 后丢弃，避免绕过 VPN。"})
+		Setting{"vpn-credentials-file", "", "VPN 客户端专用凭据 JSON 文件，包含一个账号；相对路径按本配置目录解析。", "client VPN credentials JSON file containing one account, relative to this configuration"},
+		Setting{"vpn-server", "", "VPN 服务端 udp://、quic://、tcp:// 或 wss://主机:端口/vpn；UDP 使用共享密钥加密，业务包不重传，其余方式使用 TLS。保存后自动重连，已停止的 VPN 不会自动启动。", "VPN server udp://, quic://, tcp://, or wss://host:port/vpn URL; UDP uses shared-key encryption without payload retransmission; other transports use TLS"},
+		Setting{"vpn-tls-ca", "", "附加信任 CA；留空复用 tls-ca。自签名证书需要显式信任。", "additional trusted CA PEM file; empty reuses tls-ca; required for self-signed certificates"},
+		Setting{"vpn-tls-skip-verify", "false", "信任服务端证书（跳过校验）。仅用于 QUIC、TCP、WSS；开启后无法验证服务端身份。", "skip server certificate verification for QUIC, TCP, and WSS; disables server identity verification"},
+		Setting{"vpn-routes", "0.0.0.0/1,128.0.0.0/1", "逗号分隔 IPv4 路由；服务端外层地址保留物理出口。", "comma-separated IPv4 VPN routes; the outer server connection retains its physical route"},
+		Setting{"vpn-dns", "1.1.1.1", "VPN IPv4 DNS，逗号分隔；留空不改 DNS。", "comma-separated IPv4 VPN DNS servers; empty leaves DNS unchanged"},
+		Setting{"vpn-dns-service", "Wi-Fi", "macOS 网络服务名称；Linux 使用 resolvectl。", "macOS network service name; Linux uses resolvectl"},
+		Setting{"vpn-block-ipv6", "true", "首版不转发 IPv6；将公网 IPv6 导入 TUN 后丢弃，避免绕过 VPN。", "route public IPv6 traffic to the TUN device and drop it to prevent bypass; IPv6 forwarding is not supported"})
 }
 
 var legacyServerFileOptions = []string{
@@ -85,19 +86,19 @@ func RegisterFlags(fs *flag.FlagSet, role string) {
 	for _, s := range Settings(role) {
 		switch s.Key {
 		case "vpn-require-account", "vpn-manage-network", "vpn-allow-private", "vpn-block-ipv6", "vpn-noise-traffic", "vpn-noise-idle", "vpn-tls-skip-verify":
-			fs.Bool(s.Key, s.Default == "true", s.Description)
+			fs.Bool(s.Key, s.Default == "true", s.Usage)
 		case "vpn-noise-rate", "vpn-tcp-notsent-lowat":
-			cli.ByteSizeVar(fs, new(int), s.Key, 0, s.Description)
+			cli.ByteSizeVar(fs, new(int), s.Key, 0, s.Usage)
 		case "vpn-noise-idle-after":
-			fs.Duration(s.Key, time.Second, s.Description)
+			fs.Duration(s.Key, time.Second, s.Usage)
 		case "vpn-queue-max-age", "vpn-udp-send-interval":
-			fs.Duration(s.Key, 0, s.Description)
+			fs.Duration(s.Key, 0, s.Usage)
 		case "vpn-mtu":
-			fs.Int(s.Key, 1280, s.Description)
+			fs.Int(s.Key, 1280, s.Usage)
 		case "vpn-max-clients":
-			fs.Int(s.Key, 64, s.Description)
+			fs.Int(s.Key, 64, s.Usage)
 		default:
-			fs.String(s.Key, s.Default, s.Description)
+			fs.String(s.Key, s.Default, s.Usage)
 		}
 	}
 }
@@ -182,7 +183,7 @@ func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Pref
 		if noiseErr != nil {
 			return nil, invalidFields(noiseErr.Error(), "vpn-tcp-notsent-lowat")
 		}
-		p.Config.Address = get("vpn-listen")
+		p.Config.Address = get("vpn-quic-listen")
 		p.Config.TCPListen = get("vpn-tcp-listen")
 		p.Config.UDPListen = get("vpn-udp-listen")
 		if p.Config.Address != "" || p.Config.TCPListen != "" {
@@ -202,10 +203,10 @@ func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Pref
 			}
 			p.Config.TLS.Certificates = []tls.Certificate{cert}
 		}
-		p.Config.Address = get("vpn-listen")
+		p.Config.Address = get("vpn-quic-listen")
 		p.Config.TCPListen = get("vpn-tcp-listen")
 		if p.Config.Address == "" && p.Config.TCPListen == "" && p.Config.UDPListen == "" {
-			return nil, invalidFields("至少配置一个 VPN 监听：vpn-listen（QUIC）、vpn-udp-listen（UDP）或 vpn-tcp-listen（TCP/WSS）。", "vpn-listen", "vpn-udp-listen", "vpn-tcp-listen")
+			return nil, invalidFields("至少配置一个 VPN 监听：vpn-quic-listen（QUIC）、vpn-udp-listen（UDP）或 vpn-tcp-listen（TCP/WSS）。", "vpn-quic-listen", "vpn-udp-listen", "vpn-tcp-listen")
 		}
 		if p.Config.UDPListen != "" {
 			for _, other := range []string{p.Config.Address, get("quic-listen")} {
@@ -222,7 +223,7 @@ func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Pref
 			_, a, e1 := net.SplitHostPort(q)
 			_, b, e2 := net.SplitHostPort(p.Config.Address)
 			if e1 == nil && e2 == nil && a == b {
-				return nil, invalidFields("vpn-listen 与 quic-listen 不能占用同一个 UDP 端口；请为独立 VPN 配置不同端口。", "vpn-mode", "vpn-listen")
+				return nil, invalidFields("vpn-quic-listen 与 quic-listen 不能占用同一个 UDP 端口；请为独立 VPN 配置不同端口。", "vpn-mode", "vpn-quic-listen")
 			}
 		}
 	} else {

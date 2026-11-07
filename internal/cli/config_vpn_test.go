@@ -22,6 +22,8 @@ func TestDisabledVPNConfigCannotBlockProxyStartup(t *testing.T) {
 			fs := flag.NewFlagSet("server", flag.ContinueOnError)
 			fs.SetOutput(io.Discard)
 			fs.String("vpn-mode", "disabled", "")
+			fs.String("vpn-server", "", "")
+			fs.String("vpn-client-ip", "", "")
 			mtu := fs.Int("vpn-mtu", 1280, "")
 			manage := fs.Bool("vpn-manage-network", true, "")
 			listen := fs.String("listen", "", "")
@@ -42,7 +44,7 @@ func TestVPNConfigModeUsesCLIOverrideAndKeepsEnabledValidation(t *testing.T) {
 		}{
 			{"disabled", "", false}, {"", "", false}, {"both", "", true}, {"only", "", true}, {"disabled", "both", true}, {"both", "disabled", false},
 		} {
-			body := "vpn-server = quic://127.0.0.1:8444/vpn\n"
+			body := "vpn-mtu = invalid-but-dormant\n"
 			if tc.fileMode != "" {
 				body += "vpn-mode = " + tc.fileMode + "\n"
 			}
@@ -52,6 +54,9 @@ func TestVPNConfigModeUsesCLIOverrideAndKeepsEnabledValidation(t *testing.T) {
 			fs := flag.NewFlagSet("server", flag.ContinueOnError)
 			fs.SetOutput(io.Discard)
 			fs.String("vpn-mode", "disabled", "")
+			fs.Int("vpn-mtu", 1280, "")
+			fs.String("vpn-server", "", "")
+			fs.String("vpn-client-ip", "", "")
 			args := []string{"-config", configFile(t, body)}
 			if tc.override != "" {
 				args = append(args, "-vpn-mode", tc.override)
@@ -76,6 +81,8 @@ func TestDisabledVPNDoesNotRelaxOtherConfigurationErrors(t *testing.T) {
 			fs := flag.NewFlagSet("server", flag.ContinueOnError)
 			fs.SetOutput(io.Discard)
 			fs.String("vpn-mode", "disabled", "")
+			fs.String("vpn-server", "", "")
+			fs.String("vpn-client-ip", "", "")
 			fs.Int("vpn-mtu", 1280, "")
 			if e := Parse(fs, []string{"-config", configFile(t, body)}); e == nil {
 				t.Fatal("invalid config accepted", merged)

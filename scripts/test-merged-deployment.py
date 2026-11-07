@@ -146,7 +146,6 @@ def run(args, managed, secure, relative):
 
     def app(role):
         values = {
-            "listen": "127.0.0.1:1",
             "key-file": "../deliberately-missing-key",
             "password": "deployment-proxy-secret",
             "noise-interval-min": "10ms",
@@ -155,6 +154,7 @@ def run(args, managed, secure, relative):
             "noise-max-bytes": "512",
         }
         if role == "client":
+            values["listen"] = "127.0.0.1:1"
             values.update(
                 server=f'{"wss" if secure else "ws"}://127.0.0.1:{ports["server"]}/tunnel',
                 **{"reconnect-min": "20ms", "reconnect-max": "100ms", "offline-timeout": "5s"},
@@ -248,7 +248,7 @@ def run(args, managed, secure, relative):
         flags = ["-alone", "-config" if old or role == "server" else "-f", pvalue(cfg, cwd)]
         if old:
             flags += ["-admin-config", pvalue(admin_files[role], cwd)]
-        flags += ["-listen", f"127.0.0.1:{ports[role]}"] + cli(role)
+        flags += ["-master_service" if role == "server" else "-listen", f"127.0.0.1:{ports[role]}"] + cli(role)
         log = (output / (role + ".direct.log")).open("ab")
         p = subprocess.Popen(
             [str(pathlib.Path(getattr(args, role)).resolve())] + flags,

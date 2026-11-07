@@ -90,7 +90,7 @@ def exercise(client, server, secure, mapping_file=False, missing_mapping_file=Fa
                 tls_options = f"tls-cert = {directory}/tls.crt\ntls-key = {directory}/tls.key\n"
             noise = "noise-interval-min = 5ms\nnoise-interval-max = 20ms\nnoise-min-bytes = 1K\nnoise-max-bytes = 4K\n"
             server_config = directory / "server.cf"
-            server_config.write_text(f"listen = 127.0.0.1:{ports[0]}\ntarget = 127.0.0.1:{listener.getsockname()[1]}\n"
+            server_config.write_text(f"master_service = 127.0.0.1:{ports[0]}\ntarget = 127.0.0.1:{listener.getsockname()[1]}\n"
                                      f"key-file = {key}\naccounts-file = accounts.json\n" + tls_options + noise)
 
             def launch(binary, config, *extra):
