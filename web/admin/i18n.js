@@ -6,6 +6,8 @@ const sgateI18n = (() => {
  "VPN 配置向导": "VPN setup wizard",
  "配置服务端 VPN 的监听、认证和虚拟网络。": "Configure VPN server listeners, authentication, and the virtual network.",
  "至少配置一个监听地址。QUIC、TCP 和 WSS 需要证书和私钥，可复用现有 TLS 配置。上传会立即覆盖当前文件，包括代理共用的文件。证书与私钥必须配对后再应用。": "Configure at least one listener. QUIC, TCP, and WSS need a certificate and private key and can reuse the existing TLS settings. Uploads immediately replace current files, including files shared with the proxy. Apply after the certificate and private key match.",
+ "正在上传…": "Uploading…",
+ "上传完成，请保存并应用配置。": "Upload complete. Save and apply the settings.",
  "上传文件": "Upload file",
  "上传覆盖": "Upload to replace",
  "服务端 VPN 文件已覆盖，请保存并应用配置。": "Server VPN file replaced. Save and apply the settings.",

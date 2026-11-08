@@ -195,3 +195,38 @@ func TestVPNServerCertificateImportWithoutExistingFiles(t *testing.T) {
 		t.Fatal("import changed active configuration")
 	}
 }
+
+func TestVPNServerCertificateMetadataOnlyDisplaysExistingFiles(t *testing.T) {
+	h, cfg := adminFixture(t)
+	h.view.Role = "server"
+	cookie, _ := setupAccount(t, h, cfg)
+	dir := t.TempDir()
+	existing := filepath.Join(dir, "cert.pem")
+	if err := os.WriteFile(existing, []byte("certificate"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	paths := map[string]string{"vpn-tls-cert": existing, "vpn-tls-key": filepath.Join(dir, "missing.key")}
+	h.view.ServerVPNFilePaths = func() (map[string]string, error) { return paths, nil }
+	check := func(certPath, keyPath string) {
+		t.Helper()
+		w := request(h, "GET", "/api/vpn-server-files", nil, cookie, "", "")
+		if w.Code != 200 {
+			t.Fatalf("metadata failed: %d", w.Code)
+		}
+		view := object(t, w)
+		if view["vpn-tls-cert"].(map[string]any)["path"] != certPath || view["vpn-tls-key"].(map[string]any)["path"] != keyPath {
+			t.Fatalf("unexpected visible file paths: %v", view)
+		}
+	}
+	check(existing, "")
+	if err := os.WriteFile(paths["vpn-tls-key"], []byte("key"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	check(existing, paths["vpn-tls-key"])
+	if err := os.Remove(existing); err != nil {
+		t.Fatal(err)
+	}
+	check("", paths["vpn-tls-key"])
+	paths["vpn-tls-key"] = dir
+	check("", "")
+}

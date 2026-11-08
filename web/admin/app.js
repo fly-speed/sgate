@@ -1536,7 +1536,7 @@ async function loadVPNServerFiles(wizard) {
     wizard.serverFiles = files;
     for (const [key, file] of Object.entries(files)) {
       const field = wizard.fields.get(key);
-      if (!field || field.input.value !== field.entry.original) continue;
+      if (!field || field.input.value !== (field.initialPath ?? field.entry.original)) continue;
       field.input.value = field.displayedPath = file.path;
       field.upload.disabled = !file.revision && (key === "vpn-key-file" || field.entry.overridden);
       if (key !== "vpn-key-file") {
@@ -1632,6 +1632,9 @@ function openVPNWizard() {
       titleLabel.htmlFor = id;
       titleLabel.append(name);
       row.className = "vpn-wizard-server-file-field";
+      // Display a configured certificate path only after the server checks it.
+      input.value = "";
+      vpnWizard.fields.get(key).initialPath = "";
       row.append(titleLabel, renderVPNServerFileControl(key, input), help);
     } else {
       label.append(name, input, help);
@@ -1812,6 +1815,7 @@ async function runVPNWizard(action, details) {
       if (!file || (file.revision && field.input.value !== file.path) ||
           (!file.revision && field.entry.overridden)) return;
       if (selected.size > 256 * 1024) throw new Error(t("文件过大"));
+      vpnWizardResult(() => t("正在上传…"));
       const content = await selected.text();
       if (run !== epoch) return;
       const result = await api("vpn-server-files", {method:"PUT",
@@ -1821,8 +1825,7 @@ async function runVPNWizard(action, details) {
       if (file.revision) wizard.serverFiles[key] = result;
       field.input.value = result.path;
       localText($("pending-label"), () => t("已保存 · 待应用"));
-      vpnWizardResult(() => t(file.revision ? "服务端 VPN 文件已覆盖，请保存并应用配置。" :
-        "文件已导入，路径已填入向导。"));
+      vpnWizardResult(() => t("上传完成，请保存并应用配置。"));
     } else if (wizard.imports.has(action)) {
       const result = await importVPNWizardFile(action);
       if (run !== epoch) return;

@@ -2863,13 +2863,13 @@ test("bandwidth axis labels fit inside the canvas at narrow widths and high pixe
 
 
 test("server VPN wizard enables initial certificate and private key uploads and saves imported paths", async () => {
-  const {context} = await page();
+  const {context, elements} = await page();
   context.wizardFields = [
     {key:"vpn-mode", value:"only", validation:{choices:["disabled","both","only"]}},
     {key:"vpn-quic-listen", value:""},
     {key:"vpn-udp-listen", value:"0.0.0.0:8445"},
     {key:"vpn-tls-cert", value:""},
-    {key:"vpn-tls-key", value:""},
+    {key:"vpn-tls-key", value:"/srv/missing.pem"},
   ];
   context.document.getElementById("vpn-wizard").querySelectorAll = () => [];
   vm.runInContext(`
@@ -2879,16 +2879,23 @@ test("server VPN wizard enables initial certificate and private key uploads and 
   `, context);
   const calls = [];
   context.api = async (path, options) => {
-    if (!options) return {"vpn-tls-cert":{path:""}, "vpn-tls-key":{path:"/srv/missing.pem"}};
+    if (!options) return {"vpn-tls-cert":{path:""}, "vpn-tls-key":{path:""}};
     const body = JSON.parse(options.body);
     calls.push(body);
     return {path:"/srv/"+body.field+"-new.pem", revision:"new"};
   };
   await vm.runInContext("openVPNWizard()", context);
+  assert.equal(vm.runInContext('vpnWizard.fields.get("vpn-tls-key").input.value', context), "");
+  assert.equal(vm.runInContext('vpnWizardEdits()["vpn-tls-key"]', context), undefined);
   for (const key of ["vpn-tls-cert", "vpn-tls-key"]) {
     context.fieldKey = key;
     assert.equal(vm.runInContext("vpnWizard.fields.get(fieldKey).upload.disabled", context), false);
-    await vm.runInContext('runVPNWizard("server-file", {key:fieldKey, selected:{size:10,text:async () => "pem"}})', context);
+    await vm.runInContext(`
+      var fileControl = vpnWizard.fields.get(fieldKey).row.children[1].children[2];
+      fileControl.files = [{size:10,text:async () => "pem"}];
+      fileControl.listeners.change();
+    `, context);
+    assert.match(elements.get("vpn-wizard-result").textContent, /上传完成/);
     assert.equal(vm.runInContext("vpnWizardEdits()[fieldKey]", context), "/srv/"+key+"-new.pem");
   }
   assert.deepEqual(calls, [

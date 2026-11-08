@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"sgate/internal/configfile"
-
 	"sgate/internal/tunnel"
 )
 
@@ -52,7 +51,13 @@ func (h *Handler) vpnServerFiles(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		files := make(map[string]vpnServerFile, len(paths))
 		for field, path := range paths {
-			files[field] = vpnServerFile{Path: path, Revision: vpnServerFileRevision(path)}
+			revision := vpnServerFileRevision(path)
+			if field == "vpn-tls-cert" || field == "vpn-tls-key" {
+				if info, err := os.Stat(path); err != nil || !info.Mode().IsRegular() {
+					path = ""
+				}
+			}
+			files[field] = vpnServerFile{Path: path, Revision: revision}
 		}
 		reply(w, 200, files)
 		return
