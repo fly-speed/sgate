@@ -14,6 +14,10 @@ import (
 // Parse applies defaults, file settings, then explicitly supplied flags.
 // Register all application flags before calling Parse.
 func Parse(fs *flag.FlagSet, args []string) (result error) {
+	return parse(fs, args, clientFlags(fs))
+}
+
+func parse(fs *flag.FlagSet, args []string, warnUnknown bool) (result error) {
 	path := fs.String("config", "", "application configuration file (command-line flags override file settings)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -42,7 +46,11 @@ func Parse(fs *flag.FlagSet, args []string) (result error) {
 		return err
 	}
 	if merged {
-		return annotateServiceOptionError(applyService(fs, values, "", explicit), *path)
+		err := annotateServiceOptionError(applyService(fs, values, "", explicit, warnUnknown), *path)
+		if err == nil && warnUnknown {
+			logUnknownOptions(fs, *path, "", true)
+		}
+		return err
 	}
 	f, err := os.Open(*path)
 	if err != nil {
@@ -73,7 +81,8 @@ func Parse(fs *flag.FlagSet, args []string) (result error) {
 		}
 		name, value = strings.TrimSpace(name), strings.TrimSpace(value)
 		ignoredVPN := (ignoreVPN && fs.Lookup(name) != nil && inactiveVPNOption(name)) || ignoredFileOption(fs, name)
-		if (name == "config" || fs.Lookup(name) == nil) && !ignoredVPN {
+		unknown := fs.Lookup(name) == nil
+		if (name == "config" || (unknown && !warnUnknown)) && !ignoredVPN {
 			return fmt.Errorf("configuration line %d: unknown or unsupported option", line)
 		}
 		if seen[name] {
@@ -83,6 +92,10 @@ func Parse(fs *flag.FlagSet, args []string) (result error) {
 		value, err = configValue(value)
 		if err != nil {
 			return fmt.Errorf("configuration line %d: invalid quoted value for %q", line, name)
+		}
+		if unknown {
+			warnUnknownOption(*path, line, name)
+			continue
 		}
 		if !ignoredVPN && !explicit[name] {
 			if err := fs.Set(name, value); err != nil {
@@ -113,36 +126,42 @@ func configValue(value string) (string, error) {
 // ParseSection reads management keys in the same service block, independently
 // of the proxy flags. Legacy standalone management files remain supported.
 func ParseSection(fs *flag.FlagSet, path, prefix string) error {
+	return parseSection(fs, path, prefix, false)
+}
+
+// ParseClientSection ignores surplus keys in a client's management file.
+func ParseClientSection(fs *flag.FlagSet, path, prefix string) error {
+	return parseSection(fs, path, prefix, true)
+}
+
+func parseSection(fs *flag.FlagSet, path, prefix string, warnUnknown bool) error {
 	values, merged, err := serviceconfig.Read(path)
 	if err != nil {
 		return err
 	}
 	if !merged {
-		return Parse(fs, []string{"-config", path})
+		return parse(fs, []string{"-config", path}, warnUnknown)
 	}
-	return annotateServiceOptionError(applyService(fs, values, prefix, nil), path)
+	err = annotateServiceOptionError(applyService(fs, values, prefix, nil, warnUnknown), path)
+	if err == nil && warnUnknown {
+		logUnknownOptions(fs, path, prefix, true)
+	}
+	return err
 }
-func applyService(fs *flag.FlagSet, values map[string]string, prefix string, explicit map[string]bool) error {
+func applyService(fs *flag.FlagSet, values map[string]string, prefix string, explicit map[string]bool, warnUnknown bool) error {
 	ignoreVPN := prefix == "" && vpnDisabled(fs, values["vpn-mode"], explicit)
 	for key, value := range values {
 		if prefix == "" && ((ignoreVPN && fs.Lookup(key) != nil && inactiveVPNOption(key)) || ignoredFileOption(fs, key)) {
 			continue
 		}
-		name := key
-		if prefix != "" {
-			if !strings.HasPrefix(key, prefix) || key == "admin_enabled" {
-				continue
-			}
-			name = strings.ReplaceAll(strings.TrimPrefix(key, prefix), "_", "-")
-		} else {
-			if (serviceconfig.FrameworkKey(key) && !(key == "master_service" && fs.Lookup(key) != nil)) || (strings.HasPrefix(key, "admin_") && key != "admin_enabled") {
-				continue
-			}
-			if key == "admin_enabled" {
-				name = "admin-enabled"
-			}
+		name, ignored := serviceOptionName(fs, key, prefix)
+		if ignored {
+			continue
 		}
 		if name == "config" || fs.Lookup(name) == nil {
+			if warnUnknown && name != "config" {
+				continue
+			}
 			return &unsupportedServiceOption{key: key}
 		}
 		if !explicit[name] {

@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"sgate/internal/cli"
 	"sgate/internal/clientcontrol"
 	"sgate/internal/vpn"
 	"syscall"
@@ -67,6 +68,7 @@ func run() error {
 		return err
 	}
 	defer service.Close()
+	cli.LogClientConfigWarnings(flag.CommandLine)
 	service.AcceptHandler = proxy.Accept
 	service.CloseHandler = proxy.Closed
 	if err = proxy.Configure(frameworkService{service}); err != nil {

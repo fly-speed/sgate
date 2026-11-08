@@ -58,7 +58,11 @@ func loadConfig(path string, shared bool) (Config, error) {
 	fs.IntVar(&c.MaxSessions, "max-sessions", 128, "maximum persisted login sessions")
 	fs.StringVar(&c.MasterCtl, "master-ctl", "/opt/soft/acl-master/bin/master_ctl", "acl_master service control executable")
 	fs.StringVar(&c.MasterSocket, "master-socket", "", "optional acl_master management socket")
-	if e := cli.ParseSection(fs, path, "admin_"); e != nil {
+	parse := cli.ParseSection
+	if !shared {
+		parse = cli.ParseClientSection
+	}
+	if e := parse(fs, path, "admin_"); e != nil {
 		return c, e
 	}
 	for _, p := range []*string{&c.WebDir, &c.UsersFile, &c.SessionDir, &c.SetupTokenFile, &c.TLSCert, &c.TLSKey} {
