@@ -1483,3 +1483,26 @@ main:has(> #overview:not([hidden])) > footer {
 .vpn-config-key-import [hidden] {
   display: none;
 }
+
+/* Keep file uploads and row actions aligned above the explanatory text. */
+.config-row.vpn-config-file-row {
+  --config-actions-width: 94px;
+  align-items: start;
+}
+.vpn-config-file-row .vpn-config-server-file > :is(input, button),
+.vpn-config-file-row > .config-row-actions > button,
+.vpn-config-file-row > .config-save {
+  height: 44px;
+}
+.vpn-config-file-row > .config-row-actions > button,
+.vpn-config-file-row > .config-save {
+  width: 44px;
+}
+@media (max-width: 680px) {
+  .config-row.vpn-config-file-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .vpn-config-file-row > :is(.config-row-actions, .config-save) {
+    justify-self: end;
+  }
+}

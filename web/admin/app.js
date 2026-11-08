@@ -262,6 +262,7 @@ function renderConfigFields(fields, runtime, role) {
     configInputs.push(entry);
     if (configRole === "client" && field.key === "key-file") renderClientKeyEditor(editor);
     if (configRole === "server" && ["vpn-tls-cert", "vpn-tls-key"].includes(field.key)) {
+      row.classList.toggle("vpn-config-file-row", true);
       renderVPNConfigFileControl(entry, editor);
     }
     if (field.key === "vpn-key-file") renderVPNConfigKeyControl(entry, editor);
