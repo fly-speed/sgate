@@ -113,9 +113,9 @@ service sgate-server {
     noise-interval-max = "2000ms"
     # Minimum random padding payload per burst, in bytes; must be at least 1.
     # WS/WSS: bytes per burst. QUIC: payload bytes per second per tunnel, smoothly paced.
-    noise-min-bytes = "10K"
+    noise-min-bytes = "1K"
     # Maximum random padding payload per burst, in bytes; must be at least the minimum and at most 10M (10485760 bytes). Supports K/M.
-    noise-max-bytes = "500K"
+    noise-max-bytes = "10K"
     # Send padding during application traffic; true preserves the original behavior, false pauses it during traffic in either direction.
     noise-traffic = "false"
     # Send padding when application connections exist but neither direction has data; use the interval and size settings above.
@@ -181,9 +181,9 @@ service sgate-server {
     # Per authenticated VPN connection, local padding payload bytes/second; K/M supported, 0 disables, maximum 10M. LIVE: Web saves apply without VPN reconnection.
     vpn-noise-rate = 0
     # Allow padding during business IP traffic; queued business data and congestion take priority. LIVE: Web saves apply without VPN reconnection.
-    vpn-noise-traffic = true
+    vpn-noise-traffic = false
     # Allow padding on connected but idle VPN tunnels; no business connection is required. LIVE: Web saves apply without VPN reconnection.
-    vpn-noise-idle = true
+    vpn-noise-idle = false
     # IP inactivity threshold; padding does not reset it. Zero uses 1s. LIVE: Web saves apply without VPN reconnection.
     vpn-noise-idle-after = 1s
     # Separate QUIC UDP listener; cannot share a UDP port with quic-listen.
