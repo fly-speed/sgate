@@ -1546,3 +1546,23 @@ main:has(> #overview:not([hidden])) > footer {
   overflow-wrap: anywhere;
   user-select: text;
 }
+
+.vpn-wizard-address-field,
+.vpn-wizard-address-control {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.vpn-wizard-address-control {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.vpn-wizard-address-control > :is(input, button) {
+  height: 44px;
+}
+.vpn-wizard-address-result {
+  color: var(--green, #087e68);
+  overflow-wrap: anywhere;
+}
+.vpn-wizard-address-result.bad {
+  color: var(--red, #c53030);
+}

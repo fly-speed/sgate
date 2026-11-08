@@ -3215,3 +3215,40 @@ test("first registration displays the setup token file below its input and clear
  assert.equal(elements.get("token-row").hidden,true);
  assert.equal(elements.get("setup-token-path").textContent,"");
 });
+
+test("client wizard address button probes draft settings inline without saving or starting VPN", async () => {
+ const {context,elements}=await page();
+ elements.get("vpn-wizard").querySelectorAll=()=>[];
+ context.wizardFields=[
+  {key:"vpn-mode",value:"only",validation:{choices:["disabled","both","only"]}},
+  {key:"vpn-server",value:"udp://old.example:8445/vpn",validation:{type:"vpn-url"}},
+  {key:"vpn-key-file",value:"shared.key"},
+ ];
+ vm.runInContext('state={authenticated:true,role:"client"};revision="v1";renderConfigFields(wizardFields,{},"client");openVPNWizard()',context);
+ const calls=[];let finish;
+ context.api=async(path,options)=>{
+  calls.push([path,JSON.parse(options.body)]);
+  return new Promise(resolve=>finish=resolve);
+ };
+ vm.runInContext('vpnWizard.fields.get("vpn-server").input.value="quic://new.example:8444/vpn";updateVPNWizardAddressTest()',context);
+ const pending=vm.runInContext('vpnWizard.addressTest.button.listeners.click()',context);
+ assert.equal(vm.runInContext('vpnWizard.addressTest.button.disabled',context),true);
+ assert.match(vm.runInContext('vpnWizard.addressTest.button.textContent',context),/测试中/);
+ await vm.runInContext('runVPNWizard("address-test")',context);
+ assert.equal(calls.length,1);
+ finish({ok:true,stage:"datagram",elapsed_ms:7});await pending;
+ assert.equal(vm.runInContext('vpnWizard.step',context),0);
+ assert.equal(vm.runInContext('vpnWizard.addressTest.button.disabled',context),false);
+ assert.match(vm.runInContext('vpnWizard.addressTest.result.textContent',context),/VPN 测试成功/);
+ assert.deepEqual(calls,[["vpn-test",{fields:{"vpn-server":"quic://new.example:8444/vpn"}}]]);
+ assert.equal(vm.runInContext('configInputs.find(e=>e.key==="vpn-server").original',context),"udp://old.example:8445/vpn");
+ context.api=async()=>({ok:false,stage:"tls",error:"certificate signed by unknown authority",elapsed_ms:3});
+ await vm.runInContext('vpnWizard.addressTest.button.listeners.click()',context);
+ assert.match(vm.runInContext('vpnWizard.addressTest.result.textContent',context),/unknown authority/);
+ context.api=async()=>{throw new Error("should not probe unimported key")};
+ vm.runInContext('vpnWizard.imports.get("key").secret.value="ab".repeat(32)',context);
+ await vm.runInContext('vpnWizard.addressTest.button.listeners.click()',context);
+ assert.match(vm.runInContext('vpnWizard.addressTest.result.textContent',context),/请先导入/);
+ vm.runInContext('vpnWizard.fields.get("vpn-server").input.value="";updateVPNWizardAddressTest()',context);
+ assert.equal(vm.runInContext('vpnWizard.addressTest.button.disabled',context),true);
+});

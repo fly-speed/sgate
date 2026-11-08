@@ -19,6 +19,7 @@ const sgateI18n = (() => {
  "请打开以下文件，复制其中的初始化令牌并粘贴到上方：": "Open this file, copy the setup token, and paste it above:",
  "设置独立管理账号，并从下方指定文件中复制初始化令牌。": "Create a separate administrator account and copy the setup token from the file shown below.",
  "无法解析初始化令牌文件路径": "Could not resolve the setup-token file path",
+ "测试当前向导参数和已保存的凭据；不会保存配置或启动 VPN。": "Test the current wizard settings and saved credentials without saving settings or starting VPN.",
  "VPN 配置向导": "VPN setup wizard",
  "配置服务端 VPN 的监听、认证和虚拟网络。": "Configure VPN server listeners, authentication, and the virtual network.",
  "至少配置一个监听地址。QUIC、TCP 和 WSS 需要证书和私钥，可复用现有 TLS 配置。上传会立即覆盖当前文件，包括代理共用的文件。证书与私钥必须配对后再应用。": "Configure at least one listener. QUIC, TCP, and WSS need a certificate and private key and can reuse the existing TLS settings. Uploads immediately replace current files, including files shared with the proxy. Apply after the certificate and private key match.",

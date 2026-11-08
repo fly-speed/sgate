@@ -1786,6 +1786,43 @@ async function loadVPNServerFiles(wizard) {
   }
 }
 
+function renderVPNWizardAddressControl(input) {
+  const controls = document.createElement("div");
+  controls.className = "vpn-wizard-address-control";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "secondary";
+  localText(button, () => t("测试"));
+  localAttr(button, "aria-label", () => t("测试 VPN 连接"));
+  const result = document.createElement("small");
+  result.id = "vpn-wizard-address-result";
+  result.className = "vpn-wizard-address-result";
+  result.hidden = true;
+  result.setAttribute("role", "status");
+  result.setAttribute("aria-live", "polite");
+  vpnWizard.addressTest = {button, result};
+  button.addEventListener("click", () => runVPNWizard("address-test"));
+  controls.append(input, button);
+  updateVPNWizardAddressTest();
+  return controls;
+}
+
+function updateVPNWizardAddressTest() {
+  const test = vpnWizard?.addressTest;
+  if (!test) return;
+  test.button.disabled = vpnWizard.busy || configSaving || serviceRestarting ||
+    !vpnWizard.fields.get("vpn-server")?.input.value.trim();
+  localText(test.button, () => t(vpnWizard.testingAddress ? "测试中…" : "测试"));
+}
+
+function vpnWizardAddressResult(message, bad = false) {
+  const result = vpnWizard?.addressTest?.result;
+  if (!result) return;
+  localText(result, message);
+  result.hidden = false;
+  result.classList.toggle("bad", bad);
+}
+
 function openVPNWizard() {
   if (vpnWizard?.busy) return;
   const container = $("vpn-wizard-fields");
@@ -1861,9 +1898,23 @@ function openVPNWizard() {
       input.type = "hidden";
       input.hidden = true;
     }
-    input.addEventListener("input", () => { $("vpn-wizard-result").hidden = true; });
+    input.addEventListener("input", () => {
+      $("vpn-wizard-result").hidden = true;
+      if (vpnWizard.addressTest) vpnWizard.addressTest.result.hidden = true;
+      updateVPNWizardAddressTest();
+    });
     vpnWizard.fields.set(key, {input, entry, row});
-    if (server && vpnServerWizardFiles.has(key) && !keyImport) {
+    if (!server && key === "vpn-server") {
+      input.id = "vpn-wizard-input-vpn-server";
+      const titleLabel = document.createElement("label");
+      titleLabel.htmlFor = input.id;
+      titleLabel.append(name);
+      row.className = "vpn-wizard-address-field";
+      const controls = renderVPNWizardAddressControl(input);
+      const testHelp = document.createElement("small");
+      localText(testHelp, () => t("测试当前向导参数和已保存的凭据；不会保存配置或启动 VPN。"));
+      row.append(titleLabel, controls, help, testHelp, vpnWizard.addressTest.result);
+    } else if (server && vpnServerWizardFiles.has(key) && !keyImport) {
       const id = "vpn-wizard-input-" + key;
       input.id = id;
       const titleLabel = document.createElement("label");
@@ -2053,8 +2104,9 @@ function renderVPNWizardAccount(view, keepDraft = false) {
 async function runVPNWizard(action, details) {
   const wizard = vpnWizard;
   const start = action === "apply-start";
+  const testing = action === "test" || action === "address-test";
   if (!wizard || wizard.busy || vpnAccountsBusy || configSaving || serviceRestarting ||
-      (start && vpnControlBusy) || (wizard.server && (start || action === "test")) ||
+      (start && vpnControlBusy) || (wizard.server && (start || testing)) ||
       state.role !== (wizard.server ? "server" : "client")) return;
   const controls = $("vpn-wizard").querySelectorAll("button, input, select");
   const enabled = Array.from(controls).filter(control => !control.disabled);
@@ -2063,6 +2115,9 @@ async function runVPNWizard(action, details) {
   let applied = false;
   if (start) vpnControlBusy = true;
   wizard.busy = configSaving = true;
+  wizard.testingAddress = action === "address-test";
+  if (wizard.addressTest) wizard.addressTest.result.hidden = true;
+  updateVPNWizardAddressTest();
   enabled.forEach(control => control.disabled = true);
   setConfigBusy(true);
   $("vpn-wizard-result").hidden = true;
@@ -2147,10 +2202,21 @@ async function runVPNWizard(action, details) {
         wizard.server ? "VPN 账号已保存，下次启动 VPN 时生效。" : "VPN 账号已保存，重启 VPN 后生效"));
     } else {
       const fields = vpnWizardEdits();
-      if (action === "test") {
-        vpnWizardResult(() => t("正在测试 VPN 连接、认证和数据报回显…"));
+      if (testing) {
+        for (const [kind, imported] of wizard.imports) {
+          if (imported.file.value || imported.secret?.value.trim()) {
+            const error = new Error(t("请先导入所选文件或输入的密钥，或清除输入。"));
+            error.fieldErrors = {[kind === "key" ? "vpn-key-file" : "vpn-tls-ca"]:error.message};
+            throw error;
+          }
+        }
+        if (action === "address-test") vpnWizardAddressResult(() => t("正在测试 VPN 连接、认证和数据报回显…"));
+        else vpnWizardResult(() => t("正在测试 VPN 连接、认证和数据报回显…"));
         const result = await api("vpn-test", {method:"POST", body:JSON.stringify({fields})});
-        if (run === epoch) vpnWizardResult(() => vpnTestText(result), !result.ok);
+        if (run === epoch) {
+          if (action === "address-test") vpnWizardAddressResult(() => vpnTestText(result), !result.ok);
+          else vpnWizardResult(() => vpnTestText(result), !result.ok);
+        }
         return;
       }
       const result = await api("config", {method:"PUT", body:JSON.stringify(configPayload(fields, true))});
@@ -2186,18 +2252,21 @@ async function runVPNWizard(action, details) {
     }
   } catch (error) {
     if (run === epoch) {
+      if (action === "address-test") vpnWizardAddressResult(() => errorText(error), true);
       showVPNWizardFieldErrors(error, action === "server-file" ? details.key :
         action === "key" ? "vpn-key-file" : action === "ca" ? "vpn-tls-ca" : null);
-      vpnWizardResult(() => [...(start && applied ? [t("VPN 配置已应用，启动或重启失败")] : []),
+      if (action !== "address-test") vpnWizardResult(() => [...(start && applied ? [t("VPN 配置已应用，启动或重启失败")] : []),
         errorText(error)].join(" · "), true);
     }
   } finally {
     wizard.busy = configSaving = false;
+    wizard.testingAddress = false;
     if (start) vpnControlBusy = false;
     enabled.forEach(control => control.disabled = false);
     setConfigBusy(serviceRestarting);
     wizard.errorFocus?.focus();
     wizard.errorFocus = null;
+    updateVPNWizardAddressTest();
   }
 }
 
