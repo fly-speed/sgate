@@ -71,3 +71,37 @@ func TestVPNProbeAPIRequiresAuthValidatesDraftsAndDoesNotSave(t *testing.T) {
 		t.Fatal(w.Code)
 	}
 }
+
+func TestServerVPNPreflightRequiresRevisionAndNeverSaves(t *testing.T) {
+	h, cfg := adminFixture(t)
+	h.view.Role = "server"
+	cookie, csrf := setupAccount(t, h, cfg)
+	before, _ := os.ReadFile(h.view.AppConfigPath)
+	calls := 0
+	h.view.ValidateServerVPN = func(fields map[string]string, parameters bool) error {
+		calls++
+		if fields["vpn-tls-cert"] != "missing.pem" || !parameters {
+			t.Fatal(fields, parameters)
+		}
+		return &vpn.ValidationError{Fields: []string{"vpn-tls-cert", "vpn-tls-key"}, Message: "bad certificate pair"}
+	}
+	input := map[string]any{"fields": map[string]string{"vpn-tls-cert": "missing.pem"}, "revision": h.configRevision(before), "parameters": true}
+	if w := request(h, "POST", "/api/vpn-server-validate", input, cookie, "", ""); w.Code != 403 {
+		t.Fatal(w.Code)
+	}
+	w := request(h, "POST", "/api/vpn-server-validate", input, cookie, csrf, "")
+	if w.Code != 400 || object(t, w)["field_errors"].(map[string]any)["vpn-tls-cert"] != "bad certificate pair" {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	input["revision"] = "stale"
+	if w := request(h, "POST", "/api/vpn-server-validate", input, cookie, csrf, ""); w.Code != 409 {
+		t.Fatal(w.Code)
+	}
+	if calls != 1 {
+		t.Fatal(calls)
+	}
+	after, _ := os.ReadFile(h.view.AppConfigPath)
+	if string(after) != string(before) {
+		t.Fatal("preflight saved draft")
+	}
+}

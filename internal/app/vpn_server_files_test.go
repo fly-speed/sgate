@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -83,5 +84,35 @@ func TestServerVPNFilePathsIncludeUnconfiguredCertificateFields(t *testing.T) {
 		if path, ok := paths[field]; !ok || path != "" {
 			t.Fatalf("%s: path=%q, present=%t", field, path, ok)
 		}
+	}
+}
+
+func TestServerVPNWizardPreflightUsesDraftsAndCLIOverrides(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "server.cf")
+	key := filepath.Join(dir, "shared.key")
+	if err := os.WriteFile(key, []byte(strings.Repeat("ab", 32)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	content := "vpn-mode = disabled\nkey-file = " + key + "\nvpn-require-account = true\nvpn-tls-cert = saved.pem\nvpn-tls-key = saved.key\n"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c := &controller{role: "server", path: path, original: appFlags("server"), args: []string{"-config", path}}
+	fields := map[string]string{"vpn-tls-cert": filepath.Join(dir, "draft.pem"), "vpn-tls-key": filepath.Join(dir, "draft.key")}
+	if err := c.validateServerVPN(fields, true); err == nil || !strings.Contains(err.Error(), "draft.pem") {
+		t.Fatalf("draft certificate not checked: %v", err)
+	}
+	c.args = append(c.args, "-vpn-tls-cert="+filepath.Join(dir, "override.pem"))
+	c.overrides = []string{"vpn-tls-cert"}
+	if err := c.validateServerVPN(fields, true); err == nil || !strings.Contains(err.Error(), "override.pem") {
+		t.Fatalf("CLI override ignored: %v", err)
+	}
+	if err := c.validateServerVPN(fields, false); err == nil || !strings.Contains(err.Error(), "第二步") {
+		t.Fatalf("account preflight missing: %v", err)
+	}
+	after, _ := os.ReadFile(path)
+	if string(after) != content {
+		t.Fatal("preflight modified config")
 	}
 }

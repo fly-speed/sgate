@@ -161,6 +161,8 @@ func (h *Handler) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		h.restartVPN(w, r)
 	case (r.URL.Path == "/api/vpn-start" || r.URL.Path == "/api/vpn-stop") && r.Method == "POST":
 		h.controlVPN(w, r)
+	case r.URL.Path == "/api/vpn-server-validate" && r.Method == "POST":
+		h.validateServerVPN(w, r)
 	case r.URL.Path == "/api/vpn-test" && r.Method == "POST":
 		h.testVPN(w, r)
 	case r.URL.Path == "/api/proxy-test" && r.Method == "POST":

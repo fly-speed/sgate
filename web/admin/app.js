@@ -1668,6 +1668,10 @@ function clearVPNWizardFieldError(key) {
 function showVPNWizardFieldErrors(error, fallbackKey) {
   const errors = {...(error.fieldErrors || {})};
   if (!Object.keys(errors).length && fallbackKey) errors[fallbackKey] = errorText(error);
+  if (errors["vpn-accounts-file"] || errors["vpn-require-account"]) {
+    showVPNWizardStep(1);
+    vpnWizard.errorFocus = $("vpn-wizard-user");
+  }
   let first;
   for (const [key, message] of Object.entries(errors)) {
     const field = vpnWizard.fields.get(key);
@@ -2098,12 +2102,23 @@ async function runVPNWizard(action, details) {
       vpnWizardResult(() => t(wizard.server ? "服务端 VPN 文件已覆盖，请保存并应用配置。" :
         action === "key" ? "共享密钥已导入。" : "文件已导入，路径已填入向导。"));
     } else if (action === "account") {
+      if (wizard.server) {
+        await api("vpn-server-validate", {method:"POST", body:JSON.stringify({
+          fields:vpnWizardEdits(), revision:wizard.revision, parameters:true,
+        })});
+        if (run !== epoch) return;
+      }
       showVPNWizardStep(1);
       $("vpn-wizard-account-form").hidden = true;
       $("vpn-wizard-account-list").hidden = true;
       localText($("vpn-wizard-account-status"), () => "");
       const view = await api("vpn-accounts");
       if (run === epoch) renderVPNWizardAccount(view);
+    } else if (action === "review") {
+      await api("vpn-server-validate", {method:"POST", body:JSON.stringify({
+        fields:vpnWizardEdits(), revision:wizard.revision, parameters:false,
+      })});
+      if (run === epoch) showVPNWizardStep(2);
     } else if (action === "credentials" || action === "delete-account") {
       if (!wizard.account || wizard.account.blocked) return;
       const deleting = action === "delete-account";
@@ -2173,9 +2188,8 @@ async function runVPNWizard(action, details) {
     if (run === epoch) {
       showVPNWizardFieldErrors(error, action === "server-file" ? details.key :
         action === "key" ? "vpn-key-file" : action === "ca" ? "vpn-tls-ca" : null);
-      const detail = Object.entries(error.fieldErrors || {}).map(([key, value]) => key + " · " + t(value));
       vpnWizardResult(() => [...(start && applied ? [t("VPN 配置已应用，启动或重启失败")] : []),
-        errorText(error), ...detail].join(" · "), true);
+        errorText(error)].join(" · "), true);
     }
   } finally {
     wizard.busy = configSaving = false;
@@ -2209,6 +2223,7 @@ $("vpn-wizard-next").addEventListener("click", () => {
     vpnWizardResult(() => t("请先保存输入的 VPN 凭据，或清除未保存的修改。"), true);
     return;
   }
+  if (vpnWizard.server) return runVPNWizard("review");
   showVPNWizardStep(2);
 });
 $("vpn-wizard-back").addEventListener("click", () => showVPNWizardStep(vpnWizard.step - 1));

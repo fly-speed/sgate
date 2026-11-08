@@ -4,6 +4,11 @@
 const sgateI18n = (() => {
   const messages = {
  "密码至少需要 6 个字符": "Password must contain at least 6 characters",
+ "服务端 VPN 配置校验不可用": "VPN server configuration validation is unavailable",
+ "VPN 校验包含不支持的参数": "VPN validation contains unsupported settings",
+ "已启用 VPN 账号认证，请先在第二步新增 VPN 账号，或在 VPN 参数页配置专用账号文件。": "VPN account authentication is enabled. Add a VPN account in step 2 or configure a dedicated account file in VPN settings.",
+ "VPN 服务端证书无效": "Invalid VPN server certificate",
+ "VPN 服务端证书尚未生效或已过期": "The VPN server certificate is not yet valid or has expired",
  "VPN 配置向导": "VPN setup wizard",
  "配置服务端 VPN 的监听、认证和虚拟网络。": "Configure VPN server listeners, authentication, and the virtual network.",
  "至少配置一个监听地址。QUIC、TCP 和 WSS 需要证书和私钥，可复用现有 TLS 配置。上传会立即覆盖当前文件，包括代理共用的文件。证书与私钥必须配对后再应用。": "Configure at least one listener. QUIC, TCP, and WSS need a certificate and private key and can reuse the existing TLS settings. Uploads immediately replace current files, including files shared with the proxy. Apply after the certificate and private key match.",

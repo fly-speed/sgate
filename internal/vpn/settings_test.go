@@ -1,11 +1,18 @@
 package vpn
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
+	"errors"
 	"flag"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func integratedSettings(t *testing.T) *flag.FlagSet {
@@ -172,5 +179,56 @@ func TestVPNServerCandidateMatchesFreshFingerprintWithoutChangingAppliedNetwork(
 	}
 	if candidate.Fingerprint != fresh.Fingerprint || candidate.Config.TLS.ServerName != "vpn-next.invalid" || applied.Config.TLS.ServerName != "vpn.invalid" || candidate.Network.MTU != applied.Network.MTU {
 		t.Fatal("endpoint candidate changed unrelated settings or identity")
+	}
+}
+
+func TestServerParameterPreflightChecksFilesBeforeAccountStep(t *testing.T) {
+	dir := t.TempDir()
+	fs := flag.NewFlagSet("server", flag.ContinueOnError)
+	RegisterFlags(fs, "server")
+	fs.String("key-file", filepath.Join(dir, "shared.key"), "")
+	fs.String("tls-cert", "", "")
+	fs.String("tls-key", "", "")
+	os.WriteFile(filepath.Join(dir, "shared.key"), []byte(strings.Repeat("ab", 32)), 0600)
+	fs.Set("vpn-mode", "both")
+	fs.Set("vpn-require-account", "true")
+	certPath, keyPath := filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem")
+	fs.Set("vpn-tls-cert", certPath)
+	fs.Set("vpn-tls-key", keyPath)
+	checkBad := func() {
+		t.Helper()
+		err := ValidateServerParameters(fs)
+		var invalid *ValidationError
+		if !errors.As(err, &invalid) || len(invalid.Fields) == 0 || invalid.Fields[len(invalid.Fields)-1] != "vpn-tls-key" {
+			t.Fatalf("expected pair error: %v", err)
+		}
+	}
+	checkBad()
+	os.WriteFile(certPath, []byte("bad pem"), 0600)
+	os.WriteFile(keyPath, []byte("bad pem"), 0600)
+	checkBad()
+	pub, key, _ := ed25519.GenerateKey(rand.Reader)
+	cert := &x509.Certificate{SerialNumber: big.NewInt(1), NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour)}
+	der, _ := x509.CreateCertificate(rand.Reader, cert, cert, pub, key)
+	raw, _ := x509.MarshalPKCS8PrivateKey(key)
+	os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0600)
+	os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: raw}), 0600)
+	if err := ValidateServerParameters(fs); err != nil {
+		t.Fatal("account must be deferred to step 2", err)
+	}
+	if _, err := Prepare("server", fs); err == nil {
+		t.Fatal("full validation must require account file")
+	}
+	_, other, _ := ed25519.GenerateKey(rand.Reader)
+	raw, _ = x509.MarshalPKCS8PrivateKey(other)
+	os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: raw}), 0600)
+	checkBad()
+	raw, _ = x509.MarshalPKCS8PrivateKey(key)
+	os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: raw}), 0600)
+	cert.NotAfter = time.Now().Add(-time.Minute)
+	der, _ = x509.CreateCertificate(rand.Reader, cert, cert, pub, key)
+	os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0600)
+	if err := ValidateServerParameters(fs); err == nil || !strings.Contains(err.Error(), "过期") {
+		t.Fatalf("expired certificate accepted: %v", err)
 	}
 }

@@ -57,3 +57,34 @@ func (c *controller) testVPN(parent context.Context, fields map[string]string) (
 	}
 	return result, nil
 }
+
+// Validate drafts using effective CLI overrides, without saving or opening TUNs.
+func (c *controller) validateServerVPN(fields map[string]string, parameters bool) error {
+	c.mu.Lock()
+	fs := cli.CloneFlags(c.original)
+	args := append([]string(nil), c.args...)
+	overrides := append([]string(nil), c.overrides...)
+	c.mu.Unlock()
+	for key, value := range fields {
+		overridden := false
+		for _, k := range overrides {
+			if k == key {
+				overridden = true
+				break
+			}
+		}
+		if key != "vpn-mode" && !overridden {
+			args = append(args, "-"+key+"="+value)
+		}
+	}
+	// Parse dormant VPN settings even if the running service has VPN disabled.
+	args = append(args, "-vpn-mode=both")
+	if err := cli.Parse(fs, args); err != nil {
+		return err
+	}
+	if parameters {
+		return vpn.ValidateServerParameters(fs)
+	}
+	_, err := vpn.Prepare("server", fs)
+	return err
+}

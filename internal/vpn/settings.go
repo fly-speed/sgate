@@ -115,6 +115,30 @@ type Prepared struct {
 // Prepare validates settings without opening devices, issuing privileged commands
 // or resolving remote hosts. It is safe for Web candidate validation.
 func Prepare(role string, fs *flag.FlagSet) (*Prepared, error) {
+	return prepare(role, fs, false)
+}
+
+// ValidateServerParameters checks the first wizard step without requiring the
+// account file that can be created by the following step. It has no side effects.
+func ValidateServerParameters(fs *flag.FlagSet) error {
+	p, err := prepare("server", fs, true)
+	if err != nil || p == nil {
+		return err
+	}
+	for _, pair := range p.Config.TLS.Certificates {
+		leaf, err := x509.ParseCertificate(pair.Certificate[0])
+		if err != nil {
+			return invalidFields("VPN 服务端证书无效", "vpn-tls-cert")
+		}
+		now := time.Now()
+		if now.Before(leaf.NotBefore) || now.After(leaf.NotAfter) {
+			return invalidFields("VPN 服务端证书尚未生效或已过期", "vpn-tls-cert")
+		}
+	}
+	return nil
+}
+
+func prepare(role string, fs *flag.FlagSet, skipAccounts bool) (*Prepared, error) {
 	get := func(k string) string {
 		if f := fs.Lookup(k); f != nil {
 			return f.Value.String()
@@ -144,9 +168,9 @@ func Prepare(role string, fs *flag.FlagSet) (*Prepared, error) {
 	if err != nil {
 		return nil, err
 	}
-	return prepareValues(p, fs, key, network, get)
+	return prepareValues(p, fs, key, network, get, skipAccounts)
 }
-func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Prefix, get func(string) string) (*Prepared, error) {
+func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Prefix, get func(string) string, skipAccounts bool) (*Prepared, error) {
 	mtu := fs.Lookup("vpn-mtu").Value.(flag.Getter).Get().(int)
 	noiseRate, noiseErr := cli.ParseByteSize(get("vpn-noise-rate"))
 	if noiseErr != nil {
@@ -165,7 +189,7 @@ func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Pref
 	p.Config.UDPSendInterval = fs.Lookup("vpn-udp-send-interval").Value.(flag.Getter).Get().(time.Duration)
 	p.Config.Noise = NoiseConfig{Rate: noiseRate, Traffic: get("vpn-noise-traffic") == "true", Idle: get("vpn-noise-idle") == "true", IdleAfter: idleAfter}
 	p.Config.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
-	p.Config.RequireAccount = get("vpn-require-account") == "true"
+	p.Config.RequireAccount = !skipAccounts && get("vpn-require-account") == "true"
 	accountField := "vpn-credentials-file"
 	if p.Role == "server" {
 		accountField = "vpn-accounts-file"
@@ -174,10 +198,15 @@ func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Pref
 	if accountPath != "" && !filepath.IsAbs(accountPath) && get("config") != "" {
 		accountPath = filepath.Join(filepath.Dir(get("config")), accountPath)
 	}
-	if err := p.Config.LoadAccountFile(accountPath, p.Role == "server"); err != nil {
-		return nil, invalidFields("无法加载 VPN 专用账号文件："+err.Error(), accountField, "vpn-require-account")
-	}
+	if !skipAccounts {
+		if p.Role == "server" && p.Config.RequireAccount && accountPath == "" {
+			return nil, invalidFields("已启用 VPN 账号认证，请先在第二步新增 VPN 账号，或在 VPN 参数页配置专用账号文件。", accountField, "vpn-require-account")
+		}
+		if err := p.Config.LoadAccountFile(accountPath, p.Role == "server"); err != nil {
+			return nil, invalidFields("无法加载 VPN 专用账号文件："+err.Error(), accountField, "vpn-require-account")
+		}
 
+	}
 	if p.Role == "server" {
 		p.Config.TCPNotSentLowat, noiseErr = cli.ParseByteSize(get("vpn-tcp-notsent-lowat"))
 		if noiseErr != nil {

@@ -120,6 +120,7 @@ type View struct {
 	ControlVPN           func(bool) error
 	RestartVPN           func() error
 	VPNRestartPending    func() (pending, retry bool, err error)
+	ValidateServerVPN    func(map[string]string, bool) error
 	TestVPN              func(context.Context, map[string]string) (vpn.ProbeResult, error)
 	ManageTunnelAccounts func(*TunnelAccountChange) (TunnelAccountsSnapshot, error)
 	ManageVPNAccounts    func(*VPNAccountChange) (VPNAccountsSnapshot, error)

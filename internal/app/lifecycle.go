@@ -132,6 +132,7 @@ func (c *controller) managementView() admin.View {
 		MappingCandidate:     c.mappingCandidate,
 		TestProxy:            c.testProxy,
 		TestVPN:              c.testVPN,
+		ValidateServerVPN:    c.validateServerVPN,
 		ControlVPN:           c.controlVPN,
 		RestartVPN:           c.restartVPN,
 		VPNRestartPending:    c.vpnRestartPending,

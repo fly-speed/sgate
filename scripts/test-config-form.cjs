@@ -2430,9 +2430,11 @@ test("server VPN wizard validates listeners, creates accounts, and reports liste
   assert.deepEqual(calls, [
     ["vpn-server-files", null],
     ["vpn-server-files", {field:"vpn-tls-cert", revision:"f1", content:"certificate"}],
+    ["vpn-server-validate", {fields:{"vpn-udp-listen":"0.0.0.0:8445"},revision:"v1",parameters:true}],
     ["vpn-accounts", null],
     ["vpn-accounts", {action:"create", username:"alice", password:"secret", revision:"a1"}],
     ["vpn-accounts", {action:"delete", username:"alice", password:"", revision:"a2"}],
+    ["vpn-server-validate", {fields:{"vpn-udp-listen":"0.0.0.0:8445"},revision:"v2",parameters:false}],
     ["config", {revision:"v2", apply:true, fields:{"vpn-udp-listen":"0.0.0.0:8445"}}],
   ]);
   assert.match(elements.get("vpn-wizard-connection").textContent, /监听中.*UDP 0.0.0.0:8445/);
@@ -3135,4 +3137,41 @@ test("VPN parameters import manual and file shared keys on both roles without lo
       ["vpn-client-file",{kind:"key",content:"CD".repeat(32)}],
     ]);
   }
+});
+
+test("server wizard validates certificate drafts before step two and account settings before review", async () => {
+ const {context,elements}=await page();
+ context.wizardFields=[{key:"vpn-mode",value:"only",validation:{choices:["disabled","both","only"]}},
+  {key:"vpn-quic-listen",value:"0.0.0.0:8444"},{key:"vpn-tls-cert",value:""},{key:"vpn-tls-key",value:""}];
+ elements.get("vpn-wizard").querySelectorAll=()=>[];
+ vm.runInContext('state={authenticated:true,role:"server"};revision="v1";renderConfigFields(wizardFields,{},"server")',context);
+ let badCertificate=true, badAccounts=true;
+ const stages=[];
+ context.api=async(path,options)=>{
+  if(path==="vpn-server-files")return {"vpn-tls-cert":{path:""},"vpn-tls-key":{path:""}};
+  if(path==="vpn-server-validate"){
+   const body=JSON.parse(options.body);stages.push(body.parameters);
+   const error=new Error(body.parameters?"bad certificate pair":"missing account file");
+   if(body.parameters && badCertificate){error.fieldErrors={"vpn-tls-cert":"bad certificate pair","vpn-tls-key":"bad certificate pair"};throw error;}
+   if(!body.parameters && badAccounts){error.fieldErrors={"vpn-accounts-file":"missing account file","vpn-require-account":"missing account file"};throw error;}
+   return {ok:true};
+  }
+  if(path==="vpn-accounts")return {path:"accounts.json",revision:"a1",accounts:[]};
+  throw new Error("unexpected request "+path);
+ };
+ await vm.runInContext('openVPNWizard()',context);
+ await elements.get("vpn-wizard-next").listeners.click();
+ assert.equal(vm.runInContext('vpnWizard.step',context),0);
+ assert.equal(vm.runInContext('vpnWizard.fields.get("vpn-tls-cert").input["aria-invalid"]',context),"true");
+ assert.match(elements.get("vpn-wizard-result").textContent,/bad certificate/);
+ badCertificate=false;
+ await elements.get("vpn-wizard-next").listeners.click();
+ assert.equal(vm.runInContext('vpnWizard.step',context),1);
+ await elements.get("vpn-wizard-next").listeners.click();
+ assert.equal(vm.runInContext('vpnWizard.step',context),1);
+ assert.equal(elements.get("vpn-wizard-result").textContent,"missing account file");
+ badAccounts=false;
+ await elements.get("vpn-wizard-next").listeners.click();
+ assert.equal(vm.runInContext('vpnWizard.step',context),2);
+ assert.deepEqual(stages,[true,true,false,false]);
 });
