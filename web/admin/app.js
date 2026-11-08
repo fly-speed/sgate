@@ -1512,8 +1512,8 @@ function renderVPNServerFileControl(key, input) {
   upload.type = "button";
   upload.className = "secondary";
   upload.disabled = true;
-  localText(upload, () => t("上传覆盖"));
-  localAttr(upload, "aria-label", () => t("上传覆盖") + " · " + t(vpnServerWizardLabels[key]));
+  localText(upload, () => t(vpnWizard?.serverFiles[key]?.revision ? "上传覆盖" : "上传文件"));
+  localAttr(upload, "aria-label", () => t(vpnWizard?.serverFiles[key]?.revision ? "上传覆盖" : "上传文件") + " · " + t(vpnServerWizardLabels[key]));
   upload.addEventListener("click", () => file.click());
   file.addEventListener("change", () => {
     const selected = file.files[0];
@@ -1522,7 +1522,7 @@ function renderVPNServerFileControl(key, input) {
   });
   input.addEventListener("input", () => {
     const saved = vpnWizard.serverFiles[key];
-    upload.disabled = !saved?.revision || input.value !== saved.path;
+    upload.disabled = !saved || (saved.revision ? input.value !== saved.path : input.disabled);
   });
   vpnWizard.fields.get(key).upload = upload;
   controls.append(input, upload, file);
@@ -1538,7 +1538,10 @@ async function loadVPNServerFiles(wizard) {
       const field = wizard.fields.get(key);
       if (!field || field.input.value !== field.entry.original) continue;
       field.input.value = field.displayedPath = file.path;
-      field.upload.disabled = !file.revision;
+      field.upload.disabled = !file.revision && (key === "vpn-key-file" || field.entry.overridden);
+      if (key !== "vpn-key-file") {
+        localText(field.upload, () => t(file.revision ? "上传覆盖" : "上传文件"));
+      }
     }
   } catch (error) {
     if (wizard === vpnWizard) vpnWizardResult(() => errorText(error), true);
@@ -1806,15 +1809,20 @@ async function runVPNWizard(action, details) {
       const {key, selected} = details;
       const file = wizard.serverFiles[key];
       const field = wizard.fields.get(key);
-      if (!file?.revision || field.input.value !== file.path) return;
+      if (!file || (file.revision && field.input.value !== file.path) ||
+          (!file.revision && field.entry.overridden)) return;
       if (selected.size > 256 * 1024) throw new Error(t("文件过大"));
       const content = await selected.text();
       if (run !== epoch) return;
-      wizard.serverFiles[key] = await api("vpn-server-files", {method:"PUT",
-        body:JSON.stringify({field:key, revision:file.revision, content})});
+      const result = await api("vpn-server-files", {method:"PUT",
+        body:JSON.stringify({field:key, revision:file.revision || "", content,
+          ...(!file.revision ? {create:true} : {})})});
       if (run !== epoch) return;
+      if (file.revision) wizard.serverFiles[key] = result;
+      field.input.value = result.path;
       localText($("pending-label"), () => t("已保存 · 待应用"));
-      vpnWizardResult(() => t("服务端 VPN 文件已覆盖，请保存并应用配置。"));
+      vpnWizardResult(() => t(file.revision ? "服务端 VPN 文件已覆盖，请保存并应用配置。" :
+        "文件已导入，路径已填入向导。"));
     } else if (wizard.imports.has(action)) {
       const result = await importVPNWizardFile(action);
       if (run !== epoch) return;

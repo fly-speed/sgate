@@ -7,7 +7,11 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
+
+	"sgate/internal/configfile"
 
 	"sgate/internal/tunnel"
 )
@@ -28,6 +32,7 @@ func (h *Handler) vpnServerFiles(w http.ResponseWriter, r *http.Request) {
 		Field    string `json:"field"`
 		Revision string `json:"revision"`
 		Content  string `json:"content"`
+		Create   bool   `json:"create"`
 	}
 	if r.Method == http.MethodPut && !decode(w, r, &input, 2*maxVPNServerFile+1024) {
 		return
@@ -54,7 +59,8 @@ func (h *Handler) vpnServerFiles(w http.ResponseWriter, r *http.Request) {
 	}
 	path := paths[input.Field]
 	current := vpnServerFileRevision(path)
-	if current == "" || current != input.Revision {
+	creating := input.Create && (input.Field == "vpn-tls-cert" || input.Field == "vpn-tls-key")
+	if (creating && current != "") || (!creating && current == "") || current != input.Revision {
 		problem(w, 409, "VPN 文件或路径已变化，或文件不可覆盖，请重新打开向导")
 		return
 	}
@@ -64,12 +70,47 @@ func (h *Handler) vpnServerFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer clear(data)
-	if err := atomicFile(path, data); err != nil {
+	if creating {
+		path, err = h.createVPNServerFile(input.Field, data)
+	} else {
+		err = atomicFile(path, data)
+	}
+	if err != nil {
 		problem(w, 500, "无法覆盖服务端 VPN 文件")
 		return
 	}
 	h.credentialFilesPending = true
 	reply(w, 200, vpnServerFile{Path: path, Revision: digest([]byte(path + ":" + digest(data)))})
+}
+
+// Imports with no readable configured file get a new private path. The wizard
+// saves that path with the rest of its draft when the user applies it.
+func (h *Handler) createVPNServerFile(field string, data []byte) (string, error) {
+	dir, err := filepath.Abs(filepath.Dir(h.view.AppConfigPath))
+	if err != nil {
+		return "", err
+	}
+	f, err := os.CreateTemp(dir, field+"-*.pem")
+	if err != nil {
+		return "", err
+	}
+	if err = configfile.ProtectFile(f); err == nil {
+		_, err = f.Write(data)
+	}
+	if err == nil {
+		err = f.Sync()
+	}
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = configfile.SyncDirectory(dir)
+	}
+	if err != nil {
+		os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
 }
 
 func vpnServerFileRevision(path string) string {

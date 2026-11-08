@@ -40,6 +40,7 @@ func (c *controller) serverVPNFilePaths() (map[string]string, error) {
 	paths := make(map[string]string, 3)
 	for _, base := range []string{"tls-cert", "tls-key", "key-file"} {
 		key := "vpn-" + base
+		paths[key] = ""
 		path := values[key]
 		if slices.Contains(c.overrides, key) {
 			path = fs.Lookup(key).Value.String()

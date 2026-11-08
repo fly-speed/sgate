@@ -68,3 +68,20 @@ func TestServerVPNKeyPathTreatsQuotedEmptyValuesAsUnset(t *testing.T) {
 		})
 	}
 }
+
+func TestServerVPNFilePathsIncludeUnconfiguredCertificateFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.conf")
+	if err := os.WriteFile(path, []byte("vpn-mode = disabled\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c := &controller{role: "server", path: path, original: appFlags("server"), args: []string{"-config", path}}
+	paths, err := c.serverVPNFilePaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"vpn-tls-cert", "vpn-tls-key"} {
+		if path, ok := paths[field]; !ok || path != "" {
+			t.Fatalf("%s: path=%q, present=%t", field, path, ok)
+		}
+	}
+}

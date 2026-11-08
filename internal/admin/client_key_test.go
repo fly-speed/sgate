@@ -137,3 +137,61 @@ func TestVPNServerFileReplacementUsesCurrentConfiguredPathAndRevision(t *testing
 		t.Fatal("key was not replaced or marked pending")
 	}
 }
+
+func TestVPNServerCertificateImportWithoutExistingFiles(t *testing.T) {
+	h, cfg := adminFixture(t)
+	h.view.Role = "server"
+	cookie, csrf := setupAccount(t, h, cfg)
+	original, _ := os.ReadFile(h.view.AppConfigPath)
+	paths := map[string]string{"vpn-tls-cert": "", "vpn-tls-key": filepath.Join(t.TempDir(), "missing.key")}
+	h.view.ServerVPNFilePaths = func() (map[string]string, error) { return paths, nil }
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert := &x509.Certificate{SerialNumber: big.NewInt(1)}
+	der, err := x509.CreateCertificate(rand.Reader, cert, cert, public, private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := x509.MarshalPKCS8PrivateKey(private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for field, block := range map[string]*pem.Block{
+		"vpn-tls-cert": {Type: "CERTIFICATE", Bytes: der},
+		"vpn-tls-key":  {Type: "PRIVATE KEY", Bytes: key},
+	} {
+		content := string(pem.EncodeToMemory(block))
+		upload := func(token, value string) *httptest.ResponseRecorder {
+			return request(h, "PUT", "/api/vpn-server-files", map[string]any{
+				"field": field, "revision": "", "create": true, "content": value,
+			}, cookie, token, "")
+		}
+		if upload("", content).Code != 403 || upload(csrf, "invalid").Code != 400 {
+			t.Fatal("invalid import accepted")
+		}
+		for range 2 {
+			w := upload(csrf, content)
+			if w.Code != 200 {
+				t.Fatalf("import failed: %d %s", w.Code, w.Body.String())
+			}
+			path := object(t, w)["path"].(string)
+			if !filepath.IsAbs(path) || filepath.Dir(path) != filepath.Dir(h.view.AppConfigPath) {
+				t.Fatal("wrong import path")
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil || string(raw) != content {
+				t.Fatal("wrong file content", err)
+			}
+			info, _ := os.Stat(path)
+			if info.Mode().Perm()&0077 != 0 {
+				t.Fatal("import must be private")
+			}
+		}
+	}
+	after, _ := os.ReadFile(h.view.AppConfigPath)
+	if string(after) != string(original) {
+		t.Fatal("import changed active configuration")
+	}
+}
