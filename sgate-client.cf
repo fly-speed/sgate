@@ -174,7 +174,7 @@ service sgate-client {
     # Minimum gap between bulk raw UDP VPN packets; 0 disables, maximum 10ms. LIVE: applies to local sends.
     vpn-udp-send-interval = 0s
     # New TUN device name; empty uses sgate0 on Linux or automatically allocates utunN on macOS.
-    vpn-tun-name =
+    vpn-tun-name = sgate1
     # Automatically configure routes, DNS or server NAT; requires administrator privileges.
     vpn-manage-network = true
     # VPN shared key file; empty reuses key-file. VPN authentication is separate from proxy and Web accounts.

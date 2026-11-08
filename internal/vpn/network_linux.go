@@ -165,6 +165,20 @@ func applyNetwork(o NetworkOptions, run commandRunner) (cleanup func(), err erro
 			}
 		}
 		if o.BlockIPv6 {
+			// New devices inherit default.disable_ipv6. IPv6 routes cannot use
+			// a disabled device, even when their purpose is to discard traffic.
+			// Enable only our own TUN; leave global/physical interface settings
+			// untouched. Closing the owned TUN removes this setting and routes.
+			key := "net/ipv6/conf/" + o.Interface + "/disable_ipv6"
+			disabled, e := run("sysctl", "-n", key)
+			if e != nil {
+				return nil, fmt.Errorf("inspect VPN IPv6 blocking on %s: %w", o.Interface, e)
+			}
+			if disabled == "1" {
+				if err = t.step("sysctl", []string{"-w", key + "=0"}, nil); err != nil {
+					return nil, fmt.Errorf("configure VPN IPv6 blocking on %s: %w", o.Interface, err)
+				}
+			}
 			for _, route := range []string{"::/1", "8000::/1"} {
 				if err = t.step("ip", []string{"-6", "route", "add", route, "dev", o.Interface}, t.reverse("ip", "-6", "route", "del", route, "dev", o.Interface)); err != nil {
 					return nil, err
