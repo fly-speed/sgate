@@ -252,7 +252,14 @@ func (h *Handler) getStatus(w http.ResponseWriter, r *http.Request) {
 		"authenticated":           e == nil,
 		"role":                    h.view.Role,
 		"session_timeout_seconds": h.cfg.SessionTimeout.Seconds(),
-		"setup_token_file":        filepath.Base(h.cfg.SetupTokenFile),
+	}
+	if os.IsNotExist(ae) {
+		path, err := filepath.Abs(h.cfg.SetupTokenFile)
+		if err != nil {
+			problem(w, 500, "无法解析初始化令牌文件路径")
+			return
+		}
+		v["setup_token_file"] = path
 	}
 	if e == nil {
 		v["username"], v["csrf"], v["expires"] = s.Username, s.CSRF, s.Expires

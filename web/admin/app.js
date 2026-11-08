@@ -2422,9 +2422,10 @@ function renderSignedOut() {
   const setup = !!state.setup_required;
   localText($("auth-title"), () => setup ? t("创建首个管理员") : t("欢迎回来"));
   localText($("auth-help"), () => setup
-    ? t("设置独立管理账号。初始化令牌位于管理配置指定的 ") + state.setup_token_file + t(" 文件中。")
+    ? t("设置独立管理账号，并从下方指定文件中复制初始化令牌。")
     : t("登录后查看实时流量并管理代理配置。"));
   $("confirm-row").hidden = $("token-row").hidden = !setup;
+  localText($("setup-token-path"), () => setup ? state.setup_token_file || "" : "");
   $("login-pass").minLength = setup ? 6 : 1;
   $("login-pass").autocomplete = setup ? "new-password" : "current-password";
   $("login-confirm").required = $("setup-token").required = setup;

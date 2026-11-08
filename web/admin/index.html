@@ -47,11 +47,14 @@
                 type="password"
                 autocomplete="new-password" /></label
             ><label id="token-row" hidden
-              ><span data-i18n="初始化令牌">初始化令牌</span><input
+              ><span id="setup-token-label" data-i18n="初始化令牌">初始化令牌</span><input
                 id="setup-token"
+                aria-labelledby="setup-token-label"
+                aria-describedby="setup-token-help"
                 autocomplete="off"
                 spellcheck="false"
-                placeholder="从管理配置指定的令牌文件获取" data-i18n-placeholder="从管理配置指定的令牌文件获取" /></label
+                placeholder="从管理配置指定的令牌文件获取" data-i18n-placeholder="从管理配置指定的令牌文件获取" />
+              <small id="setup-token-help"><span data-i18n="请打开以下文件，复制其中的初始化令牌并粘贴到上方：">请打开以下文件，复制其中的初始化令牌并粘贴到上方：</span><code id="setup-token-path"></code></small></label
             ><button type="submit" id="login-button" class="primary"
               ><span data-i18n="登录控制台">登录控制台 </span><span>↗</span></button
             ></form

@@ -464,3 +464,38 @@ func TestMergedFrameworkSecretsAreRedactedAndRestoredIndependently(t *testing.T)
 		t.Fatal("independent secret edit failed", e)
 	}
 }
+
+func TestFirstRegistrationShowsAbsoluteTokenPathForBothRoles(t *testing.T) {
+	for _, role := range []string{"client", "server"} {
+		t.Run(role, func(t *testing.T) {
+			h, cfg := adminFixture(t)
+			h.view.Role = role
+			cwd, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			relative, err := filepath.Rel(cwd, cfg.SetupTokenFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.cfg.SetupTokenFile = relative
+			w := request(h, "GET", "/api/status", nil, nil, "", "")
+			if w.Code != 200 {
+				t.Fatal(w.Code)
+			}
+			status := object(t, w)
+			if status["setup_token_file"] != cfg.SetupTokenFile || status["setup_required"] != true {
+				t.Fatal(status)
+			}
+			token, _ := os.ReadFile(cfg.SetupTokenFile)
+			if strings.Contains(w.Body.String(), strings.TrimSpace(string(token))) {
+				t.Fatal("token value exposed")
+			}
+			cookie, _ := setupAccount(t, h, cfg)
+			w = request(h, "GET", "/api/status", nil, cookie, "", "")
+			if _, exists := object(t, w)["setup_token_file"]; exists {
+				t.Fatal("setup path remains after registration")
+			}
+		})
+	}
+}

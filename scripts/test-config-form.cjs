@@ -3202,3 +3202,16 @@ test("server overview VPN controls require validated applied settings and show r
  assert.equal(elements.get("vpn-stop").disabled,true);
  assert.match(elements.get("notice").textContent,/客户端连接已断开/);
 });
+
+test("first registration displays the setup token file below its input and clears it after setup", async () => {
+ const {context,elements}=await page();
+ for(const role of ["client","server"]){
+  context.setupRole=role;
+  vm.runInContext('state={authenticated:false,role:setupRole,setup_required:true,setup_token_file:"/opt/soft/sgate/conf/"+setupRole+"-setup.token"};renderSignedOut()',context);
+  assert.equal(elements.get("token-row").hidden,false);
+  assert.equal(elements.get("setup-token-path").textContent,"/opt/soft/sgate/conf/"+role+"-setup.token");
+ }
+ vm.runInContext('state={authenticated:false,setup_required:false};renderSignedOut()',context);
+ assert.equal(elements.get("token-row").hidden,true);
+ assert.equal(elements.get("setup-token-path").textContent,"");
+});
