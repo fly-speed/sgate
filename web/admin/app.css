@@ -1172,7 +1172,8 @@ footer {
   width: 100%;
 }
 .config-row .config-error,
-.proxy-mapping .config-error {
+.proxy-mapping .config-error,
+#vpn-wizard .config-error {
   display: block;
   color: var(--red, #c53030);
   margin-top: 6px;
@@ -1181,7 +1182,8 @@ footer {
   display: none;
 }
 .config-row [aria-invalid="true"],
-.proxy-mapping [aria-invalid="true"] {
+.proxy-mapping [aria-invalid="true"],
+#vpn-wizard [aria-invalid="true"] {
   border-color: #c53030;
 }
 

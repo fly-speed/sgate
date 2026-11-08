@@ -1452,6 +1452,40 @@ function vpnWizardResult(message, bad = false) {
   result.classList.toggle("bad", bad);
 }
 
+function vpnWizardErrorInputs(key) {
+  const field = vpnWizard.fields.get(key);
+  if (!field) return [];
+  const imported = vpnWizard.imports.get(key === "vpn-key-file" ? "key" : key === "vpn-tls-ca" ? "ca" : "");
+  return [field.input, ...(imported ? [imported.secret, imported.file, imported.method].filter(Boolean) : [])];
+}
+
+function clearVPNWizardFieldError(key) {
+  const field = vpnWizard?.fields.get(key);
+  if (!field) return;
+  for (const input of vpnWizardErrorInputs(key)) setConfigError(input, "");
+  setConfigError(field.input, "", field.error);
+}
+
+function showVPNWizardFieldErrors(error, fallbackKey) {
+  const errors = {...(error.fieldErrors || {})};
+  if (!Object.keys(errors).length && fallbackKey) errors[fallbackKey] = errorText(error);
+  let first;
+  for (const [key, message] of Object.entries(errors)) {
+    const field = vpnWizard.fields.get(key);
+    if (!field) continue;
+    for (const input of vpnWizardErrorInputs(key)) {
+      setConfigError(input, t(message));
+      if (!first && !input.hidden && input.type !== "hidden") first = input;
+    }
+    setConfigError(field.input, t(message), field.error);
+  }
+  if (first) {
+    showVPNWizardStep(0);
+    if (first.disabled) vpnWizard.errorFocus = first;
+    else first.focus();
+  }
+}
+
 function renderVPNWizardImport(kind, heading) {
   const panel = document.createElement("div");
   panel.className = "vpn-wizard-import";
@@ -1480,6 +1514,7 @@ function renderVPNWizardImport(kind, heading) {
       method.append(option);
     }
     const updateMethod = () => {
+      clearVPNWizardFieldError("vpn-key-file");
       const manual = method.value === "manual";
       file.hidden = manual;
       secret.hidden = !manual;
@@ -1697,6 +1732,17 @@ function openVPNWizard() {
       updateCAHelp();
     }
     if (fileField) row.append(help);
+    const error = document.createElement("small");
+    error.className = "config-error";
+    error.id = "vpn-wizard-error-" + key;
+    error.hidden = true;
+    error.setAttribute("aria-live", "polite");
+    row.append(error);
+    vpnWizard.fields.get(key).error = error;
+    for (const control of vpnWizardErrorInputs(key)) {
+      control.setAttribute("aria-describedby", help.id + " " + error.id);
+      control.addEventListener("input", () => clearVPNWizardFieldError(key));
+    }
   }
   showVPNWizardStep(0);
   renderVPNWizardConnection(vpnControlHealth);
@@ -1732,23 +1778,32 @@ async function importVPNWizardFile(kind) {
 function vpnWizardEdits() {
   const mode = vpnWizard.fields.get("vpn-mode")?.input.value;
   if (!vpnWizard.fields.has(vpnWizard.server ? "vpn-quic-listen" : "vpn-server")) throw new Error(t("请先在配置页重新加载配置。"));
-  if (!["both", "only"].includes(mode)) throw new Error(t("请选择启用 VPN 的运行模式。"));
-  const fields = {}, values = {"vpn-mode": mode};
+  for (const key of vpnWizard.fields.keys()) clearVPNWizardFieldError(key);
+  const fields = {}, values = {}, errors = {};
+  for (const [key, {input}] of vpnWizard.fields) {
+    values[key] = input.type === "checkbox" ? String(input.checked) : input.value;
+  }
   for (const [key, {input, entry, displayedPath}] of vpnWizard.fields) {
     if (entry.overridden) continue;
-    const value = input.type === "checkbox" ? String(input.checked) : input.value;
-    values[key] = value;
+    const value = values[key];
     const error = configValueError(key, value, entry.rule, values);
-    if (error) throw new Error(t(vpnWizard.labels[key]) + " · " + error);
+    if (error) errors[key] = error;
     const original = input.type === "checkbox" ? String(/^(true|1|t)$/i.test(entry.original)) : entry.original;
     if (value !== original && value !== displayedPath) fields[key] = value;
   }
-  if (vpnWizard.server && !["vpn-quic-listen", "vpn-udp-listen", "vpn-tcp-listen"].some(key =>
+  if (!["both", "only"].includes(mode)) errors["vpn-mode"] = t("请选择启用 VPN 的运行模式。");
+  const listeners = ["vpn-quic-listen", "vpn-udp-listen", "vpn-tcp-listen"];
+  if (vpnWizard.server && !listeners.some(key =>
     vpnWizard.fields.get(key)?.entry.overridden || values[key])) {
-    throw new Error(t("至少配置一个 VPN 监听地址。"));
+    for (const key of listeners) if (vpnWizard.fields.has(key)) errors[key] = t("至少配置一个 VPN 监听地址。");
   }
-  const error = configRelationErrors(values).values().next().value;
-  if (error) throw new Error(error);
+  for (const [key, error] of configRelationErrors(values)) errors[key] ||= error;
+  const first = Object.entries(errors)[0];
+  if (first) {
+    const error = new Error(t(vpnWizard.labels[first[0]] || first[0]) + " · " + first[1]);
+    error.fieldErrors = errors;
+    throw error;
+  }
   return fields;
 }
 
@@ -1809,6 +1864,7 @@ async function runVPNWizard(action, details) {
   try {
     if (wizard.revision !== revision) throw new Error(t("配置已变化，请重新打开向导。"));
     if (action === "server-file") {
+      clearVPNWizardFieldError(details.key);
       const {key, selected} = details;
       const file = wizard.serverFiles[key];
       const field = wizard.fields.get(key);
@@ -1827,6 +1883,7 @@ async function runVPNWizard(action, details) {
       localText($("pending-label"), () => t("已保存 · 待应用"));
       vpnWizardResult(() => t("上传完成，请保存并应用配置。"));
     } else if (wizard.imports.has(action)) {
+      clearVPNWizardFieldError(action === "key" ? "vpn-key-file" : "vpn-tls-ca");
       const result = await importVPNWizardFile(action);
       if (run !== epoch) return;
       wizard.fields.get(action === "key" ? "vpn-key-file" : "vpn-tls-ca").input.value = result.path;
@@ -1907,6 +1964,8 @@ async function runVPNWizard(action, details) {
     }
   } catch (error) {
     if (run === epoch) {
+      showVPNWizardFieldErrors(error, action === "server-file" ? details.key :
+        action === "key" ? "vpn-key-file" : action === "ca" ? "vpn-tls-ca" : null);
       const detail = Object.entries(error.fieldErrors || {}).map(([key, value]) => key + " · " + t(value));
       vpnWizardResult(() => [...(start && applied ? [t("VPN 配置已应用，启动或重启失败")] : []),
         errorText(error), ...detail].join(" · "), true);
@@ -1916,6 +1975,8 @@ async function runVPNWizard(action, details) {
     if (start) vpnControlBusy = false;
     enabled.forEach(control => control.disabled = false);
     setConfigBusy(serviceRestarting);
+    wizard.errorFocus?.focus();
+    wizard.errorFocus = null;
   }
 }
 
@@ -1928,7 +1989,11 @@ $("vpn-wizard-next").addEventListener("click", () => {
       }
     }
     try { vpnWizardEdits(); }
-    catch (error) { vpnWizardResult(() => errorText(error), true); return; }
+    catch (error) {
+      showVPNWizardFieldErrors(error);
+      vpnWizardResult(() => errorText(error), true);
+      return;
+    }
     return runVPNWizard("account");
   }
   if (!$("vpn-wizard-account-form").hidden &&

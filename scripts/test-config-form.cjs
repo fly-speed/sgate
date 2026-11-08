@@ -2903,3 +2903,63 @@ test("server VPN wizard enables initial certificate and private key uploads and 
     {field:"vpn-tls-key",revision:"",content:"pem",create:true},
   ]);
 });
+
+test("server VPN wizard marks every invalid field, clears edited errors, and returns to backend error fields", async () => {
+  const {context, elements} = await page();
+  context.wizardFields = [
+    {key:"vpn-mode",value:"only",validation:{choices:["disabled","both","only"]}},
+    {key:"vpn-quic-listen",value:"",validation:{type:"listen"}},
+    {key:"vpn-udp-listen",value:"0.0.0.0:8445",validation:{type:"listen"}},
+    {key:"vpn-tcp-listen",value:"0.0.0.0:8444",validation:{type:"listen"}},
+    {key:"vpn-mtu",value:"1280",validation:{type:"integer",min:"576",max:"1500",hint:"576-1500"}},
+    {key:"vpn-tls-cert",value:""},
+    {key:"vpn-tls-key",value:""},
+    {key:"vpn-key-file",value:""},
+  ];
+  context.document.getElementById("vpn-wizard").querySelectorAll = () => [];
+  vm.runInContext(`
+    state = {authenticated:true,role:"server"};
+    revision = "v1";
+    renderConfigFields(wizardFields,{},"server");
+  `,context);
+  context.api = async (path, options) => {
+    if (!options) return {
+      "vpn-tls-cert":{path:""}, "vpn-tls-key":{path:""},
+      "vpn-key-file":{path:"/srv/shared.key",revision:"k1"},
+    };
+    const error = new Error("certificate and private key do not match");
+    error.fieldErrors = {"vpn-tls-cert":"certificate and private key do not match", "vpn-tls-key":"certificate and private key do not match"};
+    throw error;
+  };
+  await vm.runInContext("openVPNWizard()",context);
+  vm.runInContext(`
+    vpnWizard.fields.get("vpn-udp-listen").input.value = "bad-listen";
+    vpnWizard.fields.get("vpn-mtu").input.value = "9999";
+  `,context);
+  await elements.get("vpn-wizard-next").listeners.click();
+  for (const key of ["vpn-udp-listen","vpn-mtu"]) {
+    context.key = key;
+    assert.equal(vm.runInContext('vpnWizard.fields.get(key).input["aria-invalid"]',context),"true");
+    assert.equal(vm.runInContext('vpnWizard.fields.get(key).error.hidden',context),false);
+  }
+  assert.equal(vm.runInContext('vpnWizard.fields.get("vpn-udp-listen").input.focused',context),true);
+  vm.runInContext(`
+    vpnWizard.fields.get("vpn-udp-listen").input.value = "0.0.0.0:8445";
+    vpnWizard.fields.get("vpn-udp-listen").input.listeners.input();
+    vpnWizard.fields.get("vpn-mtu").input.value = "1280";
+    showVPNWizardStep(2);
+  `,context);
+  assert.equal(vm.runInContext('vpnWizard.fields.get("vpn-udp-listen").error.hidden',context),true);
+  await vm.runInContext('runVPNWizard("apply")',context);
+  assert.equal(vm.runInContext('vpnWizard.step',context),0);
+  for (const key of ["vpn-tls-cert","vpn-tls-key"]) {
+    context.key = key;
+    assert.equal(vm.runInContext('vpnWizard.fields.get(key).input["aria-invalid"]',context),"true");
+    assert.match(vm.runInContext('vpnWizard.fields.get(key).error.textContent',context),/do not match/);
+  }
+  assert.equal(vm.runInContext('vpnWizard.fields.get("vpn-mtu").error.hidden',context),true);
+  vm.runInContext('vpnWizard.imports.get("key").secret.value = "bad"',context);
+  await vm.runInContext('runVPNWizard("key")',context);
+  assert.equal(vm.runInContext('vpnWizard.imports.get("key").secret["aria-invalid"]',context),"true");
+  assert.match(vm.runInContext('vpnWizard.fields.get("vpn-key-file").error.textContent',context),/64/);
+});
