@@ -2,7 +2,7 @@
 
 **加密 TCP 端口代理 · 独立 IPv4 VPN**
 
-当前版本 `1.5.2` · [English documentation](README.en.md)
+当前版本 `1.5.3` · [English documentation](README.en.md)
 
 sgate 用两个进程连接本地与远端网络。只需访问 SSH、数据库或内网 Web 服务时，映射所需 TCP 端口即可。希望应用按系统路由访问远端网络时，可以启用独立 VPN。两种模式可同时运行，并可通过 Web 管理界面配置和观察。
 
@@ -20,12 +20,12 @@ sgate 用两个进程连接本地与远端网络。只需访问 SSH、数据库�
 
 ## 快速安装
 
-**macOS / Ubuntu** 选择对应架构的 `sgate-1.5.2-<系统>-<架构>.tar.gz`。Apple Silicon 和 ARM64 Ubuntu 用 `arm64`，Intel Mac 和常见 x86_64 Ubuntu 用 `amd64`。解压后运行包内的安装脚本。以下用 Apple Silicon 和用户目录举例。
+**macOS / Ubuntu** 选择对应架构的 `sgate-1.5.3-<系统>-<架构>.tar.gz`。Apple Silicon 和 ARM64 Ubuntu 用 `arm64`，Intel Mac 和常见 x86_64 Ubuntu 用 `amd64`。解压后运行包内的安装脚本。以下用 Apple Silicon 和用户目录举例。
 
 ```sh
-shasum -a 256 -c sgate-1.5.2-macos-arm64.tar.gz.sha256  # Ubuntu 可用 sha256sum -c
-tar -xzf sgate-1.5.2-macos-arm64.tar.gz
-cd sgate-1.5.2-macos-arm64
+shasum -a 256 -c sgate-1.5.3-macos-arm64.tar.gz.sha256  # Ubuntu 可用 sha256sum -c
+tar -xzf sgate-1.5.3-macos-arm64.tar.gz
+cd sgate-1.5.3-macos-arm64
 PREFIX="$HOME/.local/sgate" ./install.sh
 ```
 
