@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"log"
@@ -16,6 +17,8 @@ import (
 )
 
 type vpnHealth struct {
+	CanStart        bool                 `json:"can_start"`
+	StartError      string               `json:"start_error,omitempty"`
 	Clients         []vpn.ClientSnapshot `json:"clients,omitempty"`
 	Generation      string               `json:"generation,omitempty"`
 	RecoveryPending bool                 `json:"recovery_pending,omitempty"`
@@ -278,10 +281,28 @@ func (c *controller) vpnRecoveryPath() string {
 }
 
 func (c *controller) workerVPNStatus() vpnHealth {
-	if c.worker == nil {
-		return (*vpnWorker)(nil).snapshot()
+	h := (*vpnWorker)(nil).snapshot()
+	if c.worker != nil {
+		h = c.worker.vpn.snapshot()
 	}
-	h := c.worker.vpn.snapshot()
+	if c.role == "server" {
+		h.Role = "server"
+		if c.worker != nil && c.worker.vpn == nil && c.current.vpn != nil {
+			p := c.current.vpn
+			h = vpnHealth{Role: "server", Enabled: true, Healthy: true, State: "stopped", Mode: p.Mode, Transport: p.Config.Transport, Network: p.Config.Network.String()}
+		}
+		if !h.Enabled || h.State == "stopped" || h.State == "failed" || h.State == "disabled" {
+			if _, err := c.serverVPNStartConfig(); err != nil {
+				h.StartError = err.Error()
+			} else {
+				h.CanStart = true
+			}
+		}
+		return h
+	}
+	if c.worker == nil {
+		return h
+	}
 	if c.role == "client" {
 		if c.worker.vpn == nil && c.current.vpn != nil {
 			p := c.current.vpn
@@ -300,22 +321,41 @@ func (c *controller) workerVPNStatus() vpnHealth {
 func (c *controller) controlVPN(start bool) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.role != "client" {
-		return errors.New("仅客户端支持手动控制 VPN")
+	if c.role != "client" && c.role != "server" {
+		return errors.New("当前服务不支持手动控制 VPN")
 	}
-	if c.ctx.Err() != nil || c.restartPending {
-		return errors.New("客户端正在退出或重启，无法操作 VPN")
+	if c.ctx == nil || c.ctx.Err() != nil || c.restartPending {
+		return errors.New("服务正在退出或重启，无法操作 VPN")
 	}
 	if c.worker == nil {
-		return errors.New("客户端未运行")
+		return errors.New("服务未运行")
 	}
 	if !start {
 		c.worker.vpn.stop() // Joins RunClient, including network cleanup and TUN close.
 		c.worker.vpn = nil
-		return vpn.RecoverClientNetwork(c.vpnRecoveryPath())
+		if c.role == "client" {
+			return vpn.RecoverClientNetwork(c.vpnRecoveryPath())
+		}
+		return nil
 	}
 	if c.current.vpn == nil {
 		return errors.New("请先将 vpn-mode 设置为 both 或 only，并保存及应用配置")
+	}
+	if c.role == "server" {
+		if v := c.worker.vpn; v != nil {
+			h := v.snapshot()
+			if h.State != "failed" && h.State != "stopped" {
+				return nil
+			}
+		}
+		prepared, err := c.serverVPNStartConfig()
+		if err != nil {
+			return err
+		}
+		c.worker.vpn.stop()
+		c.worker.vpn = nil
+		c.worker.startVPN(c.ctx, prepared)
+		return nil
 	}
 	if v := c.worker.vpn; v != nil {
 		h := v.snapshot()
@@ -330,6 +370,34 @@ func (c *controller) controlVPN(start bool) error {
 	c.worker.vpnRecoveryPath = c.vpnRecoveryPath()
 	c.worker.startVPN(c.ctx, c.current.vpn)
 	return nil
+}
+
+// Called with c.mu held. Never applies drafts or changes the running proxy.
+func (c *controller) serverVPNStartConfig() (*vpn.Prepared, error) {
+	if c.ctx == nil || c.ctx.Err() != nil || c.restartPending || c.worker == nil {
+		return nil, errors.New("服务正在退出或重启，无法操作 VPN")
+	}
+	if c.current.vpn == nil {
+		return nil, errors.New("请先将 vpn-mode 设置为 both 或 only，并保存及应用配置")
+	}
+	prepared, err := c.prepareSavedVPN()
+	if err != nil {
+		return nil, err
+	}
+	if prepared == nil || prepared.Fingerprint != c.current.vpn.Fingerprint {
+		return nil, errors.New("VPN 配置或文件已变化，请先保存并应用配置")
+	}
+	for _, pair := range prepared.Config.TLS.Certificates {
+		cert, err := x509.ParseCertificate(pair.Certificate[0])
+		if err != nil {
+			return nil, errors.New("VPN 服务端证书无效")
+		}
+		now := time.Now()
+		if now.Before(cert.NotBefore) || now.After(cert.NotAfter) {
+			return nil, errors.New("VPN 服务端证书尚未生效或已过期")
+		}
+	}
+	return prepared, nil
 }
 
 func (c *controller) prepareSavedVPN() (*vpn.Prepared, error) {

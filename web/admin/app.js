@@ -3835,10 +3835,18 @@ function renderVPNControls(v) {
   renderVPNWizardConnection(v);
   const group = $("vpn-controls");
   if (!group) return;
-  group.hidden = v?.role !== "client";
+  group.hidden = !["client", "server"].includes(v?.role);
+  const server = v?.role === "server";
   const recovery = v?.role === "client" && !!v.recovery_pending;
   const running = vpnIsRunning(v);
-  $("vpn-start").disabled = vpnControlBusy || !v?.enabled || running || recovery;
+  $("vpn-start").disabled = vpnControlBusy || !v?.enabled || running || recovery || (server && v.can_start !== true);
+  const reason = server && !running ? v.start_error || "" : "";
+  $("vpn-start-warning").hidden = !reason;
+  localText($("vpn-start-warning"), () => t(reason));
+  localAttr($("vpn-start"), "title", () => t(reason || "启动 VPN"));
+  localText($("vpn-control-help"), () => t(server
+    ? "使用已应用的 VPN 配置启动监听；停止时断开 VPN 客户端并清理网络设置。"
+    : "客户端启动后需手动启动 VPN；停止时恢复路由和 DNS。"));
   $("vpn-stop").disabled = vpnControlBusy || (!running && !recovery);
   localText($("vpn-stop"), () => t(recovery ? "清理上次 VPN" : "停止 VPN"));
   $("vpn-recovery-warning").hidden = !recovery;
@@ -3849,7 +3857,8 @@ function renderVPNControls(v) {
   }
 }
 async function controlVPN(start) {
-  if (vpnControlBusy) return;
+  if (vpnControlBusy || (start && vpnControlHealth?.role === "server" && vpnControlHealth.can_start !== true)) return;
+  const server = vpnControlHealth?.role === "server";
   if (vpnControlHealth?.recovery_pending) {
     if (start || !window.confirm(t("检测到上次由 sgate-client 启动的 VPN 可能遗留了网络设置。是否清理这些设置？"))) return;
   }
@@ -3857,7 +3866,9 @@ async function controlVPN(start) {
   try {
     const result = await api(start ? "vpn-start" : "vpn-stop", {method:"POST",body:"{}"});
     if (result.runtime) renderRuntime(result.runtime);
-    notice(() => t(start ? "VPN 正在启动，请查看连接状态。" : "VPN 已停止，已执行路由和 DNS 清理。"));
+    notice(() => t(server
+      ? start ? "VPN 正在启动，请查看监听状态。" : "VPN 已停止，客户端连接已断开并清理网络设置。"
+      : start ? "VPN 正在启动，请查看连接状态。" : "VPN 已停止，已执行路由和 DNS 清理。"));
   } catch (error) { notice(() => errorText(error), true); }
   finally { vpnControlBusy = false; renderVPNControls(vpnControlHealth); }
 }

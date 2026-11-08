@@ -1529,3 +1529,8 @@ main:has(> #overview:not([hidden])) > footer {
     grid-row: 2;
   }
 }
+
+#vpn-start-warning {
+  color: var(--red, #c53030);
+  overflow-wrap: anywhere;
+}

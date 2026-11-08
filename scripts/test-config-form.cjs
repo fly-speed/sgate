@@ -2045,7 +2045,7 @@ test("VPN padding counters are independent of IP traffic and expose old peer sup
 test("VPN manual controls reflect client status and serialize requests without saving", async () => {
   const {context,elements}=await page();
   vm.runInContext('renderVPNControls({role:"server",enabled:true,state:"listening"})',context);
-  assert.equal(elements.get("vpn-controls").hidden,true);
+  assert.equal(elements.get("vpn-controls").hidden,false);
   vm.runInContext('renderVPNControls({role:"client",enabled:true,state:"stopped"})',context);
   assert.equal(elements.get("vpn-controls").hidden,false);
   assert.equal(elements.get("vpn-start").disabled,false);
@@ -3174,4 +3174,31 @@ test("server wizard validates certificate drafts before step two and account set
  await elements.get("vpn-wizard-next").listeners.click();
  assert.equal(vm.runInContext('vpnWizard.step',context),2);
  assert.deepEqual(stages,[true,true,false,false]);
+});
+
+
+test("server overview VPN controls require validated applied settings and show readiness reasons", async () => {
+ const {context,elements}=await page();
+ vm.runInContext('renderVPNControls({role:"server",enabled:false,state:"disabled",can_start:false,start_error:"请先保存并应用配置"})',context);
+ assert.equal(elements.get("vpn-controls").hidden,false);
+ assert.equal(elements.get("vpn-start").disabled,true);
+ assert.equal(elements.get("vpn-stop").disabled,true);
+ assert.equal(elements.get("vpn-start-warning").hidden,false);
+ assert.match(elements.get("vpn-start-warning").textContent,/保存并应用/);
+ let calls=[];
+ context.api=async(path)=>{calls.push(path);return {runtime:{vpn:{role:"server",enabled:true,state:path==="vpn-start"?"listening":"stopped",can_start:path!=="vpn-start"}}};};
+ await vm.runInContext('controlVPN(true)',context);
+ assert.equal(calls.length,0);
+ vm.runInContext('renderVPNControls({role:"server",enabled:true,state:"stopped",can_start:true})',context);
+ assert.equal(elements.get("vpn-start").disabled,false);
+ assert.equal(elements.get("vpn-start-warning").hidden,true);
+ await vm.runInContext('controlVPN(true)',context);
+ assert.deepEqual(calls,["vpn-start"]);
+ assert.equal(elements.get("vpn-start").disabled,true);
+ assert.equal(elements.get("vpn-stop").disabled,false);
+ await vm.runInContext('controlVPN(false)',context);
+ assert.deepEqual(calls,["vpn-start","vpn-stop"]);
+ assert.equal(elements.get("vpn-start").disabled,false);
+ assert.equal(elements.get("vpn-stop").disabled,true);
+ assert.match(elements.get("notice").textContent,/客户端连接已断开/);
 });

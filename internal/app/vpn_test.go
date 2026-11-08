@@ -256,3 +256,65 @@ func TestVPNManualStartIsIdempotentAndRejectedDuringShutdown(t *testing.T) {
 		t.Fatal("server exposed manual controls")
 	}
 }
+
+func TestServerVPNManualControlsCheckReadinessAndStopOnlyVPN(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "server.cf")
+	key := filepath.Join(dir, "shared.key")
+	cert, private := managedCertificate(t)
+	os.WriteFile(key, []byte(strings.Repeat("ab", 32)), 0600)
+	content := "key-file = " + key + "\nvpn-mode = both\nvpn-quic-listen = 127.0.0.1:0\nvpn-tls-cert = " + cert + "\nvpn-tls-key = " + private + "\nvpn-manage-network = false\n"
+	os.WriteFile(path, []byte(content), 0600)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := &controller{ctx: ctx, role: "server", path: path, original: appFlags("server"), args: []string{"-config", path}, worker: &instance{openTUN: func(string) (vpnDevice, error) { return &vpnTestDevice{done: make(chan struct{})}, nil }}}
+	t.Cleanup(func() { c.controlVPN(false) })
+	saved, err := c.prepareSavedVPN()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.current.vpn = saved
+	if h := c.workerVPNStatus(); h.Role != "server" || h.State != "stopped" || !h.CanStart {
+		t.Fatal(h)
+	}
+	if err := c.controlVPN(true); err != nil {
+		t.Fatal(err)
+	}
+	worker := c.worker.vpn
+	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); {
+		if c.workerVPNStatus().State == "listening" {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if h := c.workerVPNStatus(); h.State != "listening" {
+		t.Fatal(h)
+	}
+	if err := c.controlVPN(true); err != nil || c.worker.vpn != worker {
+		t.Fatal("duplicate start", err)
+	}
+	if err := c.controlVPN(false); err != nil {
+		t.Fatal(err)
+	}
+	if c.worker == nil || c.current.vpn != saved || c.workerVPNStatus().State != "stopped" {
+		t.Fatal("stop changed service config")
+	}
+	raw, _ := os.ReadFile(cert)
+	os.Remove(cert)
+	if h := c.workerVPNStatus(); h.CanStart || h.StartError == "" {
+		t.Fatal("missing certificate accepted", h)
+	}
+	if err := c.controlVPN(true); err == nil || c.worker.vpn != nil {
+		t.Fatal("start bypassed file validation")
+	}
+	os.WriteFile(cert, raw, 0600)
+	os.WriteFile(key, []byte("invalid"), 0600)
+	if h := c.workerVPNStatus(); h.CanStart || !strings.Contains(h.StartError, "密钥") {
+		t.Fatal(h)
+	}
+	os.WriteFile(key, []byte(strings.Repeat("ab", 32)), 0600)
+	os.WriteFile(path, []byte(content+"vpn-mtu = 1200\n"), 0600)
+	if h := c.workerVPNStatus(); h.CanStart || !strings.Contains(h.StartError, "应用") {
+		t.Fatal("pending settings accepted", h)
+	}
+}
