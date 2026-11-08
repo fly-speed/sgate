@@ -52,7 +52,8 @@ func Settings(role string) []Setting {
 			Setting{"vpn-tls-key", "", "VPN 证书私钥；留空复用 tls-key。", "VPN server private key PEM file; empty reuses tls-key"},
 			Setting{"vpn-max-clients", "64", "最多同时认证客户端数，1～254；降低上限不踢现有客户端，仅限制新连接；各客户端虚拟 IP 唯一。", "maximum authenticated VPN clients (1..254); lowering the limit does not disconnect existing clients"},
 			Setting{"vpn-egress-interface", "", "macOS/Linux 物理出口网卡；留空按当前路由识别。", "macOS/Linux outbound network interface; empty detects it from the current route"},
-			Setting{"vpn-allow-private", "false", "允许访问服务器侧私网；始终禁止客户端互访。", "allow access to server-side private networks; communication between VPN clients remains blocked"})
+			Setting{"vpn-allow-private", "false", "允许访问服务器侧私网；客户端互访由 vpn-allow-client-to-client 单独控制。", "allow access to server-side private networks; VPN client communication is controlled separately by vpn-allow-client-to-client"},
+			Setting{"vpn-allow-client-to-client", "false", "允许 VPN 客户端通过 VPN IP 相互访问；默认关闭，独立于 vpn-allow-private，保存后立即生效。", "allow VPN clients to communicate using VPN IPs; disabled by default, independent of vpn-allow-private; applies immediately"})
 	}
 	return append(s,
 		Setting{"vpn-credentials-file", "", "VPN 客户端专用凭据 JSON 文件，包含一个账号；相对路径按本配置目录解析。", "client VPN credentials JSON file containing one account, relative to this configuration"},
@@ -85,7 +86,7 @@ func RegisterFlags(fs *flag.FlagSet, role string) {
 	}
 	for _, s := range Settings(role) {
 		switch s.Key {
-		case "vpn-require-account", "vpn-manage-network", "vpn-allow-private", "vpn-block-ipv6", "vpn-noise-traffic", "vpn-noise-idle", "vpn-tls-skip-verify":
+		case "vpn-require-account", "vpn-manage-network", "vpn-allow-private", "vpn-allow-client-to-client", "vpn-block-ipv6", "vpn-noise-traffic", "vpn-noise-idle", "vpn-tls-skip-verify":
 			fs.Bool(s.Key, s.Default == "true", s.Usage)
 		case "vpn-noise-rate", "vpn-tcp-notsent-lowat":
 			cli.ByteSizeVar(fs, new(int), s.Key, 0, s.Usage)
@@ -248,6 +249,7 @@ func prepareValues(p *Prepared, fs *flag.FlagSet, key []byte, network netip.Pref
 		}
 		p.Config.MaxClients = fs.Lookup("vpn-max-clients").Value.(flag.Getter).Get().(int)
 		p.Config.AllowPrivate = get("vpn-allow-private") == "true"
+		p.Config.AllowClientToClient = get("vpn-allow-client-to-client") == "true"
 		if q := get("quic-listen"); q != "" && p.Config.Address != "" {
 			_, a, e1 := net.SplitHostPort(q)
 			_, b, e2 := net.SplitHostPort(p.Config.Address)

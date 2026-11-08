@@ -11,11 +11,12 @@ import (
 )
 
 type LiveConfig struct {
-	Noise           NoiseConfig
-	QueueMaxAge     time.Duration
-	UDPSendInterval time.Duration
-	MaxClients      int
-	AllowPrivate    bool
+	Noise               NoiseConfig
+	QueueMaxAge         time.Duration
+	UDPSendInterval     time.Duration
+	MaxClients          int
+	AllowPrivate        bool
+	AllowClientToClient bool
 }
 type liveValue struct {
 	config  LiveConfig
@@ -29,12 +30,12 @@ type LiveSettings struct {
 func LiveFields(role string) []string {
 	keys := []string{"vpn-noise-rate", "vpn-noise-traffic", "vpn-noise-idle", "vpn-noise-idle-after", "vpn-queue-max-age", "vpn-udp-send-interval"}
 	if role == "server" {
-		keys = append(keys, "vpn-max-clients", "vpn-allow-private")
+		keys = append(keys, "vpn-max-clients", "vpn-allow-private", "vpn-allow-client-to-client")
 	}
 	return keys
 }
 func LiveFromConfig(c Config) LiveConfig {
-	return LiveConfig{Noise: c.Noise, QueueMaxAge: c.QueueMaxAge, UDPSendInterval: c.UDPSendInterval, MaxClients: c.MaxClients, AllowPrivate: c.AllowPrivate}
+	return LiveConfig{Noise: c.Noise, QueueMaxAge: c.QueueMaxAge, UDPSendInterval: c.UDPSendInterval, MaxClients: c.MaxClients, AllowPrivate: c.AllowPrivate, AllowClientToClient: c.AllowClientToClient}
 }
 func normalizeLive(c LiveConfig) (LiveConfig, error) {
 	if c.Noise.Rate < 0 || c.Noise.Rate > maxNoiseRate || c.Noise.IdleAfter < 0 {
@@ -112,6 +113,8 @@ func WithLiveValues(c LiveConfig, values map[string]string, keys []string) (Live
 			c.UDPSendInterval, err = time.ParseDuration(value)
 		case "vpn-max-clients":
 			c.MaxClients, err = strconv.Atoi(value)
+		case "vpn-allow-client-to-client":
+			c.AllowClientToClient, err = strconv.ParseBool(value)
 		case "vpn-allow-private":
 			c.AllowPrivate, err = strconv.ParseBool(value)
 		}
@@ -127,6 +130,7 @@ func (c *Config) setLive(v LiveConfig) {
 	c.UDPSendInterval = v.UDPSendInterval
 	c.MaxClients = v.MaxClients
 	c.AllowPrivate = v.AllowPrivate
+	c.AllowClientToClient = v.AllowClientToClient
 }
 
 // WithLiveConfig copies the prepared definition without changing static identity.

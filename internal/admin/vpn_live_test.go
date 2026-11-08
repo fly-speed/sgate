@@ -31,12 +31,16 @@ func TestDormantVPNFieldsExposeLiveMetadataForBothRoles(t *testing.T) {
 			}
 			current, _ := os.ReadFile(h.view.AppConfigPath)
 			h.startupRevision = h.restartDigest(current)
-			response := request(h, "PUT", "/api/config", map[string]any{"revision": view["revision"], "fields": map[string]string{"vpn-noise-rate": "8K"}}, cookie, csrf, "")
+			fields := map[string]string{"vpn-noise-rate": "8K"}
+			if role == "server" {
+				fields["vpn-allow-client-to-client"] = "true"
+			}
+			response := request(h, "PUT", "/api/config", map[string]any{"revision": view["revision"], "fields": fields}, cookie, csrf, "")
 			if response.Code != 200 {
 				t.Fatal(response.Code, response.Body.String())
 			}
 			result := object(t, response)
-			if result["requires_restart"] != false || len(result["live_applied"].([]any)) != 1 {
+			if result["requires_restart"] != false || len(result["live_applied"].([]any)) != len(fields) {
 				t.Fatal("live save requested a rebuild", result)
 			}
 		})

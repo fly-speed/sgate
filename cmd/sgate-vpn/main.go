@@ -36,7 +36,7 @@ type options struct {
 	queueMaxAge, udpSendInterval                                                                          time.Duration
 	mtu, maxClients                                                                                       int
 	tcpNotSentLowat                                                                                       int
-	manage, private, block6                                                                               bool
+	manage, private, clientToClient, block6                                                               bool
 }
 
 func parse(args []string) (options, error) {
@@ -62,6 +62,7 @@ func parse(args []string) (options, error) {
 	fs.IntVar(&o.maxClients, "max-clients", 64, "maximum authenticated clients (server)")
 	fs.BoolVar(&o.manage, "manage-network", true, "configure owned TUN/routes/DNS or server NAT and restore on exit; requires administrator")
 	fs.BoolVar(&o.private, "allow-private", false, "allow clients to reach private server-side destinations")
+	fs.BoolVar(&o.clientToClient, "allow-client-to-client", false, "allow VPN clients to communicate using VPN IPs (server)")
 	fs.BoolVar(&o.block6, "block-ipv6", true, "client routes IPv6 into unsupported TUN and discards it instead of bypassing VPN")
 	fs.StringVar(&o.routes, "routes", "0.0.0.0/1,128.0.0.0/1", "client IPv4 prefixes to route into VPN; 0.0.0.0/0 is split into two routes")
 	fs.StringVar(&o.dns, "dns", "1.1.1.1", "client IPv4 DNS servers, comma separated; empty leaves DNS unchanged")
@@ -112,7 +113,7 @@ func run(args []string) error {
 		return err
 	}
 	stats := &vpn.Stats{}
-	config := vpn.Config{RequireAccount: o.requireAccount, QueueMaxAge: o.queueMaxAge, UDPSendInterval: o.udpSendInterval, Noise: o.noise, Key: key, Network: network, ClientIP: clientIP, MTU: o.mtu, MaxClients: o.maxClients, AllowPrivate: o.private, Stats: stats, Logf: log.Printf}
+	config := vpn.Config{RequireAccount: o.requireAccount, QueueMaxAge: o.queueMaxAge, UDPSendInterval: o.udpSendInterval, Noise: o.noise, Key: key, Network: network, ClientIP: clientIP, MTU: o.mtu, MaxClients: o.maxClients, AllowPrivate: o.private, AllowClientToClient: o.clientToClient, Stats: stats, Logf: log.Printf}
 	accountPath := o.credentialsFile
 	if o.role == "server" {
 		accountPath = o.accountsFile

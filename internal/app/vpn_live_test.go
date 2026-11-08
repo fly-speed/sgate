@@ -29,10 +29,16 @@ func TestVPNLiveSavePreservesPendingStaticSettingsAndCLIOverrides(t *testing.T) 
 			setConfig(t, c, "vpn-noise-idle-after", "7s")
 			setConfig(t, c, "vpn-queue-max-age", "900ms")
 			setConfig(t, c, "vpn-udp-send-interval", "1ms")
+			if role == "server" {
+				setConfig(t, c, "vpn-allow-client-to-client", "true")
+			}
 			if err := c.applyLive(vpn.LiveFields(role)); err != nil {
 				t.Fatal(err)
 			}
 			got := live.Snapshot()
+			if got.AllowClientToClient != (role == "server") || c.current.vpn.Config.AllowClientToClient != got.AllowClientToClient {
+				t.Fatal("client-to-client policy was lost", got)
+			}
 			if got.Noise.Rate != 1024 || !got.Noise.Idle || got.Noise.IdleAfter != 7*time.Second || got.QueueMaxAge != 900*time.Millisecond || got.UDPSendInterval != time.Millisecond {
 				t.Fatal(got)
 			}

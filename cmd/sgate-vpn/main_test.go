@@ -25,3 +25,22 @@ func TestVPNOptionsConfigAndCLIOverride(t *testing.T) {
 		t.Fatal("duplicate config accepted")
 	}
 }
+
+func TestVPNClientToClientOption(t *testing.T) {
+	defaults, err := parse(nil)
+	if err != nil || defaults.clientToClient {
+		t.Fatal("client communication enabled by default", err)
+	}
+	path := filepath.Join(t.TempDir(), "vpn.conf")
+	if err := os.WriteFile(path, []byte("role = server\nallow-client-to-client = true\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	enabled, err := parse([]string{"-config", path})
+	if err != nil || !enabled.clientToClient {
+		t.Fatal(enabled, err)
+	}
+	disabled, err := parse([]string{"-config", path, "-allow-client-to-client=false"})
+	if err != nil || disabled.clientToClient {
+		t.Fatal(disabled, err)
+	}
+}

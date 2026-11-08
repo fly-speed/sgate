@@ -1,5 +1,5 @@
 "use strict";
-const { t, localText, localAttr } = sgateI18n;
+const { t, configDescription, localText, localAttr } = sgateI18n;
 const $ = (id) => document.getElementById(id);
 let state = {},
   revision = "",
@@ -159,7 +159,7 @@ function renderConfigFields(fields, runtime, role) {
         ? t("服务端密码") + " (password)" : field.key);
     const description = document.createElement("small");
     description.id = id + "-help";
-    localText(description, () => ((t(field.description) || t("配置项：") + field.key) +
+    localText(description, () => (configDescription(field, configRole) +
       (field.validation?.hint ? " · " + t(field.validation.hint) : "") +
       (["noise-min-bytes", "noise-max-bytes"].includes(field.key)
         ? t(" · WS/WSS 为每批负载字节；QUIC 为每秒噪音负载字节，小帧平滑发送，每条隧道独立计速。")
@@ -208,7 +208,11 @@ function renderConfigFields(fields, runtime, role) {
             ? ["true", "yes", "y", "1", "t", "T", "TRUE", "True"].includes(value)
               ? t("（是）")
               : t("（否）")
-            : "")));
+            : field.key === "vpn-mode"
+              ? " · " + t(({disabled: "关闭", both: "代理与 VPN 共存", only: "仅 VPN"})[value] || value)
+              : field.key === "quic-mode"
+                ? " · " + t(value === "native" ? "原生多流" : "旧版单流")
+                : "")));
         input.append(option);
       }
     } else {
@@ -726,7 +730,7 @@ function renderProxyMappings(group, field, overridden, readOnly = false) {
   help.className = "muted";
   help.setAttribute("aria-live", "polite");
   const updateHelp = reason => localText(help, () => reason
-    ? t(reason) + (field.description ? " " + t(field.description) : "")
+    ? t(reason) + " " + configDescription(field, configRole)
     : (t("每行将一个本地端口映射到远程服务。后端地址可选，须在服务端允许列表内；没有映射时不建立代理连接。") +
     (overridden ? t(" 当前映射来源受命令行覆盖，保存配置不会移除启动时的覆盖参数。") : "") +
     " " + t("每个映射可使用独立账号密码；关闭独立认证则继承公共凭据。测试使用本行认证和地址，密钥、TLS 和 send-addr 沿用生效设置。密码不会回显，留空保留已保存密码。") +
@@ -1860,7 +1864,7 @@ function openVPNWizard() {
     const fileField = keyImport || key === "vpn-tls-ca";
     const input = document.createElement(entry.rule.choices && !checkbox ? "select" : "input");
     localText(name, () => t(title) + (entry.overridden ? " · " + t("命令行优先") : ""));
-    localText(help, () => t(entry.description));
+    localText(help, () => configDescription(entry, state.role));
     help.id = "vpn-wizard-help-" + key;
     input.setAttribute("aria-describedby", help.id);
     if (checkbox) {
@@ -1958,7 +1962,7 @@ function openVPNWizard() {
       row.className = server ? "vpn-wizard-server-key" : "vpn-wizard-file-field";
     }
     if (key === "vpn-key-file") {
-      localText(help, () => t("共享密钥须与服务端一致。") + " " + t(entry.description));
+      localText(help, () => t("共享密钥须与服务端一致。") + " " + configDescription(entry, state.role));
       if (keyImport && (server || !entry.overridden)) row.append(renderVPNWizardImport("key", label));
     }
     if (key === "vpn-tls-ca") {
@@ -2392,7 +2396,7 @@ async function refreshAuth() {
     return;
   }
   updateNavigationRole(state.role);
-  localText($("role-title"), () => state.role === "server" ? "SERVER" : "CLIENT");
+  localText($("role-title"), () => t(state.role === "server" ? "服务端" : "客户端"));
   localText($("side-role"), () => state.role === "server" ? t("服务端代理") : t("客户端代理"));
   localText($("user-label"), () => state.username);
   localText($("session-user"), () => state.username);

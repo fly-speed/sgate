@@ -217,7 +217,9 @@ service vpn-server {
     vpn-max-clients = 64
     # macOS/Linux physical egress interface; empty detects it from the current route.
     vpn-egress-interface = ''
-    # Allow access to private networks on the server side; inter-client traffic is always denied. LIVE: applies to subsequent packets in both directions.
+    # Allow access to private networks on the server side; inter-client traffic is controlled separately. LIVE: applies to subsequent packets in both directions.
     vpn-allow-private = false
+    # Allow VPN clients to communicate using VPN IPs; independent of vpn-allow-private. LIVE: applies to subsequent packets.
+    vpn-allow-client-to-client = false
 
 }

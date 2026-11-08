@@ -3,6 +3,14 @@
 // UI translations only: editable values and protocol/configuration keys are never translated.
 const sgateI18n = (() => {
   const messages = {
+    "控制台": "CONTROL",
+    "网络状态，一目了然": "YOUR NETWORK, IN VIEW",
+    "TCP · WebSocket / QUIC · 加密传输": "TCP · WebSocket / QUIC · Encrypted",
+    "sgate 管理": "SGATE MANAGEMENT",
+    "客户端": "CLIENT",
+    "服务端": "SERVER",
+    "原生多流": "Native streams",
+    "旧版单流": "Legacy single stream",
  "密码至少需要 6 个字符": "Password must contain at least 6 characters",
  "服务端 VPN 配置校验不可用": "VPN server configuration validation is unavailable",
  "VPN 校验包含不支持的参数": "VPN validation contains unsupported settings",
@@ -702,7 +710,7 @@ const sgateI18n = (() => {
   "服务配置": "Service configuration",
   "重新加载": "Reload",
   "命令行参数优先": "Command-line options take precedence",
-  "每项单独配置，下方说明包含配置文件注释、单位和允许范围。非法值会在保存前拦截并提示；关联项请一起修改后使用整页保存。命令行显式参数仍然优先。密码类字段留空且不编辑即可保留原值；框架与管理参数修改后通常需要重启整个服务。": "Edit settings individually. Descriptions include configuration comments, units and limits. Invalid values are blocked before saving; edit related settings together and save the entire form. Explicit command-line options still take precedence. Leave unedited password fields blank to keep existing values. Framework and management changes usually require a full service restart.",
+  "每项单独配置，下方说明随界面语言切换，包含参数用途、单位和允许范围。非法值会在保存前拦截并提示；关联项请一起修改后使用整页保存。命令行显式参数仍然优先。密码类字段留空且不编辑即可保留原值；框架与管理参数修改后通常需要重启整个服务。": "Edit settings individually. Descriptions follow the interface language and include each setting’s purpose, units and limits. Invalid values are blocked before saving; edit related settings together and save the entire form. Explicit command-line options still take precedence. Leave unedited password fields blank to keep existing values. Framework and management changes usually require a full service restart.",
   "配置项": "Setting",
   "正在读取…": "Loading…",
   "标注“保存后立即生效”的参数会同步保存并在线更新，无需重启；其他参数保存后需应用或重启。行内图标保存该项，旧文件备份为 .bak。应用非即时参数时会中断现有代理连接。": "Settings marked “Takes effect immediately on save” are saved and updated online without a restart. Other settings require application or restart. The row icon saves one setting; the previous file is backed up as .bak. Applying other settings interrupts existing proxy connections.",
@@ -950,6 +958,152 @@ const sgateI18n = (() => {
   "master_service 与映射监听地址冲突；请修改映射中的 listen，框架监听会自动同步": "master_service conflicts with mapping listeners; edit listen in the mappings and framework listeners will be synchronized automatically",
   "无法解析生效监听参数，请检查命令行覆盖与 master_args": "Cannot parse effective listeners; check command-line overrides and master_args"
 };
+  // Help is keyed by option, not by deployment-specific file comments.
+  const configHelp = {
+    "listen": ["HTTP/HTTPS 监听地址；服务端管理页面与代理共用此监听。", "HTTP/HTTPS listen address; server management shares this listener with the proxy."],
+    "target": ["服务端默认转发的后端 TCP 地址，格式为主机:端口。", "Default backend TCP address forwarded by the server, in host:port format."],
+    "addr": ["客户端选择的后端地址；须在服务端允许列表内，留空使用服务端默认后端。", "Client-selected backend address; it must be allowed by the server. Leave empty to use the server default."],
+    "allowed-targets": ["允许客户端选择的后端地址，逗号分隔；留空禁止客户端选择后端，不影响默认后端。", "Comma-separated backends clients may select. Empty disables client selection while retaining the default backend."],
+    "path": ["WebSocket 隧道路径，须与客户端地址中的路径一致；不能占用 /admin 管理路径。", "WebSocket tunnel path; it must match the client URL path and must not overlap /admin management paths."],
+    "server": ["映射连接使用的远程服务端地址，支持 ws://、wss:// 和 quic://。", "Remote server URL used by a mapping; supports ws://, wss://, and quic://."],
+    "key-file": ["两端共用的加密密钥文件；相对路径按进程工作目录解析。", "Shared encryption key file for both endpoints; relative paths resolve from the process working directory."],
+    "password": ["隧道认证密码，与对端匹配；独立于网页管理员密码。", "Tunnel authentication password; it must match the peer and is separate from the Web administrator password."],
+    "username": ["隧道认证账号；留空使用旧版公共密码认证，映射可单独覆盖账号。", "Tunnel account username; empty uses legacy common-password authentication. Mappings may override it."],
+    "accounts-file": ["服务端隧道账号 JSON 文件；相对路径按本配置文件目录解析。填写后使用账号认证，空账号列表禁止连接。", "Server tunnel account JSON file, relative to this configuration file. A nonempty path enables account authentication; an empty account list denies connections."],
+    "proxies": ["代理映射列表，每项配置本地监听、远程服务端及可选后端；没有映射时不建立代理连接。", "Proxy mappings, each with a local listener, remote server, and optional backend. No mappings means no proxy connections."],
+    "proxies-file": ["代理映射 JSON 文件；相对路径按本配置文件目录解析，填写后优先于内联 proxies。", "Proxy mapping JSON file, relative to this configuration file; a nonempty path takes priority over inline proxies."],
+    "send-addr": ["是否将映射中的后端地址发送给服务端；关闭后使用服务端默认后端。", "Send each mapping's backend address to the server; disabling uses the server default backend."],
+    "allow-reverse": ["允许服务端通过隧道访问客户端目标；各账号的反向映射仍按账号配置控制。", "Allow server-initiated tunnel connections to client targets; account reverse mappings remain controlled by account settings."],
+    "tls-ca": ["附加信任的 CA 证书文件；留空使用系统信任库，仍校验服务端证书。", "Additional trusted CA certificate file; empty uses system trust and still verifies the server certificate."],
+    "tls-cert": ["HTTPS/WSS 服务证书文件，须与 tls-key 配套；两项均留空使用 HTTP/WS。", "HTTPS/WSS server certificate file; pair it with tls-key. Leave both empty for HTTP/WS."],
+    "tls-key": ["HTTPS/WSS 服务证书私钥文件，须与 tls-cert 配套。", "HTTPS/WSS server certificate private key file; pair it with tls-cert."],
+    "quic-listen": ["可选 QUIC UDP 监听地址；留空关闭，启用时须配置服务端证书和私钥。", "Optional QUIC UDP listen address; empty disables it. Enabling requires a server certificate and private key."],
+    "quic-mode": ["QUIC 传输模式：native 使用原生多流，legacy 使用旧版单流协议。", "QUIC transport mode: native uses native multiplexed streams; legacy uses the older single-stream protocol."],
+    "reconnect-min": ["客户端断线重连退避的最小间隔；实际等待包含随机抖动。", "Minimum client reconnect backoff interval; actual waits include random jitter."],
+    "reconnect-max": ["客户端断线重连退避的最大间隔，不能小于 reconnect-min。", "Maximum client reconnect backoff interval; must be at least reconnect-min."],
+    "offline-timeout": ["客户端断网后保留应用连接与重放缓存的期限，到期释放。", "Client offline retention period for application connections and replay buffers; release them on expiry."],
+    "session-ttl": ["服务端保留已断开隧道会话的期限，等待重连；到期释放应用连接与缓存。", "Server retention period for disconnected tunnel sessions awaiting reconnect; release application connections and buffers on expiry."],
+    "max-sessions": ["服务端最多保留的隧道会话数。", "Maximum number of tunnel sessions retained by the server."],
+    "max-streams": ["每个隧道会话允许同时存在的 TCP 应用连接数。", "Maximum concurrent TCP application connections per tunnel session."],
+    "buffer-bytes": ["每个会话、每个方向的未确认数据缓存上限；达到上限后等待可用空间。", "Unacknowledged data limit per session and direction; apply backpressure at the limit."],
+    "heartbeat": ["WebSocket 心跳发送间隔，支持 ms、s、m 等时间单位。", "WebSocket heartbeat interval; supports time units such as ms, s, and m."],
+    "heartbeat-timeout": ["接收空闲超时；0 使用心跳间隔的三倍。", "Receive idle timeout; 0 uses three times the heartbeat interval."],
+    "noise-interval": ["固定白噪音发送间隔；与随机间隔上下限均为 0 时关闭白噪音。", "Fixed padding send interval; padding is disabled when this and both random interval bounds are 0."],
+    "noise-interval-min": ["随机白噪音间隔下限；与上限同时为正值时启用，固定间隔须为 0。", "Minimum random padding interval; enable by setting both bounds positive and the fixed interval to 0."],
+    "noise-interval-max": ["随机白噪音间隔上限，不能小于 noise-interval-min。", "Maximum random padding interval; must be at least noise-interval-min."],
+    "noise-min-bytes": ["白噪音负载大小下限，支持 K/M 后缀。", "Minimum padding payload size; supports K/M suffixes."],
+    "noise-max-bytes": ["白噪音负载大小上限，不能小于下限，最多 10M，支持 K/M 后缀。", "Maximum padding payload size; at least the minimum and at most 10M. Supports K/M suffixes."],
+    "noise-traffic": ["是否在应用业务传输期间发送白噪音；关闭不影响心跳。", "Send padding during application traffic; disabling does not affect heartbeats."],
+    "noise-idle": ["是否在存在应用连接但双向无业务数据时发送白噪音。", "Send padding while application connections exist without business data in either direction."],
+    "noise-empty": ["是否在隧道在线但没有应用连接时发送白噪音；关闭不影响心跳。", "Send padding while the tunnel is online without application connections; disabling does not affect heartbeats."],
+    "noise-idle-after": ["双向连续无业务数据达到此时长后视为空闲；0 使用 1s，新建且未传输的连接立即视为空闲。", "No business data in either direction for this duration means idle; 0 uses 1s. New unused connections are idle immediately."],
+    "quic-initial-packet-bytes": ["QUIC 初始 UDP 负载大小，1200～1452 字节；后续自动探测路径 MTU。", "Initial QUIC UDP payload size, 1200–1452 bytes; path MTU is detected subsequently."],
+    "quic-stream-window": ["QUIC 每条流的接收窗口上限，0 使用默认值。", "Maximum QUIC receive window per stream; 0 uses the default."],
+    "quic-connection-window": ["QUIC 每条连接的接收窗口上限，0 使用默认值。", "Maximum QUIC receive window per connection; 0 uses the default."],
+    "quic-stream-buffer": ["原生 QUIC 每条流、每个方向的业务队列上限，0 按 buffer-bytes 推导。", "Native QUIC business queue limit per stream and direction; 0 derives from buffer-bytes."],
+    "quic-replay-bytes": ["QUIC 重放缓存上限，0 使用默认值。", "QUIC replay buffer limit; 0 uses the default."],
+    "quic-receive-bytes": ["QUIC 接收缓存上限，0 使用默认值。", "QUIC receive buffer limit; 0 uses the default."],
+    "memory-budget-bytes": ["进程受管缓存总预算，0 表示不限制。", "Process-wide managed buffer budget; 0 means unlimited."],
+    "admin-config": ["独立网页管理配置文件；填写后加载该文件并启用管理，留空使用当前配置文件中的管理参数。", "Separate Web management configuration file; a nonempty path loads it and enables management. Empty uses management settings in the current file."],
+    "admin_enabled": ["是否启用网页管理；命令行 -admin-enabled 优先。", "Enable Web management; the -admin-enabled command-line option takes priority."],
+    "admin_listen": ["客户端独立网页管理监听地址，与代理监听端口分开。", "Separate client Web management listen address; use a different port from proxy listeners."],
+    "admin_web_dir": ["网页管理 HTML、CSS、JavaScript 文件目录；相对路径按本配置文件目录解析。", "Web management HTML, CSS, and JavaScript directory; relative to this configuration file."],
+    "admin_users_file": ["独立网页管理员账号文件，保存密码哈希；相对路径按本配置文件目录解析。", "Separate Web administrator account file storing password hashes; relative to this configuration file."],
+    "admin_session_dir": ["网页登录会话持久化目录；相对路径按本配置文件目录解析。", "Persistent Web login session directory; relative to this configuration file."],
+    "admin_session_timeout": ["网页登录会话的固定有效期；进程重启后仍保留原到期时间。", "Fixed Web login session lifetime; process restarts retain the original expiry."],
+    "admin_max_sessions": ["最多保存的网页管理登录会话数。", "Maximum number of stored Web management login sessions."],
+    "admin_setup_token_file": ["创建首个网页管理员账号使用的一次性初始化令牌文件。", "One-time setup token file used to create the first Web administrator account."],
+    "admin_tls_cert": ["客户端网页管理 HTTPS 证书；留空使用 HTTP。", "Client Web management HTTPS certificate; empty uses HTTP."],
+    "admin_tls_key": ["客户端网页管理 HTTPS 证书私钥，须与 admin_tls_cert 配套。", "Client Web management HTTPS private key; pair it with admin_tls_cert."],
+    "admin_master_ctl": ["网页重启服务使用的 acl_master 控制程序路径。", "Path to the acl_master control executable used to restart the service from the Web interface."],
+    "admin_master_socket": ["acl_master 管理套接字路径；留空使用 master_ctl 的默认值。", "acl_master control socket path; empty uses the master_ctl default."],
+    "master_disable": ["是否禁止 acl_master 加载及启动服务；yes 禁止，no 允许，不影响独立启动。", "Disable service loading and startup in acl_master: yes disables, no enables. Standalone startup is unaffected."],
+    "master_type": ["acl_master 服务类型；sock 由框架管理监听套接字。", "acl_master service type; sock lets the framework manage listening sockets."],
+    "master_service": ["框架监听地址，格式为 IP|端口，多项用逗号分隔；不填写 IP 时监听所有网卡。", "Framework listeners in IP|port format, comma-separated; omit the IP to listen on all interfaces."],
+    "master_reuseport": ["是否启用端口复用；sgate 托管模式要求关闭，由 acl_master 持有并传递监听套接字。", "Enable port reuse; sgate managed mode requires it disabled so acl_master owns and passes listening sockets."],
+    "master_maxproc": ["最大子进程数；sgate 托管模式仅支持 1。", "Maximum child process count; sgate managed mode supports only 1."],
+    "master_prefork": ["预启动子进程数，不得超过 master_maxproc；sgate 托管模式仅支持 1。", "Prefork child process count; must not exceed master_maxproc. sgate managed mode supports only 1."],
+    "master_status_notify": ["是否向 acl_master 报告子进程忙闲状态；sgate 托管模式要求关闭。", "Report child process busy/idle status to acl_master; sgate managed mode requires this disabled."],
+    "master_unpriv": ["是否切换为框架配置的非特权身份；sgate 托管模式要求关闭。", "Switch to the framework's configured unprivileged identity; sgate managed mode requires this disabled."],
+    "master_chroot": ["是否启用 chroot 隔离；sgate 托管模式要求关闭。", "Enable chroot isolation; sgate managed mode requires this disabled."],
+    "master_stop_kill": ["框架停止或重启服务时是否使用 SIGTERM；关闭时沿用框架原有停止流程。", "Use SIGTERM when the framework stops or restarts the service; disabling retains the original stop sequence."],
+    "master_stop_wait": ["启用 master_stop_kill 时，是否等待旧子进程退出。", "Wait for the old child process to exit when master_stop_kill is enabled."],
+    "master_private": ["是否使用框架私有套接字目录；n 使用公共目录，y 使用私有目录。", "Use private framework socket directories: n uses public directories, y uses private directories."],
+    "master_command": ["acl_master 启动的可执行程序绝对路径。", "Absolute path to the executable launched by acl_master."],
+    "master_args": ["额外命令行覆盖参数；通常留空，框架会自动提供 -f 配置文件参数。", "Extra command-line overrides; normally empty. The framework supplies the -f configuration-file option."],
+    "master_home": ["子进程工作目录；应用层相对路径按该目录解析。", "Child process working directory; relative application paths resolve from here."],
+    "master_check_fds": ["是否采集子进程文件描述符使用情况。", "Collect child process file descriptor usage statistics."],
+    "master_check_mem": ["是否采集子进程内存使用情况。", "Collect child process memory usage statistics."],
+    "master_check_cpu": ["是否采集子进程 CPU 使用情况。", "Collect child process CPU usage statistics."],
+    "master_check_io": ["是否采集子进程 I/O 使用情况。", "Collect child process I/O usage statistics."],
+    "master_check_limit": ["是否检查子进程资源限制。", "Check child process resource limits."],
+    "master_notify_addr": ["子进程异常退出时的通知服务地址；no 使用框架默认监控套接字。", "Notification service address for abnormal child exits; no uses the framework's default monitoring socket."],
+    "master_notify_recipients": ["故障邮件通知接收者；no 表示不指定。", "Failure notification email recipients; no leaves recipients unspecified."],
+    "master_version": ["供 acl_master 管理和展示的服务版本标识。", "Service version identifier used by acl_master for management and display."],
+    "master_wakeup": ["定时唤醒间隔，单位秒，仅用于 trigger 服务；sock 服务使用 -。", "Wakeup interval in seconds for trigger services; use - for sock services."],
+    "master_log": ["服务进程日志文件路径；目录需存在且允许服务账号写入。", "Service process log file path; the directory must exist and be writable by the service account."],
+    "master_stdout": ["托管模式下标准输出的重定向文件。", "Standard output redirection file in managed mode."],
+    "master_stderr": ["托管模式下标准错误的重定向文件。", "Standard error redirection file in managed mode."],
+    "master_env": ["子进程环境变量，按框架服务模板格式填写。", "Child process environment variables in framework service-template syntax."],
+    "master_owner": ["子进程运行身份，按框架服务模板格式填写。", "Child process execution identity in framework service-template syntax."],
+    "app_use_limit": ["应用使用次数上限；0 保留框架默认值。", "Application use count limit; 0 keeps the framework default."],
+    "app_threads": ["应用线程数；-1 或 0 保持当前运行设置。", "Application thread count; -1 or 0 retains current runtime settings."],
+    "app_idle_limit": ["应用空闲时间上限，单位秒。", "Application idle time limit in seconds."],
+    "app_wait_limit": ["应用等待时间上限，单位秒。", "Application wait time limit in seconds."],
+    "app_quick_abort": ["是否启用框架应用快速终止。", "Enable framework application quick abort."],
+    "app_reuseport": ["是否启用应用监听端口复用。", "Enable application listener port reuse."],
+    "app_queue_dir": ["应用队列目录，按框架服务模板的路径规则解析。", "Application queue directory, resolved using framework service-template path rules."],
+    "app_access_allow": ["应用访问允许规则，按框架服务模板格式填写。", "Application access allow rules in framework service-template syntax."],
+    "tls_cert_file": ["框架 TLS 证书文件路径。", "Framework TLS certificate file path."],
+    "tls_key_file": ["框架 TLS 私钥文件路径。", "Framework TLS private key file path."],
+    "vpn-mode": ["独立 VPN：disabled 关闭，both 与代理共存，only 仅 VPN（保留框架及管理监听）。应用时会中断 VPN 并恢复/重建网络。", "VPN mode: disabled, both (proxy and VPN), or only (VPN with management); applying changes restarts VPN networking"],
+    "vpn-network": ["两端一致的 IPv4 VPN 子网，避免与现有网络重叠。", "shared IPv4 VPN subnet; must match on both ends and avoid existing networks"],
+    "vpn-mtu": ["TUN MTU，576～1500 字节。", "TUN MTU in bytes (576..1500)"],
+    "vpn-queue-max-age": ["发送队列过期时间，0 关闭过期丢弃（默认）；最多 1m。弱网 TCP 建议保持 0，队列容量仍有上限。", "maximum queued packet age (up to 1m; 0 disables expiry); queue capacity limits still apply"],
+    "vpn-udp-send-interval": ["纯 UDP VPN 每条连接发送大包的最小间隔，0 关闭，最多 10ms；仅影响本端发送，保存后立即生效。", "minimum interval between large raw UDP VPN packets (up to 10ms; 0 disables); applies immediately"],
+    "vpn-tun-name": ["新建设备名；Linux 默认 sgate0，macOS 自动分配 utunN。", "TUN device name (empty uses sgate0 on Linux or an automatically allocated utun device on macOS)"],
+    "vpn-manage-network": ["自动配置路由、DNS 或服务端 NAT；需要管理员权限。", "configure routes, DNS, or server NAT automatically; requires administrator privileges"],
+    "vpn-key-file": ["VPN 共享密钥文件；留空复用 key-file；不是代理或 Web 账号认证。", "VPN shared key file; empty reuses key-file; separate from proxy and Web authentication"],
+    "vpn-require-account": ["要求配置 VPN 专用账号文件并启用账号认证；配置文件路径后自动启用。", "require VPN account authentication; also enabled when an account file is configured"],
+    "vpn-noise-rate": ["本端每条 VPN 连接的白噪音负载字节/秒，支持 K/M，0 关闭，上限 10M；与代理 noise-* 参数独立。", "padding payload bytes per second per VPN connection (supports K/M; maximum 10M; 0 disables); separate from proxy noise settings"],
+    "vpn-noise-traffic": ["业务 IP 数据传输期间允许白噪音；拥塞或有待发送业务时优先业务。", "allow VPN padding during application traffic; queued data and congestion take priority"],
+    "vpn-noise-idle": ["VPN 已连接但无业务 IP 数据时允许白噪音；不要求存在业务连接。", "allow VPN padding while connected without IP traffic; no application connection is required"],
+    "vpn-noise-idle-after": ["连续多久没有双向业务 IP 数据视为空闲；0 使用 1s。", "no bidirectional IP data for this duration means idle (0 uses 1s)"],
+    "vpn-accounts-file": ["VPN 服务端专用账号 JSON 文件，相对路径按本配置目录解析；填写后启用账号认证。", "server VPN account JSON file, relative to this configuration; nonempty enables account authentication"],
+    "vpn-quic-listen": ["独立 QUIC UDP 监听，不能与 quic-listen 共用 UDP 端口；配置 TCP 监听后可留空以关闭 UDP。", "QUIC UDP VPN listen address; must use a different UDP port from quic-listen; empty disables QUIC"],
+    "vpn-udp-listen": ["纯 UDP VPN 监听，例如 0.0.0.0:8445；与 QUIC 分开 UDP 端口，业务包不确认或重传，使用共享密钥加密认证。", "encrypted raw UDP VPN listen address; must use a separate UDP port from QUIC; payloads are not acknowledged or retransmitted"],
+    "vpn-tcp-listen": ["可选 TLS/TCP 与 WSS 共用监听，例如 0.0.0.0:8444；可与 VPN UDP 使用相同数字端口，不能与其他 TCP 服务共用。", "shared TLS/TCP and WSS VPN listen address; empty disables both; may share a numeric port with UDP, but not another TCP service"],
+    "vpn-tcp-notsent-lowat": ["Linux VPN 服务端 TCP/WSS 套接字的未发送数据水位，支持 K/M，0 使用系统默认，最大 1M；重启 VPN 生效。", "Linux server TCP/WSS unsent-data low-water mark (supports K/M; maximum 1M; 0 uses system default); requires a VPN restart"],
+    "vpn-tls-cert": ["VPN 服务器证书；留空复用 tls-cert。", "VPN server certificate PEM file; empty reuses tls-cert"],
+    "vpn-tls-key": ["VPN 证书私钥；留空复用 tls-key。", "VPN server private key PEM file; empty reuses tls-key"],
+    "vpn-max-clients": ["最多同时认证客户端数，1～254；降低上限不踢现有客户端，仅限制新连接；各客户端虚拟 IP 唯一。", "maximum authenticated VPN clients (1..254); lowering the limit does not disconnect existing clients"],
+    "vpn-egress-interface": ["macOS/Linux 物理出口网卡；留空按当前路由识别。", "macOS/Linux outbound network interface; empty detects it from the current route"],
+    "vpn-allow-private": ["允许访问服务器侧私网；客户端互访由 vpn-allow-client-to-client 单独控制。", "allow access to server-side private networks; VPN client communication is controlled separately by vpn-allow-client-to-client"],
+    "vpn-allow-client-to-client": ["允许 VPN 客户端通过 VPN IP 相互访问；默认关闭，独立于 vpn-allow-private，保存后立即生效。", "allow VPN clients to communicate using VPN IPs; disabled by default, independent of vpn-allow-private; applies immediately"],
+    "vpn-credentials-file": ["VPN 客户端专用凭据 JSON 文件，包含一个账号；相对路径按本配置目录解析。", "client VPN credentials JSON file containing one account, relative to this configuration"],
+    "vpn-server": ["VPN 服务端 udp://、quic://、tcp:// 或 wss://主机:端口/vpn；UDP 使用共享密钥加密，业务包不重传，其余方式使用 TLS。保存后自动重连，已停止的 VPN 不会自动启动。", "VPN server udp://, quic://, tcp://, or wss://host:port/vpn URL; UDP uses shared-key encryption without payload retransmission; other transports use TLS"],
+    "vpn-tls-ca": ["附加信任 CA；留空复用 tls-ca。自签名证书需要显式信任。", "additional trusted CA PEM file; empty reuses tls-ca; required for self-signed certificates"],
+    "vpn-tls-skip-verify": ["信任服务端证书（跳过校验）。仅用于 QUIC、TCP、WSS；开启后无法验证服务端身份。", "skip server certificate verification for QUIC, TCP, and WSS; disables server identity verification"],
+    "vpn-routes": ["逗号分隔 IPv4 路由；服务端外层地址保留物理出口。", "comma-separated IPv4 VPN routes; the outer server connection retains its physical route"],
+    "vpn-dns": ["VPN IPv4 DNS，逗号分隔；留空不改 DNS。", "comma-separated IPv4 VPN DNS servers; empty leaves DNS unchanged"],
+    "vpn-dns-service": ["macOS 网络服务名称；Linux 使用 resolvectl。", "macOS network service name; Linux uses resolvectl"],
+    "vpn-block-ipv6": ["首版不转发 IPv6；将公网 IPv6 导入 TUN 后丢弃，避免绕过 VPN。", "route public IPv6 traffic to the TUN device and drop it to prevent bypass; IPv6 forwarding is not supported"],
+    "vpn-client-ip": ["已废弃；客户端 VPN 地址由服务端自动分配，此项会被忽略。", "Deprecated and ignored; the server assigns the client VPN address automatically."],
+    "admin-enabled": ["是否启用网页管理；命令行 -admin-enabled 优先。", "Enable Web management; the -admin-enabled command-line option takes priority."],
+  };
+  Object.assign(messages, {
+    "本端每条 VPN 连接每秒噪音负载字节，支持 K/M；0 关闭，上限 10M。拥塞或业务排队时让出，不补发暂停额度。": "Local padding payload bytes per second per VPN connection; supports K/M. 0 disables, maximum 10M. Yield to congestion or queued business data without accumulating paused credit.",
+    "连续无双向业务 IP 数据的空闲阈值，支持 ms/s/m/h；0 使用 1s。": "Idle threshold without business IP data in either direction; supports ms/s/m/h. 0 uses 1s.",
+    "纯 UDP VPN 每条连接发送大包的最小间隔，0 关闭，最多 10ms。": "Minimum interval between large raw UDP VPN packets per connection; 0 disables, maximum 10ms.",
+    "IPv4 TUN MTU，默认 1280 字节。": "IPv4 TUN MTU; default: 1280 bytes.",
+    "纯 UDP VPN 监听，与 QUIC 分开 UDP 端口；业务包不重传，使用共享密钥加密。": "Raw UDP VPN listener on a separate UDP port from QUIC; shared-key encryption without IP packet retransmission.",
+    "Linux VPN TCP/WSS 套接字未发送数据水位，支持 K/M，0 使用系统默认，最大 1M。": "Linux VPN TCP/WSS unsent-data low-water mark; supports K/M. 0 uses the system default, maximum 1M.",
+    "端口映射中的 ws://、wss:// 或 quic:// 远程地址。": "Remote ws://, wss://, or quic:// URL in a port mapping.",
+    "由 VPN 配置校验器检查；保存不创建网络设备，应用后生效。": "Checked by the VPN configuration validator; saving does not create network devices. Takes effect after applying.",
+    "VPN 专用账号 JSON 文件；相对路径按配置文件目录解析，配置路径后启用账号认证。": "Dedicated VPN account JSON file; relative to the configuration directory. Setting a path enables account authentication.",
+    "VPN 文件路径；留空复用同用途的代理密钥或 TLS 配置。": "VPN file path; empty reuses the corresponding proxy key or TLS configuration.",
+    "最多 64 个映射；监听端口不可重复；删除全部映射后使用单代理配置。": "Up to 64 mappings with unique listen ports; deleting all mappings uses the single-proxy configuration."
+  });
   const reverse = new Map(Object.entries(messages).map(([zh, en]) => [en, zh]));
   const storageKey = "sgate.admin.language";
   let current = typeof navigator !== "undefined" && /^en\b/i.test(navigator.language) ? "en" : "zh-CN";
@@ -965,9 +1119,29 @@ const sgateI18n = (() => {
     const source = reverse.get(text) || text;
     if (current === "zh-CN") return source;
     if (Object.hasOwn(messages, source)) return messages[source];
+    if (current === "en" && source.trim() !== source) {
+      return source.replace(/\S[\s\S]*\S|\S/, part => t(part));
+    }
     // Server duration hints combine a unit description and the setting's zero-value rule.
     const parts = source.split(/(?<=。)\s+/);
     return parts.length > 1 ? parts.map(t).join(" ") : source;
+  }
+
+  function configDescription(field, role = "") {
+    let help = Object.hasOwn(configHelp, field.key) ? configHelp[field.key] : null;
+    if (role === "server" && ["admin_tls_cert", "admin_tls_key"].includes(field.key)) {
+      help = ["服务端管理页面复用代理的 tls-cert/tls-key；此旧管理证书参数仅保留兼容。",
+        "Server management reuses the proxy tls-cert/tls-key; this legacy management certificate option is retained only for compatibility."];
+    } else if (role === "client" && field.key === "master_service") {
+      help = ["仅填写代理 TCP 监听地址，格式为 IP|端口；不要加入 admin_listen，管理端口独立监听。",
+        "Proxy TCP listeners only, in IP|port format. Do not include admin_listen; management listens separately."];
+    } else if (role === "server" && field.key === "password") {
+      help = ["旧版公共隧道密码，仅在 accounts-file 为空时使用；独立于网页管理员密码。",
+        "Legacy common tunnel password, used only when accounts-file is empty; separate from the Web administrator password."];
+    }
+    if (help) return help[current === "en" ? 1 : 0];
+    // Unknown options get localized guidance, never an untranslated file comment.
+    return t("配置项：") + field.key;
   }
 
   // Keep a binding on the DOM element rather than in a global collection.
@@ -1023,5 +1197,5 @@ const sgateI18n = (() => {
     setLanguage(current);
     onChange = callback;
   }
-  return { t, localText, localAttr, init, setLanguage, language: () => current };
+  return { t, configDescription, localText, localAttr, init, setLanguage, language: () => current };
 })();

@@ -107,7 +107,7 @@ test("form groups rows, masks secrets and submits only explicitly changed values
     undefined,
   );
   const row = elements.get("config-fields").children[0].children[2];
-  assert.equal(row.children[0].children[1].textContent, "<script>bad()</script>");
+  assert.equal(row.children[0].children[1].textContent, "服务端默认转发的后端 TCP 地址，格式为主机:端口。");
   assert.equal(row.children[0].children[2].textContent, "命令行优先");
 });
 
@@ -3250,4 +3250,44 @@ test("client wizard address button probes draft settings inline without saving o
  assert.match(vm.runInContext('vpnWizard.addressTest.result.textContent',context),/请先导入/);
  vm.runInContext('vpnWizard.fields.get("vpn-server").input.value="";updateVPNWizardAddressTest()',context);
  assert.equal(vm.runInContext('vpnWizard.addressTest.button.disabled',context),true);
+});
+
+test("client/server parameter descriptions and VPN wizard help switch languages without using file comments", async () => {
+  for (const role of ["client", "server"]) {
+    const {context, elements} = await page();
+    context.drawChart = () => {};
+    context.role = role;
+    context.localizedFields = [
+      {key:"vpn-mode",value:"only",group:"独立 VPN",description:"VPN mode: English file comment",validation:{type:"enum",choices:["disabled","both","only"],hint:"关闭 / 代理与 VPN 共存 / 仅 VPN；客户端应用配置后需手动启动 VPN，服务端自动监听。"}},
+      {key:"vpn-network",value:"10.77.0.0/24",group:"独立 VPN",description:"IPv4 VPN subnet; English file comment",validation:{type:"text",hint:"由 VPN 配置校验器检查；保存不创建网络设备，应用后生效。"}},
+      {key:"vpn-key-file",value:"example.key",group:"独立 VPN",description:"Shared key file: English file comment",validation:{type:"file"}},
+      {key:"vpn-allow-client-to-client",value:"false",group:"独立 VPN",description:"Allow client communication: English file comment",validation:{type:"boolean",choices:["true","false"],live:true,hint:"布尔值：true 开启，false 关闭。"}},
+    ];
+    vm.runInContext('state={role}; renderConfigFields(localizedFields,{},role); openVPNWizard()',context);
+    const before = vm.runInContext('JSON.stringify(configInputs.filter(e=>e.input).map(e=>[e.key,e.input.value]))',context);
+    for (const lang of ["zh-CN","en","zh-CN"]) {
+      vm.runInContext(`sgateI18n.setLanguage(${JSON.stringify(lang)})`,context);
+      const group = elements.get("config-fields").children.find(item=>item.configSection==="vpn");
+      for (const row of group.children.slice(1).filter(row=>row.className==="config-row")) {
+        const description = row.children[0].children[1].textContent;
+        assert.doesNotMatch(description,/English file comment/);
+        if(lang==="en") assert.doesNotMatch(description,/\p{Script=Han}/u);
+        else assert.match(description,/\p{Script=Han}/u);
+      }
+      const help = elements.get("vpn-wizard-fields").children.flatMap(item=>[item,...(item.children||[])]);
+      const text = vm.runInContext('vpnWizard.fields.get("vpn-network").input["aria-describedby"]',context);
+      assert.ok(text.split(" ").includes("vpn-wizard-help-vpn-network"));
+      // The wizard's actual help is bound through localText, as are parameter rows.
+      const findHelp = items => items.flatMap(item=>[item,...findHelp(item.children||[])]);
+      const wizardHelp = findHelp(help).filter(item=>item.id==="vpn-wizard-help-vpn-network")[0];
+      assert.ok(wizardHelp);
+      if(lang==="en") assert.doesNotMatch(wizardHelp.textContent,/\p{Script=Han}/u);
+      else assert.match(wizardHelp.textContent,/\p{Script=Han}/u);
+      assert.doesNotMatch(wizardHelp.textContent,/English file comment/);
+      assert.equal(vm.runInContext('JSON.stringify(configInputs.filter(e=>e.input).map(e=>[e.key,e.input.value]))',context),before);
+      const mode = vm.runInContext('configInputs.find(e=>e.key==="vpn-mode").input',context);
+      assert.equal(mode.value,"only");
+      assert.match(mode.children.at(-1).textContent,lang==="en"?/VPN only/:/仅 VPN/);
+    }
+  }
 });

@@ -52,7 +52,7 @@ func configurationRules() map[string]configRule {
 	add("app_use_limit", configRule{Type: "integer", Min: "0", Max: "2147483647", Hint: "填写非负整数；app_use_limit 单位为次，app_threads 单位为线程数；0 保留框架默认行为。"})
 	add("app_threads", configRule{Type: "integer", Min: "-1", Max: "2147483647", Hint: "单位为线程数；-1 或 0 保持当前运行设置。"})
 	add("app_idle_limit app_wait_limit", configRule{Type: "integer", Min: "0", Max: "2147483647", Hint: "单位为秒，只填非负整数，不带 s 后缀。"})
-	add("vpn-require-account vpn-noise-traffic vpn-noise-idle vpn-manage-network vpn-tls-skip-verify vpn-block-ipv6 vpn-allow-private admin_enabled admin-enabled send-addr allow-reverse noise-traffic noise-idle noise-empty", configRule{Type: "boolean", Choices: []string{"true", "false", "1", "0", "t", "f", "T", "F", "TRUE", "FALSE", "True", "False"}, Hint: "布尔值：true 开启，false 关闭。"})
+	add("vpn-require-account vpn-noise-traffic vpn-noise-idle vpn-manage-network vpn-tls-skip-verify vpn-block-ipv6 vpn-allow-private vpn-allow-client-to-client admin_enabled admin-enabled send-addr allow-reverse noise-traffic noise-idle noise-empty", configRule{Type: "boolean", Choices: []string{"true", "false", "1", "0", "t", "f", "T", "F", "TRUE", "FALSE", "True", "False"}, Hint: "布尔值：true 开启，false 关闭。"})
 	add("master_disable master_reuseport master_status_notify master_unpriv master_chroot master_stop_kill master_stop_wait master_private master_check_fds master_check_mem master_check_cpu master_check_io master_check_limit app_quick_abort app_reuseport", configRule{Type: "boolean", Choices: []string{"yes", "no", "true", "false", "y", "n", "1", "0"}, Hint: "布尔值：yes/true/y/1 开启，no/false/n/0 关闭。"})
 	for _, key := range strings.Fields("master_reuseport master_status_notify master_unpriv master_chroot") {
 		rules[key] = configRule{Type: "boolean", Choices: []string{"no", "false", "n", "0"}, Hint: "sgate 托管模式要求关闭：no/false/n/0。"}
@@ -250,7 +250,7 @@ func validateFormAddress(value string, listen bool) error {
 func argumentOptions(role string) map[string]configRule {
 	options := map[string]configRule{}
 	clientOnly := " vpn-credentials-file vpn-server vpn-client-ip vpn-tls-ca vpn-tls-skip-verify vpn-routes vpn-dns vpn-dns-service vpn-block-ipv6 quic-mode username proxies proxies-file addr send-addr allow-reverse tls-ca reconnect-min reconnect-max offline-timeout "
-	serverOnly := " vpn-accounts-file vpn-quic-listen vpn-udp-listen vpn-tcp-listen vpn-tls-cert vpn-tls-key vpn-max-clients vpn-egress-interface vpn-allow-private quic-listen accounts-file target allowed-targets path tls-cert tls-key session-ttl max-sessions "
+	serverOnly := " vpn-accounts-file vpn-quic-listen vpn-udp-listen vpn-tcp-listen vpn-tls-cert vpn-tls-key vpn-max-clients vpn-egress-interface vpn-allow-private vpn-allow-client-to-client quic-listen accounts-file target allowed-targets path tls-cert tls-key session-ttl max-sessions "
 	for key, rule := range configRules {
 		if (strings.Contains(key, "_") && key != "master_service") || key == "master_args" || strings.HasPrefix(key, "app_") {
 			continue

@@ -100,7 +100,8 @@ VPN 参数统一以 `vpn-` 开头，不使用独立 CLI 示例中的 `role`、`s
 | `vpn-queue-max-age` | 两端 | 后续队列操作使用新期限；降低期限可能丢弃已排队的旧包，0 关闭过期 |
 | `vpn-udp-send-interval` | 两端 | 调整纯 UDP VPN 本端每条连接的大包发送间隔，0 关闭，最多 10ms |
 | `vpn-max-clients` | 服务端 | 新接入使用新上限，降低上限不主动断开现有会话 |
-| `vpn-allow-private` | 服务端 | 后续双向转发使用新策略，关闭时阻止继续转发私网流量 |
+| `vpn-allow-private` | 服务端 | 后续双向转发使用新策略，关闭时阻止继续转发服务器侧私网流量 |
+| `vpn-allow-client-to-client` | 服务端 | 默认 false；允许通过 VPN IP 客户端互访，独立于 vpn-allow-private；关闭后阻止继续发送互访流量（包括已排队报文），无需重连 |
 
 `vpn-udp-send-interval` 只对本端发出的、长度至少 500 字节的 IPv4 业务包应用节奏控制。设置服务端影响下载方向，设置客户端影响上传方向。业务包仍由 UDP 单次发送。独立 `sgate-vpn` CLI 对应 `udp-send-interval`。
 
@@ -200,6 +201,7 @@ max-clients = 64
 manage-network = true
 egress-interface = ''
 allow-private = false
+allow-client-to-client = false
 ```
 
 ```sh
@@ -208,7 +210,7 @@ sudo /opt/soft/sgate/sbin/sgate-vpn -config /opt/soft/sgate/conf/sgate-vpn-serve
 
 自动建立新 `sgate0`，服务器虚拟地址为子网第一个主机（默认 `10.77.0.1`），按当前路由识别出口；必要时显式设置 `egress-interface = eth0` 或实际网卡名。启用 IPv4 forwarding，建立只属于此进程的 FORWARD/NAT 链，并允许到虚拟网关的 ICMP echo。退出删除本次规则，恢复原 forwarding 值，不清空既有防火墙规则。若主机上有其他服务同时修改 forwarding，需协调维护其全局状态。
 
-`allow-private=false` 拒绝访问服务器侧私网、回环、链路本地、多播以及其他 VPN 客户端地址；服务器虚拟网关本身允许访问。VPN 地址不得与已有网络重叠。现有防火墙/策略路由仍可能影响转发，须在实际 Linux 环境验证。
+`allow-private=false` 拒绝访问服务器侧私网；客户端互访由 `allow-client-to-client` 单独控制，默认 `false`。集成服务端在 `sgate-server.cf` 中使用 `vpn-allow-client-to-client = true` 开启，独立 `sgate-vpn` 使用 `allow-client-to-client = true`。开启后，服务端直接转发到已连接的目标客户端，无需开启 `allow-private` 或配置服务端 TUN 回流转发。客户端需有到 VPN 网段的路由，且目标客户端防火墙及应用需允许访问。回环、链路本地、多播仍被禁止；服务器虚拟网关本身允许访问。VPN 地址不得与已有网络重叠。现有防火墙/策略路由仍可能影响转发，须在实际 Linux 环境验证。
 
 ## macOS 服务端测试
 
@@ -268,7 +270,7 @@ Linux 新网卡会继承系统的 IPv6 禁用设置。为安装上述阻断路�
 - 自动分配适用于 QUIC、TCP/TLS 和 WSS。新客户端要求服务端支持地址分配，请先升级服务端；旧服务端会明确提示需要更新。新服务端仍接受旧客户端显式申请空闲地址，方便逐端升级。
 - TLS 1.3 验证服务器证书；控制流使用随机挑战和共享密钥 HMAC 进行双向确认。未认证报文不会写入 TUN。不使用 0-RTT 发送 IP 包。
 - 当前是一个共享密钥信任域，持有密钥即获 VPN 准入；不是既有 Web 管理账号或 TCP 账号 ACL，也没有单用户撤销功能。
-- 服务端校验每个报文的源地址必须等于该连接绑定地址，禁止客户端互访；客户端校验目的地址必须为自己的虚拟地址。
+- 服务端校验每个报文的源地址必须等于该连接绑定地址，默认禁止客户端互访，仅在服务端显式开启 `vpn-allow-client-to-client` 后允许；客户端校验目的地址必须为自己的虚拟地址。
 - MTU 576～1500，默认 1280。一个 IP 包拆成最多两个 1000 字节负载片段，适应 QUIC 初始 1200 字节 UDP 负载；不把大 IP 包回退到可靠流。
 - 每连接至多 64 个重组项，2 秒过期；发送队列 64 包。丢片只影响对应 IP 包，后续其他包仍可交付。拥塞/离线时丢弃，不建立 IP 重放缓存。
 - QUIC 自身仍有拥塞控制，DATAGRAM 并不保证送达、顺序或性能；它消除了此层的可靠流重传等待，不能消除跨境 UDP 丢包和路径限速。

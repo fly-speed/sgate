@@ -46,6 +46,7 @@ type Config struct {
 	MTU                        int
 	MaxClients                 int
 	AllowPrivate               bool
+	AllowClientToClient        bool
 	Noise                      NoiseConfig
 	QueueMaxAge                time.Duration
 	UDPSendInterval            time.Duration

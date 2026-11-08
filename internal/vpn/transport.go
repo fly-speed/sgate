@@ -73,11 +73,15 @@ func (p *peer) run(ctx context.Context, c Config, receive func([]byte) error) er
 		}()
 
 		send := func(packet []byte) error {
-			if c.server && !c.Live.Snapshot().AllowPrivate {
+			if c.server {
 				src, _, valid := ipv4(packet, c.MTU)
-				if valid && src != c.Network.Addr().Next() && !publicDestination(src) {
-					c.Stats.drops.Add(1)
-					return nil
+				policy := c.Live.Snapshot()
+				if valid && src != c.Network.Addr().Next() {
+					clientSource := c.Network.Contains(src)
+					if (clientSource && !policy.AllowClientToClient) || (!clientSource && !publicDestination(src) && !policy.AllowPrivate) {
+						c.Stats.drops.Add(1)
+						return nil
+					}
 				}
 			}
 			if _, reliable := p.conn.(*recordConnection); !reliable && clampTCPMSS(packet, c.MTU) {
@@ -641,12 +645,29 @@ func (s *Server) accept(ctx context.Context, conn connection) {
 	_ = p.run(ctx, s.cfg, func(packet []byte) error {
 		src, dst, ok := ipv4(packet, s.cfg.MTU)
 		gateway := s.cfg.Network.Addr().Next()
-		if !ok || src != ip || (s.cfg.Network.Contains(dst) && dst != gateway) || (dst != gateway && !publicDestination(dst) && !s.cfg.Live.Snapshot().AllowPrivate) {
+		policy := s.cfg.Live.Snapshot()
+		clientDestination := s.cfg.Network.Contains(dst) && dst != gateway
+		if !ok || src != ip || (clientDestination && !policy.AllowClientToClient) || (!clientDestination && dst != gateway && !publicDestination(dst) && !policy.AllowPrivate) {
 			s.cfg.Stats.drops.Add(1)
 			return nil
 		}
 		if !dst.IsGlobalUnicast() || dst.IsLoopback() || dst.IsLinkLocalUnicast() {
 			s.cfg.Stats.drops.Add(1)
+			return nil
+		}
+		if clientDestination {
+			// Switch authenticated clients directly, without depending on host
+			// TUN hairpin forwarding or applying the server-side private policy.
+			s.mu.Lock()
+			target := s.peers[dst]
+			if p.accountRevoked.Load() || target == nil || target.accountRevoked.Load() {
+				s.cfg.Stats.drops.Add(1)
+			} else {
+				target.enqueue(packet, s.cfg.Stats)
+				s.cfg.Stats.rx.Add(uint64(len(packet)))
+				p.trafficRX.Add(uint64(len(packet)))
+			}
+			s.mu.Unlock()
 			return nil
 		}
 		s.writeMu.Lock()
