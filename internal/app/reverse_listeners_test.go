@@ -164,7 +164,7 @@ func TestReverseInheritedFrameworkSocketEndToEnd(t *testing.T) {
 	done := make(chan struct{})
 	go func() { framework.Run(); close(done) }()
 	defer func() { framework.Close(); <-done }()
-	newController(t, "client", "server = ws://"+httpAddress+"/tunnel\nusername = alice\nallow-reverse = true\nreconnect-min = 10ms\nreconnect-max = 20ms\n", "-password", "secret")
+	newController(t, "client", testClientMappingAt(t, "", "ws://"+httpAddress+"/tunnel", true)+"username = alice\nreconnect-min = 10ms\nreconnect-max = 20ms\n", "-password", "secret")
 	conn := reverseAppConnect(t, rawAddress, "R")
 	onlineExchange(t, conn)
 	// Shared HTTP replacement transfers the same raw lease before closing the

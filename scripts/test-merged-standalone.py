@@ -138,11 +138,11 @@ def run(args, secure):
 
         try:
             for role in ["server", "client"]:
-                text = f"service standalone-{role} {{\nmaster_service = 127.0.0.1|1\nmaster_args =\nkey-file = {root}/key\npassword = standalone-secret\nnoise-interval-min = 10ms\nnoise-interval-max = 30ms\nnoise-min-bytes = 128\nnoise-max-bytes = 512\nadmin_enabled = true\nadmin_listen = 127.0.0.1:{management[role]}\nadmin_web_dir = {helper.ROOT}/web/admin\nadmin_users_file = {role}-users.json\nadmin_session_dir = {role}-sessions\nadmin_setup_token_file = {role}-setup.token\n"
+                text = f"service standalone-{role} {{\nmaster_service = 127.0.0.1|{proxy[role]}\nmaster_args =\nkey-file = {root}/key\npassword = standalone-secret\nnoise-interval-min = 10ms\nnoise-interval-max = 30ms\nnoise-min-bytes = 128\nnoise-max-bytes = 512\nadmin_enabled = true\nadmin_listen = 127.0.0.1:{management[role]}\nadmin_web_dir = {helper.ROOT}/web/admin\nadmin_users_file = {role}-users.json\nadmin_session_dir = {role}-sessions\nadmin_setup_token_file = {role}-setup.token\n"
                 if role == "server":
                     text += f"target = 127.0.0.1:{backend.getsockname()[1]}\n"
                 else:
-                    text += f'server = {"wss" if secure else "ws"}://127.0.0.1:{proxy["server"]}/tunnel\n'
+                    text += "proxies = '" + json.dumps([{"listen": f"127.0.0.1:{proxy['client']}", "server": f"{'wss' if secure else 'ws'}://127.0.0.1:{proxy['server']}/tunnel"}]) + "'\n"
                 if secure:
                     text += f"admin_tls_cert = {root}/cert\nadmin_tls_key = {root}/tls.key\n"
                     text += (

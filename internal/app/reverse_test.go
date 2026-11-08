@@ -51,7 +51,7 @@ func TestReverseAccountManagementAndAppLifecycle(t *testing.T) {
 	if len(snapshot.Accounts[0].ReverseMappings) != 1 {
 		t.Fatal("management omitted mappings")
 	}
-	newController(t, "client", "server = ws://"+server.worker.listener.Addr().String()+"/tunnel\nusername = alice\nallow-reverse = true\nreconnect-min = 10ms\nreconnect-max = 20ms\n", "-password", "alice-secret")
+	newController(t, "client", testClientMappingAt(t, "", "ws://"+server.worker.listener.Addr().String()+"/tunnel", true)+"username = alice\nreconnect-min = 10ms\nreconnect-max = 20ms\n", "-password", "alice-secret")
 	conn := reverseAppConnect(t, address, "R")
 	onlineExchange(t, conn)
 	// Revalidating a running configuration must not try to bind its ports again.

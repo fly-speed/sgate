@@ -15,7 +15,7 @@ import (
 )
 
 func TestVPNProbeReadsDormantSettingsAndDraftsWithoutApplying(t *testing.T) {
-	c := newController(t, "client", "server = ws://127.0.0.1:1/tunnel\n")
+	c := newController(t, "client", testClientMapping(t, "ws://127.0.0.1:1/tunnel")+"")
 	cert, private := managedCertificate(t)
 	pair, e := tls.LoadX509KeyPair(cert, private)
 	if e != nil {
@@ -76,7 +76,7 @@ func TestVPNProbeReadsDormantSettingsAndDraftsWithoutApplying(t *testing.T) {
 }
 
 func TestVPNProbeUsesCredentialsSavedFromManagement(t *testing.T) {
-	c := newController(t, "client", "server = ws://127.0.0.1:1/tunnel\n")
+	c := newController(t, "client", testClientMapping(t, "ws://127.0.0.1:1/tunnel")+"")
 	key, err := cli.LoadKey(c.original.Lookup("key-file").Value.String())
 	if err != nil {
 		t.Fatal(err)

@@ -28,7 +28,7 @@ func (d *vpnTestDevice) Read([]byte) (int, error)    { <-d.done; return 0, io.EO
 func (d *vpnTestDevice) Write(p []byte) (int, error) { return len(p), nil }
 func (d *vpnTestDevice) Close() error                { d.once.Do(func() { close(d.done) }); return nil }
 func TestVPNOnlyBuildDoesNotRequireProxyServerOrPassword(t *testing.T) {
-	c := newController(t, "client", "server = ws://127.0.0.1:1/tunnel\n")
+	c := newController(t, "client", testClientMapping(t, "ws://127.0.0.1:1/tunnel")+"")
 	fs := appFlags("client")
 	fs.Set("key-file", c.original.Lookup("key-file").Value.String())
 	fs.Set("vpn-mode", "only")

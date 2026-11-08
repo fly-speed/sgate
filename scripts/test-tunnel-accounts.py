@@ -130,7 +130,8 @@ def exercise(client, server, secure, mapping_file=False, missing_mapping_file=Fa
             else:
                 for index, name in enumerate(("alice", "bob"), 1):
                     config = directory / (name + ".cf")
-                    text = (f"master_service = 127.0.0.1:{ports[index]}\nserver = {'wss' if secure else 'ws'}://127.0.0.1:{ports[0]}/tunnel\n"
+                    routes = [{"listen": f"127.0.0.1:{ports[index]}", "server": f"{'wss' if secure else 'ws'}://127.0.0.1:{ports[0]}/tunnel"}]
+                    text = ("proxies = '" + json.dumps(routes) + "'\n" +
                             f"key-file = {key}\nusername = alice\npassword = alice-test-secret\n" + noise)
                     if secure:
                         text += f"tls-ca = {directory}/tls.crt\n"

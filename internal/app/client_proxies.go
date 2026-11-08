@@ -40,9 +40,6 @@ func (v configValues) multiClientConfigs(secret []byte, options tunnel.Options) 
 	if err != nil {
 		return nil, err
 	}
-	if len(mappings) == 0 && path == "" {
-		return nil, errors.New("proxies requires 1 to 64 mappings")
-	}
 	routes := make([]clientProxy, len(mappings))
 	for i, m := range mappings {
 		routes[i] = clientProxy{Listen: m.Listen, Server: m.Server, Addr: m.Addr, Username: m.Username, Password: m.Password, AllowReverse: m.AllowReverse}
@@ -69,7 +66,7 @@ func (v configValues) multiClientConfigs(secret []byte, options tunnel.Options) 
 		route.Listen = address.String()
 		route.config = common
 		route.config.URL, route.config.Addr = route.Server, route.Addr
-		route.config.AllowReverse = route.AllowReverse // Explicit per mapping; never inherit the single-proxy switch.
+		route.config.AllowReverse = route.AllowReverse // Reverse access is explicit per mapping.
 		if route.Username != nil {
 			route.config.Username = *route.Username
 		}

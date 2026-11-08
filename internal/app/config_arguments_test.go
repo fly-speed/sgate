@@ -11,7 +11,7 @@ func TestSavedMasterArgumentsAreValidatedBeforeRestart(t *testing.T) {
 		t.Run(role, func(t *testing.T) {
 			body := "target = 127.0.0.1:1\n"
 			if role == "client" {
-				body = "server = ws://127.0.0.1:1/tunnel\n"
+				body = testClientMapping(t, "ws://127.0.0.1:1/tunnel")
 			}
 			c := newController(t, role, body)
 			original, err := os.ReadFile(c.path)

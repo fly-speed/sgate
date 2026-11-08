@@ -34,7 +34,7 @@ func TestMappingListenersRespectCLIAndFutureMasterArgs(t *testing.T) {
 			t.Fatal(managed, got, err)
 		}
 	}
-	c := proxyConfigController(t, "proxies = '"+disk+"'\nserver = ws://localhost/tunnel\n", "-proxies", "", "-master_service", "127.0.0.1:9010")
+	c := proxyConfigController(t, "proxies = '"+disk+"'\n", "-proxies", "", "-master_service", "127.0.0.1:9010")
 	got, err := c.proxyListeners(c.path)
 	if err != nil || !reflect.DeepEqual(got, []string{"127.0.0.1:9010"}) {
 		t.Fatal(got, err)
@@ -61,7 +61,7 @@ func TestMappingListenersDropRemovedFrameworkOverride(t *testing.T) {
 }
 
 func TestMappingListenersDoNotExposeInvalidArgumentValues(t *testing.T) {
-	c := proxyConfigController(t, "server = ws://localhost/tunnel\n")
+	c := proxyConfigController(t, testClientMapping(t, "ws://localhost/tunnel")+"")
 	content, err := os.ReadFile(c.path)
 	if err != nil {
 		t.Fatal(err)

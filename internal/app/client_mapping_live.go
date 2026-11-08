@@ -8,32 +8,9 @@ import (
 	"sgate/internal/admin"
 )
 
-func (d definition) clientRoutes(singleAddress string) []clientProxy {
-	if len(d.proxies) > 0 {
-		return d.proxies
-	}
-	if d.client == nil {
-		return nil
-	}
-	var routes []clientProxy
-	seen := map[string]bool{}
-	for _, configured := range strings.Split(d.listen, ",") {
-		configured = strings.TrimSpace(configured)
-		if _, port, _ := net.SplitHostPort(configured); port == "0" {
-			configured = singleAddress
-		}
-		address, err := net.ResolveTCPAddr("tcp", configured)
-		if err != nil {
-			return nil
-		}
-		_, port, _ := net.SplitHostPort(address.String())
-		if !seen[port] {
-			routes = append(routes, clientProxy{Listen: address.String(), Server: d.client.URL, Addr: d.client.Addr, AllowReverse: d.client.AllowReverse, port: port, config: *d.client})
-			seen[port] = true
-		}
-	}
-	return routes
-}
+// Only explicit mappings become routes. Framework listeners without mappings
+// remain idle and never create a connection to a remote server.
+func (d definition) clientRoutes(_ string) []clientProxy { return d.proxies }
 
 func sameClientAddresses(a, b string) bool {
 	parse := func(s string) map[string]bool {
@@ -79,13 +56,10 @@ func (c *controller) replaceClientMappings(next definition) error {
 		return admin.ErrMappingServiceRestart
 	}
 	base := c.current.client
-	if len(c.current.proxies) > 0 {
-		base = &c.current.proxies[0].config
-	}
 	current := c.current
 	current.listen = next.listen
 	current.proxies = nil
-	current.client = nil
+	current.client = base
 	if len(next.proxies) > 0 {
 		current.proxies = append([]clientProxy(nil), next.proxies...)
 		for n := range current.proxies {
@@ -102,13 +76,8 @@ func (c *controller) replaceClientMappings(next definition) error {
 			}
 			current.proxies[n].config = cfg
 		}
-	} else {
-		cfg := *base
-		cfg.URL, cfg.Addr = next.client.URL, next.client.Addr
-		cfg.AllowReverse = c.current.commonAllowReverse // Do not apply pending single-proxy security edits.
-		cfg.Username, cfg.Password = c.current.commonUsername, c.current.commonPassword
-		current.client = &cfg
 	}
+
 	routes := current.withLiveSettings(c.worker.live).clientRoutes(current.listen)
 	for _, route := range routes {
 		if route.port == "0" {

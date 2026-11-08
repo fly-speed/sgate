@@ -63,7 +63,7 @@ func TestManagementRealProcessRestartAndExpiry(t *testing.T) {
 			listenKey := "master_service"
 			appText := listenKey + " = " + business + "\nkey-file = " + key + "\npassword = process-test-password\n"
 			if role == "client" {
-				appText += "server = ws://127.0.0.1:1/tunnel\n"
+				appText += testClientMappingAt(t, business, "ws://127.0.0.1:1/tunnel")
 			} else {
 				appText += "target = 127.0.0.1:1\n"
 			}

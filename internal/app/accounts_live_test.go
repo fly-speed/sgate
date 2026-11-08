@@ -89,7 +89,7 @@ func TestAccountsFileOnlineSaveWSWSSKeepsWorkerAndUnchangedUsers(t *testing.T) {
 			endpoint := scheme + "://" + worker.listener.Addr().String() + "/tunnel"
 			client := func(username, password string) *controller {
 				t.Helper()
-				return newController(t, "client", "server = "+endpoint+"\nusername = "+username+"\n"+ca, "-password", password)
+				return newController(t, "client", testClientMapping(t, endpoint)+"username = "+username+"\n"+ca, "-password", password)
 			}
 			legacy := client("", "app-test-password")
 			old := onlineConnect(t, legacy.worker.listener.Addr().String(), "A")

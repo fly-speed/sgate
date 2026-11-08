@@ -61,25 +61,23 @@ service sgate-client {
 # Proxy configuration: loaded by the service template; same-name CLI options take precedence.
     # UTF-8 application configuration; explicit CLI options override this file.
     # Relative application paths resolve from the process working directory.
-    # master_service above controls single-proxy listening in both standalone and managed modes.
-    # Proxy mappings as a JSON array: each has listen, server and optional addr; empty keeps single-proxy behavior.
-    # A nonempty array replaces single-proxy master_service/server/addr; key, TLS, reconnect, heartbeat and padding settings are shared; each mapping can override username/password.
+    # master_service supplies framework listeners; mappings define all proxy connections.
+    # Proxy mappings as a JSON array: each has listen, server and optional addr; empty leaves the proxy idle.
+    # Each mapping supplies its own listener, server and backend; key, TLS, reconnect, heartbeat and padding settings are shared; each mapping can override username/password.
     # Local ports must differ between mappings; send-addr=false removes addr from every mapping URL.
     # Example: proxies = '[{"listen":"127.0.0.1:9001","server":"ws://127.0.0.1:8081/tunnel?addr=127.0.0.1:22"},{"listen":"127.0.0.1:9002","server":"ws://127.0.0.1:8081/tunnel?addr=127.0.0.1:8088"}]'
     # UI saves update mappings online and synchronize master_service; managed port changes restart via bin/sgate-client-stop.sh then bin/sgate-client-start.sh.
     # Manual file edits must keep master_service and mapping ports consistent; standalone updates preserve unchanged mappings.
     proxies = ''
     # Optional JSON array file; relative paths resolve from this .cf directory. Nonempty overrides inline proxies.
-    # On startup a missing file is created privately from inline proxies, or as [] to use single-proxy settings; existing files are preserved.
+    # On startup a missing file is created privately from inline proxies, or as [] to leave the proxy idle; existing files are preserved.
     # Each mapping may specify username/password; omitted fields inherit the common credentials below.
-    # UI saves update this file and master_service together; an empty array uses single-proxy settings.
+    # UI saves update this file and master_service together; an empty array leaves the proxy idle.
     proxies-file = 'sgate-proxies.json'
-    # Server WebSocket URL using ws:// or wss://; its path must match the server path setting.
-    server = ws://127.0.0.1:8081/tunnel
-    # Server-side backend; a nonempty value overrides addr in the server URL. Supports IP:port or domain:port.
-    # Leave empty to keep the URL selection; without URL addr, use the server default. Selected targets must be in the server allowlist.
+    # Backend selection is configured in each mapping through its addr or URL query.
+    # This common value is not used by mappings; selected targets must be in the server allowlist.
     addr =
-    # Include the target address in the request URL; false ignores standalone addr and removes URL addr, using the server default.
+    # Include the target address in the request URL; false ignores mapping addr and removes URL addr, using the server default.
     send-addr = true
     # Shared encryption key file for both endpoints; relative paths resolve from the process working directory.
     key-file = sgate.key
@@ -189,7 +187,7 @@ service sgate-client {
     vpn-noise-idle = true
     # IP inactivity threshold; padding does not reset it. Zero uses 1s. LIVE: Web saves apply without VPN reconnection.
     vpn-noise-idle-after = 1s
-    # VPN endpoint, separate from the proxy server setting; use one transport at a time.
+    # VPN endpoint, separate from proxy mappings; use one transport at a time.
     # Raw UDP:  udp://vpn.example.com:8445/vpn (shared-key encryption, no IP data retransmission)
     # QUIC/UDP: quic://vpn.example.com:8444/vpn
     # TLS/TCP:  tcp://vpn.example.com:8444/vpn

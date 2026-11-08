@@ -28,7 +28,7 @@ func TestContinuousLiveUpdatesKeepWorkerAndCommandLinePriority(t *testing.T) {
 			text := "target = 127.0.0.1:1\n"
 			extra := []string{"-noise-min-bytes", "256", "-noise-traffic=false", "-noise-idle-after=80ms"}
 			if role == "client" {
-				text = "server = ws://127.0.0.1:1/tunnel\n"
+				text = testClientMapping(t, "ws://127.0.0.1:1/tunnel")
 				extra = append(extra, "-reconnect-min", "400ms")
 			}
 			c := newController(t, role, text, extra...)

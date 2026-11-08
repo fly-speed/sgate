@@ -570,6 +570,9 @@ func (h *Handler) getConfig(w http.ResponseWriter) {
 		}
 		fields = visible
 	}
+	if h.view.Role == "client" {
+		fields = slices.DeleteFunc(fields, func(f configField) bool { return f.Key == "server" })
+	}
 	fields = vpnConfigFields(fields, h.view.Role)
 	for i := range fields {
 		for _, key := range h.view.LiveFields {
@@ -584,7 +587,7 @@ func (h *Handler) getConfig(w http.ResponseWriter) {
 	configRevision := digest(b)
 	if h.view.Role == "client" {
 		fields = clientCredentialFields(fields)
-		mappings, mappingPath, snapshotRevision, err := h.mappingSnapshot(b)
+		mappings, _, snapshotRevision, err := h.mappingSnapshot(b)
 		if err != nil {
 			problem(w, 500, err.Error())
 			return
@@ -602,7 +605,7 @@ func (h *Handler) getConfig(w http.ResponseWriter) {
 		if !hasFile {
 			fields = append(fields, configField{Key: "proxies-file", Group: "代理与通道", Validation: ruleForConfig("proxies-file"), Description: "独立 JSON 映射文件；相对路径按客户端配置文件目录解析，留空使用内联 proxies。"})
 		}
-		if !hasMappings && mappingPath != "" {
+		if !hasMappings {
 			fields = append(fields, configField{Key: "proxies", Group: "代理与通道", Validation: ruleForConfig("proxies")})
 		}
 		for i := range fields {
@@ -667,6 +670,10 @@ func (h *Handler) putConfig(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if !h.authorizeMutation(w, r) {
+		return
+	}
+	if _, exists := input.Fields["server"]; h.view.Role == "client" && exists {
+		problem(w, 400, "独立 server 配置项已移除，请在端口映射中设置远程服务端地址")
 		return
 	}
 	if _, exists := input.Fields["admin_listen"]; h.view.Role == "server" && exists {

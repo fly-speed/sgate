@@ -80,7 +80,8 @@ service web-client {
     # Connections and authentication
     # Local TCP listen address for application connections; retain the existing address.
     # Server WebSocket URL; retain the existing scheme, address, port and path.
-    server = "ws://i18n.webcool.cn:8088/tunnel"
+
+    proxies = '[{"listen":"127.0.0.1:1088","server":"ws://i18n.webcool.cn:8088/tunnel","addr":"# Include the target address in the request URL; false ignores standalone addr and removes URL addr, using the server default."}]'
     # Server-side backend; a nonempty value overrides addr in the server URL. Supports IP:port or domain:port.
     # Leave empty to keep the URL selection; without URL addr, use the server default. Selected targets must be in the server allowlist.
     addr =

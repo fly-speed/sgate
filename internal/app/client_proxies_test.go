@@ -49,16 +49,16 @@ func TestMultiProxyConfigAndCLI(t *testing.T) {
 	if len(d.proxies) != 1 || d.proxies[0].port != "19003" || !d.proxies[0].config.OmitAddr {
 		t.Fatal("CLI override failed")
 	}
-	c = proxyConfigController(t, "proxies = '"+raw+"'\nserver = ws://localhost:8080/tunnel\n", "-proxies", "")
+	c = proxyConfigController(t, "proxies = '"+raw+"'\n", "-proxies", "")
 	d, err = c.load("")
 	if err != nil || len(d.proxies) != 0 || d.client == nil {
-		t.Fatal("single proxy fallback failed", err)
+		t.Fatal("empty mappings must leave the proxy idle", err)
 	}
 }
 
 func TestMultiProxyInvalidConfiguration(t *testing.T) {
 	for _, raw := range []string{
-		`[]`, `null`, `{}`, `[{"listen":"127.0.0.1:0","server":"ws://localhost/tunnel"}]`,
+		`null`, `{}`, `[{"listen":"127.0.0.1:0","server":"ws://localhost/tunnel"}]`,
 		`[{"listen":"127.0.0.1:19001","server":"http://localhost/tunnel"}]`,
 		`[{"listen":"127.0.0.1:19001","server":"ws://localhost/tunnel","password":""}]`,
 		`[{"listen":"127.0.0.1:19001","server":"ws://localhost/tunnel"},{"listen":"0.0.0.0:19001","server":"ws://localhost/tunnel"}]`,

@@ -677,7 +677,6 @@ test("relationship validation catches reconnect, sizes, heartbeat, TLS and share
       { admin_users_file: "same", admin_session_dir: "same", admin_setup_token_file: "token" },
       "admin_users_file",
     ],
-    [{ server: "", proxies: [] }, "server"],
     [{ path: "/admin/api" }, "path"],
   ]) {
     context.values = values;
@@ -2636,7 +2635,7 @@ test("client settings use feature navigation and retain drafts across sections",
   };
   context.featureFields = [
     {key:"proxies",kind:"proxies",mappings:[],group:"代理与通道"},
-    {key:"server",value:"ws://localhost:8080/tunnel",group:"代理与通道"},
+    {key:"tls-ca",value:"ca.pem",group:"代理与通道"},
     {key:"buffer-bytes",value:"4194304",group:"代理与通道",validation:{type:"integer",min:"0"}},
     {key:"noise-interval",value:"0s",group:"代理与通道"},
     {key:"vpn-mode",value:"disabled",group:"独立 VPN",validation:{choices:["disabled","only","both"]}},
@@ -2665,7 +2664,7 @@ test("client settings use feature navigation and retain drafts across sections",
   assert.equal(entry("proxies").rows[0].listen.value,"127.0.0.1:9001");
   vm.runInContext('showAdminTab("configuration","connection")', context);
   assert.deepEqual(shown(),["mappings","connection"]);
-  const server = entry("server").input;
+  const server = entry("tls-ca").input;
   server.value = "ws://localhost:9000/tunnel";
   server.listeners.input();
   vm.runInContext('showAdminTab("configuration","vpn")', context);
@@ -2676,8 +2675,8 @@ test("client settings use feature navigation and retain drafts across sections",
   assert.equal(vm.runInContext('vpnRestartButtons.length',context),1);
   assert.ok(elements.get("vpn-test-button") || vm.runInContext('vpnProbeState.button',context));
   vm.runInContext('showAdminTab("configuration","connection")', context);
-  assert.equal(entry("server").input,server);
-  assert.equal(vm.runInContext('configEdits().server', context),"ws://localhost:9000/tunnel");
+  assert.equal(entry("tls-ca").input,server);
+  assert.equal(vm.runInContext('configEdits()["tls-ca"]', context),"ws://localhost:9000/tunnel");
 
   const buffer = entry("buffer-bytes").input;
   buffer.value = "bad";

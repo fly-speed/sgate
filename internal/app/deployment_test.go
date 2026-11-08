@@ -390,7 +390,7 @@ func runManagementDeployment(t *testing.T, cb, sb string, secure bool, mode stri
 				common += "tls-cert = " + strconv.Quote(cert) + "\ntls-key = " + strconv.Quote(tlsKey) + "\n"
 			}
 		} else {
-			common += "server = " + wire + "://" + serverAddress + "/tunnel\nreconnect-min = 10ms\nreconnect-max = 30ms\n"
+			common += testClientMappingAt(t, business, wire+"://"+serverAddress+"/tunnel") + "reconnect-min = 10ms\nreconnect-max = 30ms\n"
 			if secure {
 				common += "tls-ca = " + strconv.Quote(cert) + "\n"
 			}

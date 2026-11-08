@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"flag"
 	"io"
@@ -52,7 +53,6 @@ func appFlags(role string) *flag.FlagSet {
 		fs.String("proxies-file", "", "")
 		fs.String("username", "", "")
 		fs.String("quic-mode", "native", "")
-		fs.String("server", "", "")
 		fs.String("addr", "", "")
 		fs.Bool("send-addr", true, "")
 		fs.Bool("allow-reverse", false, "")
@@ -137,7 +137,7 @@ func TestApplyRestartAndBindRollback(t *testing.T) {
 		t.Run(role, func(t *testing.T) {
 			content := "target = 127.0.0.1:1\n"
 			if role == "client" {
-				content = "server = ws://127.0.0.1:1/tunnel\n"
+				content = testClientMapping(t, "ws://127.0.0.1:1/tunnel")
 			}
 			c := newController(t, role, content)
 			first := c.worker
@@ -160,7 +160,11 @@ func TestApplyRestartAndBindRollback(t *testing.T) {
 			}
 			defer occupied.Close()
 			listenKey := "master_service"
-			setConfig(t, c, listenKey, occupied.Addr().String())
+			if role == "client" {
+				setConfig(t, c, "proxies", testClientMappingJSON(t, occupied.Addr().String(), "ws://127.0.0.1:1/tunnel"))
+			} else {
+				setConfig(t, c, listenKey, occupied.Addr().String())
+			}
 			if e = c.apply(); e == nil || !strings.Contains(e.Error(), "已恢复") {
 				t.Fatal("missing rollback", e)
 			}
@@ -179,7 +183,7 @@ func TestApplyKeepsCLIOverrideAndRejectsBadCandidate(t *testing.T) {
 	c := newController(
 		t,
 		"client",
-		("server = ws://127.0.0.1:1/tunnel\n" +
+		(testClientMapping(t, "ws://127.0.0.1:1/tunnel") + "" +
 			"noise-interval-min = 1s\n" +
 			"noise-interval-max = 3s\n"),
 		"-noise-interval-min",
@@ -244,7 +248,7 @@ func TestManagedClientServerDuplexAndStats(t *testing.T) {
 			if tlsMode {
 				scheme = "wss"
 			}
-			client := newController(t, "client", "server = "+scheme+"://"+server.worker.listener.Addr().String()+"/tunnel\n"+ca)
+			client := newController(t, "client", testClientMapping(t, scheme+"://"+server.worker.listener.Addr().String()+"/tunnel")+ca)
 			exchange := func() {
 				conn, e := net.DialTimeout("tcp", client.worker.listener.Addr().String(), time.Second)
 				if e != nil {
@@ -273,7 +277,7 @@ func TestManagedClientServerDuplexAndStats(t *testing.T) {
 			if e := server.apply(); e != nil {
 				t.Fatal(e)
 			}
-			setConfig(t, client, "server", scheme+"://"+server.worker.listener.Addr().String()+"/tunnel")
+			setConfig(t, client, "proxies", strings.TrimSuffix(strings.TrimPrefix(testClientMappingAt(t, client.current.listen, scheme+"://"+server.worker.listener.Addr().String()+"/tunnel"), "proxies = '"), "'\n"))
 			if e := client.apply(); e != nil {
 				t.Fatal(e)
 			}
@@ -286,4 +290,31 @@ func TestManagedClientServerDuplexAndStats(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Build current mapping-only fixtures. Ports are reserved per test rather than
+// relying on an implicit endpoint inherited from master_service/server.
+func testClientMapping(t *testing.T, endpoint string) string {
+	t.Helper()
+	return testClientMappingAt(t, "", endpoint)
+}
+func testClientMappingAt(t *testing.T, listen, endpoint string, reverse ...bool) string {
+	t.Helper()
+	if listen == "" {
+		listen = temporaryAddress(t)
+	}
+	route := clientProxy{Listen: listen, Server: endpoint}
+	if len(reverse) > 0 {
+		route.AllowReverse = reverse[0]
+	}
+	raw, err := json.Marshal([]clientProxy{route})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return "proxies = '" + string(raw) + "'\n"
+}
+
+func testClientMappingJSON(t *testing.T, listen, endpoint string) string {
+	t.Helper()
+	return strings.TrimSuffix(strings.TrimPrefix(testClientMappingAt(t, listen, endpoint), "proxies = '"), "'\n")
 }

@@ -16,7 +16,6 @@ type clientOptions struct {
 	adminEnabled      bool
 	vpnDiagnose       bool
 	adminConfig       string
-	server            string
 	proxies           string
 	proxiesFile       string
 	addr              string
@@ -58,18 +57,17 @@ func parseClientOptions() (clientOptions, error) {
 		"",
 		"separate Web management configuration (disabled when empty)",
 	)
-	flag.String("master_service", "127.0.0.1|9000", "single-proxy TCP listeners for standalone and acl_master modes (IP|port, comma-separated)")
+	flag.String("master_service", "127.0.0.1|9000", "framework TCP listeners; proxy endpoints are configured through proxies or proxies-file")
 	flag.String("quic-mode", "native", "QUIC protocol: native or legacy")
-	flag.StringVar(&options.server, "server", "", "server ws://, wss:// or quic:// URL (required unless proxies is set)")
 	flag.StringVar(&options.proxiesFile, "proxies-file", "", "external JSON mapping file; relative to the application config; created on startup if missing; overrides inline proxies")
-	flag.StringVar(&options.proxies, "proxies", "", "JSON array of listen/server/addr mappings; empty uses single-proxy settings")
+	flag.StringVar(&options.proxies, "proxies", "", "JSON array of listen/server/addr mappings; empty leaves the proxy idle")
 	flag.BoolVar(
 		&options.sendAddr,
 		"send-addr",
 		true,
 		"include backend addr in the request URL; false uses the server default",
 	)
-	flag.BoolVar(&options.allowReverse, "allow-reverse", false, "allow server reverse TCP connections in single-proxy mode (default denies; multi-proxy entries require their own allow_reverse)")
+	flag.BoolVar(&options.allowReverse, "allow-reverse", false, "reverse access is controlled by allow_reverse in each proxy mapping")
 	flag.StringVar(&options.addr, "addr", "", "optional server-side backend host:port; overrides server URL addr when nonempty")
 	flag.StringVar(&options.keyFile, "key-file", "", "shared key file (defaults to SGATE_KEY environment variable)")
 	flag.StringVar(&options.username, "username", "", "tunnel account username; empty uses legacy single-password authentication")

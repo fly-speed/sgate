@@ -20,7 +20,6 @@ type definition struct {
 	vpnOnly                        bool
 	accountsFile                   string
 	commonUsername, commonPassword string
-	commonAllowReverse             bool
 	listen                         string
 	quicListen                     string
 	client                         *tunnel.ClientConfig
@@ -70,7 +69,7 @@ func (d definition) startProxy(ctx context.Context, stats *tunnel.Stats) (*insta
 		return nil, err
 	}
 	d = d.withLiveSettings(live)
-	if len(d.proxies) > 0 && d.tcp == nil {
+	if len(d.proxies) > 1 && d.tcp == nil {
 		return nil, errors.New("multi-proxy requires the go-service TCP lifecycle")
 	}
 	if d.tcp != nil && d.tcp.Managed() && !d.vpnOnly {
@@ -110,7 +109,7 @@ func (d definition) startProxy(ctx context.Context, stats *tunnel.Stats) (*insta
 				conn.Close()
 			}
 		}()
-	} else if d.tcp != nil && (len(d.proxies) > 0 || d.client != nil) {
+	} else if len(d.proxies) > 0 || d.client != nil {
 		group, err := newClientProxyGroup(runCtx, l, d.clientRoutes(l.Addr().String()))
 		if err != nil {
 			l.Close()
@@ -119,17 +118,6 @@ func (d definition) startProxy(ctx context.Context, stats *tunnel.Stats) (*insta
 		}
 		i.proxies = group
 		go func() { i.err = group.run(); close(i.done) }()
-	} else if d.client != nil {
-		c, e := tunnel.NewClient(*d.client)
-		if e != nil {
-			l.Close()
-			cancel()
-			return nil, e
-		}
-		go func() {
-			i.err = c.Run(runCtx, l)
-			close(i.done)
-		}()
 	} else {
 		s, e := startTunnelServer(*d.server)
 		if e != nil {

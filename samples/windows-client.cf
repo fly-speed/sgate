@@ -2,7 +2,8 @@
 # Configure the proxy endpoint and VPN endpoint separately through the Web UI.
 service sgate-client {
     master_service = 127.0.0.1|9000
-    server = ws://127.0.0.1:8081/tunnel
+
+    proxies-file = sgate-proxies.json
     key-file = sgate.key
     password = 'replace-with-your-password'
     tls-ca = ''

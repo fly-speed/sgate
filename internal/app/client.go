@@ -87,6 +87,10 @@ func (c *Client) Err() error { return c.controller.tcp.Err() }
 
 // 托管模式只使用框架继承的端口，不能悄悄遗漏映射或接入未配置的端口。
 func validateProxyListeners(routes []clientProxy, addresses []string) error {
+	// acl_master may retain its bootstrap listeners while the mapping list is empty.
+	if len(routes) == 0 {
+		return nil
+	}
 	want := make(map[string]bool, len(routes))
 	seen := make(map[string]bool, len(routes))
 	for _, route := range routes {

@@ -12,7 +12,7 @@ func TestVPNLiveSavePreservesPendingStaticSettingsAndCLIOverrides(t *testing.T) 
 		t.Run(role, func(t *testing.T) {
 			text := "target = 127.0.0.1:1\n"
 			if role == "client" {
-				text = "server = ws://127.0.0.1:1/tunnel\n"
+				text = testClientMapping(t, "ws://127.0.0.1:1/tunnel")
 			}
 			c := newController(t, role, text, "-vpn-noise-rate=1K")
 			c.current.vpn = &vpn.Prepared{Role: role, Mode: "both", Fingerprint: "running-static", Config: vpn.Config{Address: "old.example:8444", Transport: "tcp", MTU: 1280, Noise: vpn.NoiseConfig{Rate: 1024}, MaxClients: 64}}

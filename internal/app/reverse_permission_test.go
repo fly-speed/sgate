@@ -32,10 +32,10 @@ func TestClientReversePermissionConfigIsIndependentAndDefaultsOff(t *testing.T) 
 	}{
 		{content: ""}, {content: "allow-reverse = true\n", want: true}, {content: "allow-reverse = true\n", args: []string{"-allow-reverse=false"}},
 	} {
-		single := proxyConfigController(t, "server = ws://localhost:8080/tunnel\nusername = alice\n"+test.content, test.args...)
+		single := proxyConfigController(t, "username = alice\n"+test.content, test.args...)
 		next, err := single.load("")
 		if err != nil || next.client.AllowReverse != test.want {
-			t.Fatal("single-proxy permission/CLI mismatch", err)
+			t.Fatal("common permission/CLI mismatch", err)
 		}
 	}
 }
@@ -169,7 +169,7 @@ func TestClientReversePermissionLiveRevocationIsolatedPerMapping(t *testing.T) {
 	}
 }
 
-func TestClientReversePermissionSingleFallbackDoesNotInheritOrApplyPendingEdits(t *testing.T) {
+func TestRemovingAllMappingsLeavesNoReverseRoutes(t *testing.T) {
 	for _, test := range []struct {
 		name            string
 		global, mapping bool
@@ -184,7 +184,7 @@ func TestClientReversePermissionSingleFallbackDoesNotInheritOrApplyPendingEdits(
 			address := onlineAddress(t)
 			routes := []clientProxy{{Listen: address, Server: "ws://127.0.0.1:1/tunnel", AllowReverse: test.mapping}}
 			raw, _ := json.Marshal(routes)
-			client := startOnlineController(t, "master_service = "+address+"\nserver = ws://127.0.0.1:1/tunnel\nallow-reverse = "+fmt.Sprint(test.global)+"\nproxies = '"+string(raw)+"'\n", false)
+			client := startOnlineController(t, "master_service = "+address+"\nallow-reverse = "+fmt.Sprint(test.global)+"\nproxies = '"+string(raw)+"'\n", false)
 			if test.pending != "" {
 				setConfig(t, client, "allow-reverse", test.pending)
 			}
@@ -192,8 +192,8 @@ func TestClientReversePermissionSingleFallbackDoesNotInheritOrApplyPendingEdits(
 			if err := client.applyLive([]string{"proxies"}); err != nil {
 				t.Fatal(err)
 			}
-			if client.current.client == nil || client.current.client.AllowReverse != test.want {
-				t.Fatal("single fallback inherited a mapping grant or applied a pending security edit")
+			if len(client.current.clientRoutes(client.current.listen)) != 0 {
+				t.Fatal("empty mappings retained an implicit route")
 			}
 		})
 	}

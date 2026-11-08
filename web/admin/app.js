@@ -97,6 +97,7 @@ function updateConfigSections(open = false) {
 // 字段值由服务端解析；浏览器不解析或拼接 .cf，避免破坏引号、注释与密码。
 function renderConfigFields(fields, runtime, role) {
   configRole = role || state.role || "";
+  if (configRole === "client") fields = fields.filter(field => field.key !== "server");
   proxyVPNModeOverride = (runtime.cli_overrides || []).includes("vpn-mode");
   appliedVPNMode = runtime.vpn_mode || "";
   vpnConfigSupport = runtime.vpn_support || null;
@@ -617,8 +618,6 @@ function configRelationErrors(values) {
   ])
     if (has(cert, key) && !!values[cert] !== !!values[key])
       fail([cert, key], t("证书与私钥路径须同时填写或同时留空"));
-  if (has("server") && values["vpn-mode"] !== "only" && !values.server && !values.proxies?.length)
-    fail(["server"], t("单代理模式需要服务端 URL；或先配置至少一个映射"));
   if (["both","only"].includes(values["vpn-mode"]) && vpnConfigSupport?.supported === false)
     fail(["vpn-mode"], t(vpnConfigSupport.reason) + " (" + vpnConfigSupport.os + ")");
   if (has("vpn-server") && ["both","only"].includes(values["vpn-mode"]) && !values["vpn-server"])
@@ -728,11 +727,11 @@ function renderProxyMappings(group, field, overridden, readOnly = false) {
   help.setAttribute("aria-live", "polite");
   const updateHelp = reason => localText(help, () => reason
     ? t(reason) + (field.description ? " " + t(field.description) : "")
-    : (t("每行将一个本地端口映射到远程服务。后端地址可选，须在服务端允许列表内；没有映射时使用下面的单代理配置。") +
+    : (t("每行将一个本地端口映射到远程服务。后端地址可选，须在服务端允许列表内；没有映射时不建立代理连接。") +
     (overridden ? t(" 当前映射来源受命令行覆盖，保存配置不会移除启动时的覆盖参数。") : "") +
     " " + t("每个映射可使用独立账号密码；关闭独立认证则继承公共凭据。测试使用本行认证和地址，密钥、TLS 和 send-addr 沿用生效设置。密码不会回显，留空保留已保存密码。") +
     " " + t("配置 proxies-file 后映射保存在独立 JSON 文件；留空继续使用内联 proxies。更改文件路径时自动迁移当前映射，已有文件则加载其映射。") +
-    " " + t("保存后自动在线更新映射并同步 master_service，未修改映射的连接继续保留。清空时使用单代理 master_service；托管模式端口变化会自动通过 acl_master 重启客户端，并中断当前业务连接。")));
+    " " + t("保存后自动在线更新映射并同步 master_service，未修改映射的连接继续保留。清空后停止全部代理映射；托管模式端口变化会自动通过 acl_master 重启客户端，并中断当前业务连接。")));
   const saveButton = document.createElement("button");
   saveButton.type = "button";
   saveButton.className = "secondary config-save";
@@ -757,7 +756,7 @@ function renderProxyMappings(group, field, overridden, readOnly = false) {
   entry.updateModeHelp = reason => {
     updateHelp(reason);
     badge.hidden = !!reason;
-    if (entry.empty) localText(entry.empty, () => t(reason ? "没有可显示的代理映射。" : "尚未添加映射，当前使用单代理配置。"));
+    if (entry.empty) localText(entry.empty, () => t(reason ? "没有可显示的代理映射。" : "尚未添加映射，添加后才建立代理连接。"));
   };
   entry.read = () =>
     entry.rows.map((row) => ({
@@ -787,7 +786,7 @@ function renderProxyMappings(group, field, overridden, readOnly = false) {
       const empty = document.createElement("p");
       empty.className = "muted";
       entry.empty = empty;
-      localText(empty, () => t(entry.readOnly ? "没有可显示的代理映射。" : "尚未添加映射，当前使用单代理配置。"));
+      localText(empty, () => t(entry.readOnly ? "没有可显示的代理映射。" : "尚未添加映射，添加后才建立代理连接。"));
       list.append(empty);
     }
     for (const value of values) {

@@ -41,7 +41,7 @@ PREFIX="$HOME/.local/sgate" ./install.sh
 
 服务端两种启动方式统一使用 `master_service = 127.0.0.1|8081`：独立模式由程序监听，托管模式由 acl_master 监听并传入句柄。无需再配置单独的 `listen`；设置 `tls-cert`、`tls-key` 后使用 HTTPS/WSS。
 
-客户端单代理同样统一使用 `master_service = 127.0.0.1|9000`，不再接受 `listen` 或 `-listen`。首次安装的 `conf/sgate-proxies.json` 初始化为 `[]`，使用 .cf 中的单代理地址、服务端和后端配置；仅在添加多代理映射后才使用 JSON 中各条 `listen`。升级会保留已有映射文件。
+客户端只通过端口映射建立代理连接，不再接受独立 `server` 配置项或 `-server` 参数。首次安装的 `conf/sgate-proxies.json` 初始化为 `[]`，客户端保持空闲；在前端添加映射后，使用各条映射的 `listen`、`server` 和可选 `addr`，并自动同步框架 `master_service`。已有独立 `server` 配置需删除并改为端口映射。
 
 1. 在安装目录的 `conf/sgate-client.cf` 和 `conf/sgate-server.cf` 中，把示例 `password` 改成相同的自选密码。同一安装目录下的两端共用 `conf/sgate.key`。
 2. 分别打开三个终端，运行下面的三个程序（HTTP 后端需要 Python 3）。若用的是系统级安装，将 `$HOME/.local/sgate` 换成实际安装目录，并以有权读取配置的用户运行。

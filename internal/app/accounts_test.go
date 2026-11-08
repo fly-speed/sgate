@@ -62,7 +62,7 @@ func TestAccountFlagsPreserveCLIAndClientMappingCredentials(t *testing.T) {
 	if len(next.server.Accounts) != 1 || next.server.Accounts[0].Username != "cli-user" {
 		t.Fatal("CLI account file priority lost")
 	}
-	client := newController(t, "client", "server = ws://127.0.0.1:1/tunnel\nusername = file-user\n", "-username", "cli-user")
+	client := newController(t, "client", testClientMapping(t, "ws://127.0.0.1:1/tunnel")+"username = file-user\n", "-username", "cli-user")
 	setConfig(t, client, "username", "new-file-user")
 	next, err = client.load("")
 	if err != nil || next.client.Username != "cli-user" {
@@ -92,7 +92,7 @@ func TestClientSavedCredentialsApplyToServerConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	url := "ws://" + server.worker.listener.Addr().String() + "/tunnel"
-	client := newController(t, "client", "server = "+url+"\n")
+	client := newController(t, "client", testClientMapping(t, url))
 	setConfig(t, client, "username", "alice")
 	setConfig(t, client, "password", "alice-secret")
 	if err := client.apply(); err != nil {
@@ -101,7 +101,7 @@ func TestClientSavedCredentialsApplyToServerConnection(t *testing.T) {
 	if client.current.client.Username != "alice" || client.current.client.Password != "alice-secret" {
 		t.Fatal("saved credentials not applied to client")
 	}
-	probe, err := tunnel.NewClient(*client.current.client)
+	probe, err := tunnel.NewClient(client.current.proxies[0].config)
 	if err != nil {
 		t.Fatal(err)
 	}

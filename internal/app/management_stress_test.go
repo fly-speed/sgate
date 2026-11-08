@@ -187,7 +187,7 @@ func TestManagementRepeatedSaveRestartDuplexResources(t *testing.T) {
 			client := newController(
 				t,
 				"client",
-				"master_service = "+temporaryAddress(t)+"\nserver = "+scheme+"://"+server.worker.listener.Addr().String()+"/tunnel\n"+ca+noise,
+				testClientMapping(t, scheme+"://"+server.worker.listener.Addr().String()+"/tunnel")+ca+noise,
 				"-noise-interval-min",
 				"0",
 				"-noise-interval-max",
@@ -292,7 +292,7 @@ func TestManagementRepeatedSaveRestartDuplexResources(t *testing.T) {
 				priorClient, priorServer := client.stats.Snapshot(), server.stats.Snapshot()
 				sa.save(t, func(s string) string { return s + fmt.Sprintf("\n# server generation %d\n", round) }, 200)
 				caAPI.save(t, func(s string) string {
-					s = replaceSetting(s, "server", scheme+"://"+server.worker.listener.Addr().String()+"/tunnel")
+					s = replaceSetting(s, "proxies", "'"+testClientMappingJSON(t, client.current.listen, scheme+"://"+server.worker.listener.Addr().String()+"/tunnel")+"'")
 					s = replaceSetting(s, "noise-interval-min", "10ms")
 					return s + fmt.Sprintf("\n# client generation %d\n", round)
 				}, 200)
@@ -323,7 +323,9 @@ func TestManagementRepeatedSaveRestartDuplexResources(t *testing.T) {
 					before, _ := os.ReadFile(client.path)
 					oldAddress := client.worker.listener.Addr().String()
 					generation := client.generation
-					caAPI.save(t, func(s string) string { return replaceSetting(s, "master_service", occupied.Addr().String()) }, 409)
+					caAPI.save(t, func(s string) string {
+						return replaceSetting(s, "proxies", "'"+testClientMappingJSON(t, occupied.Addr().String(), scheme+"://"+server.worker.listener.Addr().String()+"/tunnel")+"'")
+					}, 409)
 					occupied.Close()
 					after, _ := os.ReadFile(client.path)
 					if !bytes.Equal(before, after) || client.generation != generation ||
@@ -351,7 +353,7 @@ func TestManagementRepeatedSaveRestartDuplexResources(t *testing.T) {
 				return replaceSetting(s, "noise-interval-max", "0")
 			}, 200)
 			caAPI.save(t, func(s string) string {
-				return replaceSetting(s, "server", scheme+"://"+server.worker.listener.Addr().String()+"/tunnel")
+				return replaceSetting(s, "proxies", "'"+testClientMappingJSON(t, client.current.listen, scheme+"://"+server.worker.listener.Addr().String()+"/tunnel")+"'")
 			}, 200)
 			exchange(200)
 			stable := func() {

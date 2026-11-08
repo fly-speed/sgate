@@ -5,39 +5,30 @@ import (
 	"path/filepath"
 	"testing"
 
-	"sgate/internal/tunnel"
+	"sgate/internal/cli"
 )
 
-func TestEmptyProxyFileUsesMasterService(t *testing.T) {
+func TestEmptyProxyFileNeverCreatesImplicitRoute(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "routes.json")
-	if err := os.WriteFile(path, []byte("[]\n"), 0600); err != nil {
+	os.WriteFile(path, []byte("[]\n"), 0600)
+	c := proxyConfigController(t, "master_service = 127.0.0.1|1982\nproxies-file = "+path+"\n")
+	d, err := c.load("")
+	if err != nil {
 		t.Fatal(err)
 	}
-	for _, address := range []string{"|1982", "0.0.0.0|1982"} {
-		c := proxyConfigController(t, "master_service = "+address+"\nserver = ws://localhost:8081/tunnel\nproxies-file = "+path+"\n")
-		d, err := c.load("")
-		if err != nil {
-			t.Fatal(err)
-		}
-		routes := d.clientRoutes(d.listen)
-		if d.client == nil || len(d.proxies) != 0 || len(routes) != 1 || routes[0].port != "1982" {
-			t.Fatal(address, d.listen, routes)
-		}
-		if err := validateProxyListeners(routes, []string{"127.0.0.1:1982", "192.168.1.28:1982"}); err != nil {
-			t.Fatal(err)
-		}
-		c.args = append(c.args, "-master_service", "127.0.0.1|1983")
-		d, err = c.load("")
-		if err != nil || d.listen != "127.0.0.1:1983" {
-			t.Fatal("CLI override lost", d.listen, err)
-		}
+	if len(d.clientRoutes(d.listen)) != 0 || d.client.URL != "" {
+		t.Fatal("empty mappings created an implicit route")
 	}
 }
-
-func TestSingleProxyRoutesShareBackendAcrossMasterListeners(t *testing.T) {
-	d := definition{listen: "127.0.0.1:1982, [::1]:1982, 127.0.0.1:1983", client: &tunnel.ClientConfig{URL: "wss://localhost:8081/tunnel"}}
-	routes := d.clientRoutes(d.listen)
-	if len(routes) != 2 || routes[0].port != "1982" || routes[1].port != "1983" || routes[0].Server != routes[1].Server {
-		t.Fatal(routes)
+func TestClientRejectsRemovedServerOption(t *testing.T) {
+	for _, content := range []string{"server = ws://localhost/tunnel\n", "server = ''\n", "service client {\nserver = ws://localhost/tunnel\n}\n"} {
+		path := filepath.Join(t.TempDir(), "client.cf")
+		os.WriteFile(path, []byte(content), 0600)
+		if err := cli.Parse(appFlags("client"), []string{"-config", path}); err == nil {
+			t.Fatal("removed server option accepted")
+		}
+	}
+	if err := cli.Parse(appFlags("client"), []string{"-server", "ws://localhost/tunnel"}); err == nil {
+		t.Fatal("removed -server accepted")
 	}
 }

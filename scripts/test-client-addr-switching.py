@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise client addr precedence and hot switching with 128 real TCP streams."""
+"""Exercise mapping backend selection and CLI mapping precedence with 128 TCP streams."""
 
 import argparse
 import collections
@@ -31,22 +31,22 @@ class Case(multi.Case):
             self.ports[role + "-admin"] = admin_port
             config = self.configs[role]
             text = config.read_text()
-            # Start all three with a stale URL selection. File, CLI, and explicit
-            # empty CLI select three different precedence branches.
+            # Exercise file mapping edits and whole-list CLI overrides.
+            # client2 keeps its CLI URL even when the file URL changes.
             lines = [
                 line
                 for line in text.splitlines()
-                if not line.startswith(("server =", "addr =", "master_args ="))
+                if not line.startswith(("proxies =", "master_args ="))
             ]
             self.client_flags[role] = (
-                [] if index == 0 else ["-addr", self.targets["B"]] if index == 1 else ["-addr="]
+                [] if index == 0 else ["-proxies", self.mapping(role, self.url("C"), self.targets["B"] if index == 1 else "")]
             )
             if self.args.send_addr_toggle:
                 if index != 0:
                     self.client_flags[role] += ["-send-addr=" + ("true" if index == 1 else "false")]
             settings = (
                 f'master_args = -noise-min-bytes 256 {" ".join(self.client_flags[role])}\n'
-                f'server = "{self.url("C")}"\naddr = {self.targets["B" if index != 1 else "A"]}\n'
+                "proxies = '" + self.mapping(role, self.url("C"), self.targets["B" if index != 1 else "A"]) + "'\n" +
                 f"admin_enabled = true\nadmin_listen = 127.0.0.1:{admin_port}\n"
                 f"admin_web_dir = {multi.ROOT}/web/admin\n"
                 f"admin_users_file = {self.root}/{role}-users.json\n"
@@ -90,7 +90,7 @@ class Case(multi.Case):
             )
             multi.eventually(admin.authenticated)
             if self.client_flags[role]:
-                assert "addr" in admin.runtime()["cli_overrides"], admin.runtime()
+                assert "proxies" in admin.runtime()["cli_overrides"], admin.runtime()
             if self.args.require_client_framework:
                 runtime = admin.runtime()
                 assert runtime["tcp_framework"] == "go-service", runtime
@@ -126,7 +126,15 @@ class Case(multi.Case):
             )
         return rows
 
+    def mapping(self, role, endpoint, addr):
+        return json.dumps([{"listen": f"127.0.0.1:{self.ports[role]}", "server": endpoint, "addr": addr}], separators=(",", ":"))
+
     def apply_role(self, role, edits, status=200):
+        if role != "server" and ("addr" in edits or "server" in edits):
+            edits = dict(edits)
+            fields = self.admins[role].call("config")["fields"]
+            current = json.loads(next(field["value"] for field in fields if field["key"] == "proxies"))[0]
+            edits["proxies"] = self.mapping(role, edits.pop("server", current["server"]), edits.pop("addr", current.get("addr", "")))
         admin = self.admins[role]
         cfg = admin.call("config")
         generation = cfg["runtime"]["generation"]
@@ -295,8 +303,8 @@ class Case(multi.Case):
         )
         baseline = self.census("baseline")
         self.wave(0)
-        # Empty file addr falls back to the original URL; nonempty/empty CLI
-        # overrides stay effective even when the saved file changes.
+        # Empty mapping addr falls back to its URL; CLI lists stay effective
+        # even when the saved file changes.
         self.switch(
             "preserve-url",
             {
@@ -313,7 +321,7 @@ class Case(multi.Case):
                 "client0": {"addr": "", "server": self.url()},
                 "client2": {"addr": self.targets["D"], "server": self.url()},
             },
-            [None, "B", None],
+            [None, "B", "C"],
         )
         self.wave(2)
         self.apply_role("client0", {"addr": "localhost:0"}, status=400)
@@ -330,12 +338,12 @@ class Case(multi.Case):
         assert self.backends["D"].active() == 0 and not self.backends["D"].errors
         self.census("denied-idle", connected=False)
         self.apply_role("server", {"allowed-targets": ",".join(self.targets.values())})
-        self.choices = ["D", "B", None]
+        self.choices = ["D", "B", "C"]
         self.drained()
         self.wave(3)
-        self.switch("clear-addr-after-allowlist", {"client0": {"addr": ""}}, [None, "B", None])
+        self.switch("clear-addr-after-allowlist", {"client0": {"addr": ""}}, [None, "B", "C"])
         self.switch(
-            "server-default-update", {"server": {"target": self.targets["D"]}}, [None, "B", None]
+            "server-default-update", {"server": {"target": self.targets["D"]}}, [None, "B", "C"]
         )
         self.default = "D"
         self.wave(4)

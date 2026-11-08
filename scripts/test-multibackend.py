@@ -264,13 +264,12 @@ class Case:
                 )
                 if self.args.selection == "addr" and index != 0:
                     query = "?addr=" + urllib.parse.quote(self.targets["A"], safe="") + "&keep=1"
-                application += f'server = "{self.args.tls}://127.0.0.1:{self.relay.port}/tunnel{query}"\noffline-timeout = 6s\n'
+                route = {"listen": f"127.0.0.1:{self.ports[role]}", "server": f"{self.args.tls}://127.0.0.1:{self.relay.port}/tunnel{query}"}
                 if self.args.selection == "addr" and index != 0:
-                    # client1 使用文件 addr；client2 用命令行覆盖文件的另一个目标。
-                    selected = self.targets["B"] if index == 1 else self.targets["A"]
-                    application += f"addr = {selected}\n"
+                    route["addr"] = self.targets["B" if index == 1 else "A"]
                     if index == 2:
-                        self.client_flags[role] = ["-addr", self.targets["C"]]
+                        self.client_flags[role] = ["-proxies", json.dumps([{**route, "addr": self.targets["C"]}], separators=(",", ":"))]
+                application += "proxies = '" + json.dumps([route]) + "'\noffline-timeout = 6s\n"
                 if self.args.tls == "wss":
                     application += f"tls-ca = {self.cert}\n"
             write(

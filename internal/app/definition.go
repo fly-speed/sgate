@@ -71,26 +71,33 @@ func build(role string, fs *flag.FlagSet, stats *tunnel.Stats) (definition, erro
 	if role == "client" {
 		d.commonUsername = values.optionalText("username")
 		d.commonPassword = values.text("password")
-		d.commonAllowReverse = values.optionalText("allow-reverse") == "true"
 	}
-	if role == "client" && (strings.TrimSpace(values.optionalText("proxies")) != "" || values.optionalText("proxies-file") != "") {
+	if role == "client" {
 		secret, err := cli.LoadKey(values.text("key-file"))
 		if err != nil {
 			return d, err
 		}
+		tlsConfig, err := clientTLSConfig(values.text("tls-ca"))
+		if err != nil {
+			return d, err
+		}
+		common := values.clientSettings(secret, values.options(stats))
+		common.TLSConfig = tlsConfig
+		d.client = &common // Shared settings only; never an implicit proxy route.
 		d.proxies, err = values.multiClientConfigs(secret, values.options(stats))
 		if err != nil {
 			return d, err
 		}
-		addresses := make([]string, len(d.proxies))
-		for index, route := range d.proxies {
-			addresses[index] = route.Listen
-		}
-		if len(addresses) > 0 {
+		if len(d.proxies) > 0 {
+			addresses := make([]string, len(d.proxies))
+			for index, route := range d.proxies {
+				addresses[index] = route.Listen
+			}
 			d.listen = strings.Join(addresses, ",")
-			return d, nil
 		}
+		return d, nil
 	}
+
 	for _, address := range strings.Split(d.listen, ",") {
 		_, port, err := net.SplitHostPort(strings.TrimSpace(address))
 		if err != nil {
@@ -105,29 +112,25 @@ func build(role string, fs *flag.FlagSet, stats *tunnel.Stats) (definition, erro
 		return d, err
 	}
 	options := values.options(stats)
-	if role == "client" {
-		d.client, err = values.clientConfig(secret, options)
-	} else {
-		d.server, d.tls, err = values.serverConfig(secret, options)
-		d.quicListen = values.optionalText("quic-listen")
-		if err == nil && d.quicListen != "" {
-			if d.tls == nil {
-				return d, errors.New("quic-listen requires tls-cert and tls-key")
-			}
-			if _, port, e := net.SplitHostPort(d.quicListen); e != nil {
-				return d, errors.New("quic-listen must be host:port")
-			} else if p, e := strconv.Atoi(port); e != nil || p < 0 || p > 65535 {
-				return d, errors.New("quic-listen port must be in 0..65535")
-			}
+	d.server, d.tls, err = values.serverConfig(secret, options)
+	d.quicListen = values.optionalText("quic-listen")
+	if err == nil && d.quicListen != "" {
+		if d.tls == nil {
+			return d, errors.New("quic-listen requires tls-cert and tls-key")
 		}
-		d.accountsFile = values.accountPath()
-		if err == nil {
-			d.listen, err = serverHTTPListeners(d.listen, d.server.Accounts)
-			if err != nil {
-				return d, err
-			}
-			err = admin.ValidateReverseTunnelPorts(d.server.Accounts, d.listen)
+		if _, port, e := net.SplitHostPort(d.quicListen); e != nil {
+			return d, errors.New("quic-listen must be host:port")
+		} else if p, e := strconv.Atoi(port); e != nil || p < 0 || p > 65535 {
+			return d, errors.New("quic-listen port must be in 0..65535")
 		}
+	}
+	d.accountsFile = values.accountPath()
+	if err == nil {
+		d.listen, err = serverHTTPListeners(d.listen, d.server.Accounts)
+		if err != nil {
+			return d, err
+		}
+		err = admin.ValidateReverseTunnelPorts(d.server.Accounts, d.listen)
 	}
 	return d, err
 }
@@ -157,19 +160,6 @@ func (v configValues) options(stats *tunnel.Stats) tunnel.Options {
 	}
 }
 
-func (v configValues) clientConfig(secret []byte, options tunnel.Options) (*tunnel.ClientConfig, error) {
-	tlsConfig, err := clientTLSConfig(v.text("tls-ca"))
-	if err != nil {
-		return nil, err
-	}
-	config := v.clientSettings(secret, options)
-	config.TLSConfig = tlsConfig
-	if _, err := tunnel.NewClient(config); err != nil {
-		return nil, err
-	}
-	return &config, nil
-}
-
 func (v configValues) clientSettings(secret []byte, options tunnel.Options) tunnel.ClientConfig {
 	return tunnel.ClientConfig{
 		QUICMode:       v.optionalText("quic-mode"),
@@ -177,7 +167,6 @@ func (v configValues) clientSettings(secret []byte, options tunnel.Options) tunn
 		AllowReverse:   v.optionalText("allow-reverse") == "true",
 		Password:       v.text("password"),
 		Username:       v.optionalText("username"),
-		URL:            v.text("server"),
 		Addr:           v.text("addr"),
 		OmitAddr:       v.text("send-addr") == "false",
 		ReconnectMin:   v.duration("reconnect-min"),

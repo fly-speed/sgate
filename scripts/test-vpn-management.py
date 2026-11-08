@@ -116,7 +116,7 @@ def main():
                 view = call("config")
                 content = config.read_text().replace("vpn-mode = only", "vpn-mode = disabled")
                 content = content.replace(f"proxies-file = {root}/must-not-be-created.json", "proxies-file = ''")
-                content = content.replace("\n}", "\n server = ws://127.0.0.1:9/tunnel\n password = vpn-web-proxy-test\n}")
+                content = content.replace("\n}", "\n password = vpn-web-proxy-test\n}")
                 call("config", {"revision": view["revision"], "content": content, "apply": True}, "PUT")
                 assert call("stats")["health"]["vpn"]["state"] == "disabled"
                 assert call("config")["runtime"]["pid"] == pid

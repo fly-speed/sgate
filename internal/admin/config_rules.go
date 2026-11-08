@@ -69,6 +69,7 @@ func configurationRules() map[string]configRule {
 	add("vpn-udp-listen", configRule{Type: "listen", Hint: "纯 UDP VPN 监听，与 QUIC 分开 UDP 端口；业务包不重传，使用共享密钥加密。"})
 	add("vpn-tcp-listen", configRule{Type: "listen", Hint: "可选 TLS/TCP 与 WSS 共用监听，可与 VPN UDP 使用同一数字端口；两种监听至少填写一个。"})
 	add("vpn-tcp-notsent-lowat", configRule{Type: "bytes", Min: "0", Max: "1048576", Hint: "Linux VPN TCP/WSS 套接字未发送数据水位，支持 K/M，0 使用系统默认，最大 1M。"})
+	add("server", configRule{Type: "url", Hint: "端口映射中的 ws://、wss:// 或 quic:// 远程地址。"})
 	add("vpn-server", configRule{Type: "vpn-url", Hint: "udp://、quic://、tcp:// 或 wss://主机:端口/vpn；UDP 对应 vpn-udp-listen，TCP/WSS 对应 vpn-tcp-listen。"})
 	add("vpn-network vpn-client-ip vpn-routes vpn-dns vpn-tun-name vpn-dns-service vpn-egress-interface", configRule{Type: "text", Hint: "由 VPN 配置校验器检查；保存不创建网络设备，应用后生效。"})
 	add("vpn-accounts-file vpn-credentials-file", configRule{Type: "file", Hint: "VPN 专用账号 JSON 文件；相对路径按配置文件目录解析，配置路径后启用账号认证。"})
@@ -79,7 +80,6 @@ func configurationRules() map[string]configRule {
 	add("quic-listen", configRule{Type: "listen", Hint: "可选 UDP 监听地址，需配置 tls-cert/tls-key；更改后重启进程。"})
 	add("target", configRule{Type: "address", Required: true, Hint: "IP或域名:端口，端口范围 1～65535；IPv6 使用 [地址]:端口。"})
 	add("addr", configRule{Type: "address", Hint: "留空保留 URL 中的 addr；URL 也无 addr 时使用默认后端。填写 IP或域名:端口，端口范围 1～65535。"})
-	add("server", configRule{Type: "url", Hint: "ws://、wss:// 或 quic:// URL，例如 wss://example.com:443/tunnel；配置多端口映射时可留空。"})
 	add("allowed-targets", configRule{Type: "addresses", Hint: "逗号分隔的 IP或域名:端口；端口范围 1～65535；留空禁止客户端选后端。"})
 	add("master_service", configRule{Type: "listeners", Required: true, Hint: "框架监听格式：IP|端口，多项用逗号分隔，IPv6 用 [地址]|端口；TCP 端口范围 1～65535。unix 类型使用绝对套接字路径。"})
 	add("path", configRule{Type: "route", Hint: "以 / 开头的 URL 路径，不含 ? 或 #；留空使用 /tunnel；不能占用 /admin 管理路径。"})
@@ -249,7 +249,7 @@ func validateFormAddress(value string, listen bool) error {
 // 只发布参数类型，不包含命令行的真实取值或密码。
 func argumentOptions(role string) map[string]configRule {
 	options := map[string]configRule{}
-	clientOnly := " vpn-credentials-file vpn-server vpn-client-ip vpn-tls-ca vpn-tls-skip-verify vpn-routes vpn-dns vpn-dns-service vpn-block-ipv6 quic-mode username proxies proxies-file server addr send-addr allow-reverse tls-ca reconnect-min reconnect-max offline-timeout "
+	clientOnly := " vpn-credentials-file vpn-server vpn-client-ip vpn-tls-ca vpn-tls-skip-verify vpn-routes vpn-dns vpn-dns-service vpn-block-ipv6 quic-mode username proxies proxies-file addr send-addr allow-reverse tls-ca reconnect-min reconnect-max offline-timeout "
 	serverOnly := " vpn-accounts-file vpn-quic-listen vpn-udp-listen vpn-tcp-listen vpn-tls-cert vpn-tls-key vpn-max-clients vpn-egress-interface vpn-allow-private quic-listen accounts-file target allowed-targets path tls-cert tls-key session-ttl max-sessions "
 	for key, rule := range configRules {
 		if (strings.Contains(key, "_") && key != "master_service") || key == "master_args" || strings.HasPrefix(key, "app_") {
@@ -258,7 +258,7 @@ func argumentOptions(role string) map[string]configRule {
 		if role == "client" && strings.Contains(serverOnly, " "+key+" ") {
 			continue
 		}
-		if key == "listen" || (role == "server" && strings.Contains(clientOnly, " "+key+" ")) {
+		if key == "listen" || key == "server" || (role == "server" && strings.Contains(clientOnly, " "+key+" ")) {
 			continue
 		}
 		rule.Options = nil

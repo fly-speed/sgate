@@ -28,7 +28,7 @@ func TestStartupInitializesMissingProxyFile(t *testing.T) {
 			name = "inline-seed"
 		}
 		t.Run(name, func(t *testing.T) {
-			text := "server = ws://localhost/tunnel\nproxies-file = nested/routes.json\n"
+			text := "proxies-file = nested/routes.json\n"
 			if inline {
 				text += `proxies = '[{"listen":"127.0.0.1:19001","server":"ws://localhost/tunnel","username":"alice","password":"private-test-secret"}]'` + "\n"
 			}
@@ -58,7 +58,7 @@ func TestStartupInitializesMissingProxyFile(t *testing.T) {
 					t.Fatal("inline settings not migrated")
 				}
 			} else if strings.TrimSpace(string(data)) != "[]" || client.initial.client == nil {
-				t.Fatal("empty initialization lost single-proxy settings")
+				t.Fatal("empty initialization must retain an idle common template")
 			}
 			st, _ := os.Stat(path)
 			if runtime.GOOS != "windows" && st.Mode().Perm() != 0600 {
@@ -79,7 +79,7 @@ func TestStartupInitializesMissingProxyFile(t *testing.T) {
 }
 
 func TestStartupProxyFileCLIAndExistingInvalidFile(t *testing.T) {
-	c := proxyConfigController(t, "server = ws://localhost/tunnel\nproxies-file = ignored.json\n", "-proxies=")
+	c := proxyConfigController(t, testClientMapping(t, "ws://localhost/tunnel")+"proxies-file = ignored.json\n", "-proxies=")
 	client, err := startupClient(t, c)
 	if err != nil {
 		t.Fatal(err)

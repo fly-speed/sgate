@@ -8,7 +8,7 @@ import (
 )
 
 func TestVPNServerSaveReconnectsOnlyVPNAndPreservesPendingMTU(t *testing.T) {
-	c := newController(t, "client", "server = ws://127.0.0.1:1/tunnel\n")
+	c := newController(t, "client", testClientMapping(t, "ws://127.0.0.1:1/tunnel")+"")
 	setConfig(t, c, "vpn-mode", "both")
 	setConfig(t, c, "vpn-server", "tcp://127.0.0.1:8444/vpn")
 	next, err := c.load("")
@@ -45,7 +45,7 @@ func TestVPNServerSaveReconnectsOnlyVPNAndPreservesPendingMTU(t *testing.T) {
 	}
 }
 func TestVPNServerSaveWhileStoppedDoesNotStartVPN(t *testing.T) {
-	c := newController(t, "client", "server = ws://127.0.0.1:1/tunnel\n")
+	c := newController(t, "client", testClientMapping(t, "ws://127.0.0.1:1/tunnel")+"")
 	setConfig(t, c, "vpn-mode", "both")
 	setConfig(t, c, "vpn-server", "tcp://127.0.0.1:8444/vpn")
 	next, err := c.load("")
@@ -71,7 +71,7 @@ func TestVPNServerSaveWhileStoppedDoesNotStartVPN(t *testing.T) {
 	}
 }
 func TestScopedVPNRestartRejectsProxyModeTransitionBeforeStopping(t *testing.T) {
-	c := newController(t, "client", "server = ws://127.0.0.1:1/tunnel\n")
+	c := newController(t, "client", testClientMapping(t, "ws://127.0.0.1:1/tunnel")+"")
 	setConfig(t, c, "vpn-mode", "only")
 	setConfig(t, c, "vpn-server", "tcp://127.0.0.1:8444/vpn")
 	worker, generation := c.worker, c.generation
@@ -81,7 +81,7 @@ func TestScopedVPNRestartRejectsProxyModeTransitionBeforeStopping(t *testing.T) 
 }
 
 func TestScopedVPNRestartAppliesSavedVPNButNotProxySettings(t *testing.T) {
-	c := newController(t, "client", "server = ws://127.0.0.1:1/tunnel\nheartbeat = 20s\n")
+	c := newController(t, "client", testClientMapping(t, "ws://127.0.0.1:1/tunnel")+"heartbeat = 20s\n")
 	setConfig(t, c, "vpn-mode", "both")
 	setConfig(t, c, "vpn-server", "tcp://127.0.0.1:8444/vpn")
 	definition, err := c.load("")

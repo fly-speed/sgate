@@ -55,7 +55,7 @@ func TestMappingProbeUsesEffectiveSettingsAndDraftAddresses(t *testing.T) {
 		for _, multi := range []bool{false, true} {
 			for _, send := range []bool{false, true} {
 				t.Run(fmt.Sprintf("managed=%t/multi=%t/send=%t", managed, multi, send), func(t *testing.T) {
-					text := "server = ws://unused.invalid/tunnel\nsend-addr = true\n"
+					text := "send-addr = true\n"
 					if multi {
 						text += "proxies = '[{\"listen\":\"127.0.0.1:9000\",\"server\":\"ws://unused.invalid/tunnel\"}]'\n"
 					}

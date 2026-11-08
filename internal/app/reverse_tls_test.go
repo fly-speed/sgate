@@ -53,7 +53,7 @@ func TestReverseTLSReusesActualTunnelCertificate(t *testing.T) {
 	if _, err = c.manageTunnelAccounts(&admin.TunnelAccountChange{Action: "create", Revision: snapshot.Revision, Username: "alice", Password: "secret", ReverseMappings: &mappings}); err != nil {
 		t.Fatal(err)
 	}
-	newController(t, "client", "server = wss://"+c.worker.listener.Addr().String()+"/tunnel\nusername = alice\nallow-reverse = true\ntls-ca = "+cert+"\nreconnect-min = 10ms\nreconnect-max = 20ms\n", "-password", "secret")
+	newController(t, "client", testClientMappingAt(t, "", "wss://"+c.worker.listener.Addr().String()+"/tunnel", true)+"username = alice\ntls-ca = "+cert+"\nreconnect-min = 10ms\nreconnect-max = 20ms\n", "-password", "secret")
 	pemData, err := os.ReadFile(cert)
 	if err != nil {
 		t.Fatal(err)

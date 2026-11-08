@@ -1,6 +1,8 @@
 package app
 
 import (
+	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -43,34 +45,41 @@ func TestAllowedTargetsConfigApplyAndCLIOverride(t *testing.T) {
 	}
 }
 
-func TestClientAddrConfigApplyAndCLIOverride(t *testing.T) {
-	for _, address := range []string{"file", "localhost:8089", ""} {
-		t.Run("override-"+address, func(t *testing.T) {
+func TestClientMappingBackendConfigApplyAndCLIOverride(t *testing.T) {
+	for _, override := range []bool{false, true} {
+		t.Run(fmt.Sprint(override), func(t *testing.T) {
+			listen := temporaryAddress(t)
+			mapping := func(addr string) string {
+				raw, _ := json.Marshal([]clientProxy{{Listen: listen, Server: "ws://127.0.0.1:1/tunnel?addr=localhost:80", Addr: addr}})
+				return string(raw)
+			}
 			var args []string
+			if override {
+				args = []string{"-proxies", mapping("localhost:8089")}
+			}
+			c := newController(t, "client", "proxies = '"+mapping("localhost:8088")+"'\n", args...)
 			want := "localhost:8088"
-			if address != "file" {
-				args = []string{"-addr=" + address}
-				want = address
+			if override {
+				want = "localhost:8089"
 			}
-			c := newController(t, "client", "server = ws://127.0.0.1:1/tunnel?addr=127.0.0.1:80\naddr = localhost:8088\n", args...)
-			if c.current.client.Addr != want {
-				t.Fatal("addr priority mismatch")
+			if c.current.proxies[0].config.Addr != want {
+				t.Fatal("mapping backend priority")
 			}
-			setConfig(t, c, "addr", "localhost:8090")
+			setConfig(t, c, "proxies", mapping("localhost:8090"))
 			if err := c.apply(); err != nil {
 				t.Fatal(err)
 			}
-			if address == "file" {
+			if !override {
 				want = "localhost:8090"
 			}
-			if c.current.client.Addr != want {
-				t.Fatal("addr override lost on apply")
+			if c.current.proxies[0].config.Addr != want {
+				t.Fatal("mapping override lost")
 			}
-			if address == "file" {
+			if !override {
 				old := c.worker
-				setConfig(t, c, "addr", "localhost:0")
+				setConfig(t, c, "proxies", mapping("localhost:0"))
 				if err := c.apply(); err == nil || c.worker != old {
-					t.Fatal("invalid addr replaced running client")
+					t.Fatal("invalid mapping replaced worker")
 				}
 			}
 		})
@@ -84,7 +93,7 @@ func TestClientSendAddrConfigApplyAndCLIOverride(t *testing.T) {
 			if override != "file" {
 				args = []string{"-send-addr=" + override}
 			}
-			c := newController(t, "client", "server = ws://127.0.0.1:1/tunnel?addr=localhost:80\naddr = localhost:81\nsend-addr = false\n", args...)
+			c := newController(t, "client", testClientMapping(t, "ws://127.0.0.1:1/tunnel?addr=localhost:80")+"addr = localhost:81\nsend-addr = false\n", args...)
 			if c.current.client.OmitAddr != (override != "true") {
 				t.Fatal("send-addr priority mismatch")
 			}

@@ -545,7 +545,7 @@ def run(args, secure):
         listen_value = ", ".join(f"{'' if getattr(args, role + '_wildcard', False) else '127.0.0.1'}|{p}" for p in addresses[role])
         settings = f"{listen_key} = {listen_value}\nkey-file = {key}\npassword = isolated-proxy-password\nnoise-interval-min = 10ms\nnoise-interval-max = 30ms\nnoise-min-bytes = 128\nnoise-max-bytes = 512\n"
         if role == "client":
-            settings += f'server = {wire}://127.0.0.1:{relay.port if relay else addresses["server"][0]}/tunnel\n'
+            settings += "proxies = '" + json.dumps([{"listen": f"{'0.0.0.0' if args.client_wildcard else '127.0.0.1'}:{p}", "server": f"{wire}://127.0.0.1:{relay.port if relay else addresses['server'][0]}/tunnel"} for p in addresses[role]]) + "'\n"
             if not args.stress:
                 settings += "reconnect-min = 20ms\nreconnect-max = 100ms\n"
             if secure:

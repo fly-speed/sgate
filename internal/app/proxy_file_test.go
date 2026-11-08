@@ -10,7 +10,7 @@ import (
 func credential(s string) *string { return &s }
 
 func TestProxyFilePathsCredentialsAndCLI(t *testing.T) {
-	c := proxyConfigController(t, "server = ws://localhost/tunnel\nusername = common-user\nproxies-file = routes.json\n")
+	c := proxyConfigController(t, testClientMapping(t, "ws://localhost/tunnel")+"username = common-user\nproxies-file = routes.json\n")
 	path := filepath.Join(filepath.Dir(c.path), "routes.json")
 	routes := []clientProxy{{Listen: "127.0.0.1:19001", Server: "ws://localhost/tunnel", Username: credential("alice"), Password: credential("alice-secret")}, {Listen: "127.0.0.1:19002", Server: "wss://localhost/tunnel"}}
 	raw, _ := json.Marshal(routes)
@@ -43,7 +43,7 @@ func TestProxyFilePathsCredentialsAndCLI(t *testing.T) {
 	}
 	next, err = c.load("")
 	if err != nil || next.client == nil || len(next.proxies) != 0 {
-		t.Fatal("empty file single-proxy fallback failed", err)
+		t.Fatal("empty file must leave the proxy idle", err)
 	}
 	for _, raw := range []string{"", "null", "[{}]", `[{"listen":"127.0.0.1:19001","server":"ws://localhost/tunnel","password":""}]`, `[{"listen":"127.0.0.1:19001","server":"ws://localhost/tunnel","username":"bad user"}]`, "[] {}"} {
 		if err = os.WriteFile(path, []byte(raw), 0600); err != nil {
