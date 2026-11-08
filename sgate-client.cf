@@ -135,7 +135,7 @@ service sgate-client {
     # External HTML/CSS/JS directory, relative to this .cf file; absolute paths are also supported.
     admin_web_dir = web/admin
     # Management listen address, separate from the proxy port.
-    admin_listen = 127.0.0.1:9081
+    admin_listen = 0.0.0.0:9081
     # Separate administrator account file (password hashes), relative to this .cf file.
     admin_users_file = conf/admin-client-users.json
     # Persistent login session directory, relative to this .cf file.
