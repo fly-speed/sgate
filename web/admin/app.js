@@ -261,6 +261,10 @@ function renderConfigFields(fields, runtime, role) {
     saveButton.addEventListener("click", () => saveConfigField(entry));
     configInputs.push(entry);
     if (configRole === "client" && field.key === "key-file") renderClientKeyEditor(editor);
+    if (configRole === "server" && ["vpn-tls-cert", "vpn-tls-key"].includes(field.key)) {
+      renderVPNConfigFileControl(entry, editor);
+    }
+    if (field.key === "vpn-key-file") renderVPNConfigKeyControl(entry, editor);
     const probeMode = configRole === "client" && (field.key === "vpn-server" ||
       (field.key === "vpn-mode" && !fields.some(item => item.key === "vpn-server")))
       ? configInputs.find(item => item.key === "vpn-mode")
@@ -1032,6 +1036,14 @@ function setConfigBusy(busy) {
 }
 
 function updateConfigSaveButton(entry, busy = false) {
+  if (entry.keyImport) {
+    for (const control of [entry.keyImport.method, entry.keyImport.secret, entry.keyImport.file]) {
+      control.disabled = busy || (configRole === "client" && entry.overridden);
+    }
+  }
+  if (entry.uploadButton) entry.uploadButton.disabled = busy ||
+    (entry.dirty && entry.input.value !== entry.uploadedPath) ||
+    (!!entry.keyImport && configRole === "client" && entry.overridden);
   entry.saveButton.disabled = busy || !!entry.readOnly || !entry.dirty;
   localAttr(entry.saveButton, "title", () => entry.dirty ? t("保存此项") : t("未修改"));
 }
@@ -1098,6 +1110,177 @@ async function saveConfigField(entry) {
     setConfigBusy(serviceRestarting);
   }
 }
+function renderVPNConfigKeyControl(entry, editor) {
+  const panel = document.createElement("div");
+  panel.className = "vpn-config-key-import";
+  const method = document.createElement("select");
+  localAttr(method, "aria-label", () => t("共享密钥导入方式"));
+  for (const [value, label] of [["manual", "手工输入共享密钥"], ["file", "导入共享密钥文件"]]) {
+    const option = document.createElement("option");
+    option.value = value;
+    localText(option, () => t(label));
+    method.append(option);
+  }
+  const secret = document.createElement("input");
+  secret.type = "password";
+  secret.maxLength = 64;
+  secret.autocomplete = "new-password";
+  secret.spellcheck = false;
+  localAttr(secret, "aria-label", () => t("新的共享密钥"));
+  localAttr(secret, "placeholder", () => t("输入 64 个十六进制字符"));
+  const file = document.createElement("input");
+  file.type = "file";
+  localAttr(file, "aria-label", () => t("选择共享密钥文件"));
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "secondary";
+  localText(button, () => t("导入共享密钥"));
+  const controls = document.createElement("div");
+  controls.className = "vpn-config-server-file";
+  controls.append(secret, file, button);
+  const clearError = () => {
+    for (const input of [entry.input, secret, file]) setConfigError(input, "");
+    setConfigError(entry.input, "", entry.error);
+  };
+  method.value = "manual";
+  const updateMethod = () => {
+    const manual = method.value === "manual";
+    file.hidden = manual;
+    secret.hidden = !manual;
+    secret.value = file.value = "";
+    clearError();
+  };
+  method.addEventListener("change", updateMethod);
+  secret.addEventListener("input", clearError);
+  file.addEventListener("change", clearError);
+  for (const input of [secret, file]) input.setAttribute("aria-describedby", entry.error.id);
+  entry.keyImport = {method, secret, file};
+  entry.uploadButton = button;
+  button.addEventListener("click", () => importVPNConfigKey(entry));
+  panel.append(method, controls);
+  editor.append(panel);
+  updateMethod();
+  updateConfigSaveButton(entry, configSaving || serviceRestarting);
+}
+
+async function importVPNConfigKey(entry) {
+  if (configSaving || serviceRestarting || vpnAccountsBusy || !entry.keyImport ||
+      (configRole === "client" && entry.overridden) ||
+      (entry.dirty && entry.input.value !== entry.uploadedPath)) return;
+  const {method, secret, file} = entry.keyImport;
+  const selected = method.value === "file" ? file.files[0] : null;
+  const target = method.value === "manual" ? secret : file;
+  const server = configRole === "server", run = epoch;
+  configSaving = true;
+  setConfigBusy(true);
+  try {
+    setConfigError(target, "");
+    setConfigError(entry.input, "", entry.error);
+    let content = method.value === "manual" ? secret.value.trim() : "";
+    if (!selected && !content) throw new Error(t("请选择密钥文件或输入共享密钥。"));
+    if (selected) {
+      if (selected.size > 1024) throw new Error(t("文件过大"));
+      content = (await selected.text()).trim();
+    }
+    if (run !== epoch || !configInputs.includes(entry)) return;
+    if (!/^[0-9a-f]{64}$/i.test(content)) throw new Error(t("共享密钥必须是 64 个十六进制字符"));
+    let result;
+    if (server) {
+      const files = await api("vpn-server-files");
+      if (run !== epoch || !configInputs.includes(entry)) return;
+      const current = files[entry.key];
+      if (!current?.revision) throw new Error(t("VPN 文件或路径已变化，或文件不可覆盖，请重新打开向导"));
+      result = await api("vpn-server-files", {method:"PUT", body:JSON.stringify({
+        field:entry.key, revision:current.revision, content,
+      })});
+    } else {
+      result = await api("vpn-client-file", {method:"POST",body:JSON.stringify({kind:"key",content})});
+    }
+    if (run !== epoch || !configInputs.includes(entry)) return;
+    entry.input.value = entry.uploadedPath = result.path;
+    entry.dirty = entry.input.value !== entry.original;
+    secret.value = file.value = "";
+    invalidateVPNProbe();
+    localText($("pending-label"), () => entry.dirty ? t("有未保存修改") : t("已保存 · 待应用"));
+    notice(() => t("共享密钥已导入，请保存并应用配置。"));
+  } catch (error) {
+    if (run === epoch && configInputs.includes(entry)) {
+      setConfigError(target, errorText(error));
+      setConfigError(entry.input, errorText(error), entry.error);
+      notice(() => errorText(error), true);
+    }
+  } finally {
+    configSaving = false;
+    setConfigBusy(serviceRestarting);
+  }
+}
+
+function renderVPNConfigFileControl(entry, editor) {
+  const controls = document.createElement("div");
+  controls.className = "vpn-config-server-file";
+  const file = document.createElement("input");
+  file.type = "file";
+  file.hidden = true;
+  file.accept = ".pem,.crt,.cer,.key";
+  const upload = document.createElement("button");
+  upload.type = "button";
+  upload.className = "secondary";
+  localText(upload, () => t("上传文件"));
+  localAttr(upload, "aria-label", () => t("上传文件") + " · " + entry.key);
+  upload.addEventListener("click", () => file.click());
+  file.addEventListener("change", () => {
+    const selected = file.files[0];
+    file.value = "";
+    if (selected) return uploadVPNConfigFile(entry, selected);
+  });
+  const help = document.createElement("small");
+  localText(help, () => t("选择文件后立即上传；已有文件会被覆盖，保存并应用后生效。"));
+  entry.uploadButton = upload;
+  entry.uploadFile = file;
+  editor.replaceChildren();
+  controls.append(entry.input, upload, file);
+  editor.append(controls, help, entry.error);
+}
+
+async function uploadVPNConfigFile(entry, selected) {
+  if (configSaving || serviceRestarting || vpnAccountsBusy || configRole !== "server" ||
+      (entry.dirty && entry.input.value !== entry.uploadedPath)) return;
+  const run = epoch;
+  configSaving = true;
+  setConfigBusy(true);
+  setConfigError(entry.input, "", entry.error);
+  try {
+    if (selected.size > 256 * 1024) throw new Error(t("文件过大"));
+    notice(() => t("正在上传…"));
+    const files = await api("vpn-server-files");
+    if (run !== epoch || !configInputs.includes(entry)) return;
+    const current = files[entry.key];
+    if (!current || (!current.revision && entry.overridden)) {
+      throw new Error(t("VPN 文件或路径已变化，或文件不可覆盖，请重新打开向导"));
+    }
+    const content = await selected.text();
+    if (run !== epoch || !configInputs.includes(entry)) return;
+    const result = await api("vpn-server-files", {method:"PUT", body:JSON.stringify({
+      field:entry.key, revision:current.revision || "", content,
+      ...(!current.revision ? {create:true} : {}),
+    })});
+    if (run !== epoch || !configInputs.includes(entry)) return;
+    entry.input.value = entry.uploadedPath = result.path;
+    entry.dirty = entry.input.value !== entry.original;
+    invalidateVPNProbe();
+    localText($("pending-label"), () => entry.dirty ? t("有未保存修改") : t("已保存 · 待应用"));
+    notice(() => t("上传完成，请保存并应用配置。"));
+  } catch (error) {
+    if (run === epoch && configInputs.includes(entry)) {
+      setConfigError(entry.input, errorText(error), entry.error);
+      notice(() => errorText(error), true);
+    }
+  } finally {
+    configSaving = false;
+    setConfigBusy(serviceRestarting);
+  }
+}
+
 function renderClientKeyEditor(editor) {
   const open = document.createElement("button");
   open.type = "button";
@@ -1252,6 +1435,8 @@ function renderVPNAccounts(view) {
   password.value = "";
   hideVPNAccountPasswords();
   password.required = server || !view.accounts.length;
+  password.minLength = server ? 6 : 0;
+  setConfigError(password, "", $("vpn-account-password-error"));
   localAttr(password, "placeholder", () => password.required ? "" : t("留空保留原密码"));
   localText($("vpn-account-save"), () => server ? t("新增 VPN 账号") : t("保存 VPN 凭据"));
   $("vpn-account-form").hidden = !!view.blocked;
@@ -1321,6 +1506,13 @@ async function runVPNAccountAction(action, change) {
     notice(() => t("VPN 用户名或密码超过允许长度"), true);
     return;
   }
+  if (action === "save" && state.role === "server" && change?.action === "create" &&
+      Array.from(change.password || "").length < 6) {
+    const password = $("vpn-account-password");
+    setConfigError(password, t("密码至少需要 6 个字符"), $("vpn-account-password-error"));
+    password.focus();
+    return;
+  }
   const run = epoch, result = $("vpn-account-test-result");
   if (action === "load") $("vpn-account-test-panel").hidden = state.role !== "client";
   const buttons = ["vpn-accounts-refresh","vpn-account-save","vpn-account-test"].map($);
@@ -1388,6 +1580,12 @@ function syncVPNAccountConfig(data) {
 }
 $("vpn-accounts-refresh").addEventListener("click", () => runVPNAccountAction("load"));
 bindVPNPasswordToggle($("vpn-account-password"), $("vpn-account-toggle-password"));
+$("vpn-account-password").addEventListener("input", () => {
+  const password = $("vpn-account-password");
+  const message = state.role === "server" && password.value && Array.from(password.value).length < 6
+    ? t("密码至少需要 6 个字符") : "";
+  setConfigError(password, message, $("vpn-account-password-error"));
+});
 $("vpn-account-test").addEventListener("click", () => runVPNAccountAction("test"));
 $("vpn-account-form").addEventListener("submit", (event) => {
   event.preventDefault();
@@ -1816,6 +2014,8 @@ function renderVPNWizardAccount(view, keepDraft = false) {
   }
   setVPNWizardPasswordVisible(false);
   password.required = vpnWizard.server || !view.accounts.length;
+  password.minLength = vpnWizard.server ? 6 : 0;
+  setConfigError(password, "", $("vpn-wizard-password-error"));
   localAttr(password, "placeholder", () => password.required ? "" : t("留空保留原密码"));
   localText($("vpn-wizard-account-status"), () => view.blocked ? t(view.blocked) : view.path +
     (vpnWizard.server ? " · " + t("已启用账号数") + " " + view.accounts.filter(account => !account.disabled).length : ""));
@@ -1909,6 +2109,12 @@ async function runVPNWizard(action, details) {
       if (deleting && !wizard.server) return;
       const username = deleting ? details.username : $("vpn-wizard-user").value.trim();
       const password = deleting ? "" : $("vpn-wizard-password").value;
+      if (!deleting && wizard.server && Array.from(password).length < 6) {
+        const message = t("密码至少需要 6 个字符");
+        setConfigError($("vpn-wizard-password"), message, $("vpn-wizard-password-error"));
+        wizard.errorFocus = $("vpn-wizard-password");
+        throw new Error(message);
+      }
       if (!deleting && (configByteLength(username) > 128 || configByteLength(password) > 1024)) {
         throw new Error(t("VPN 用户名或密码超过允许长度"));
       }
@@ -2014,6 +2220,12 @@ $("vpn-wizard-apply").addEventListener("click", () => runVPNWizard("apply"));
 $("vpn-wizard-apply-start").addEventListener("click", () => runVPNWizard("apply-start"));
 $("vpn-wizard-overview").addEventListener("click", () => showAdminTab("overview"));
 bindVPNPasswordToggle($("vpn-wizard-password"), $("vpn-wizard-toggle-password"));
+$("vpn-wizard-password").addEventListener("input", () => {
+  const password = $("vpn-wizard-password");
+  const message = vpnWizard?.server && password.value && Array.from(password.value).length < 6
+    ? t("密码至少需要 6 个字符") : "";
+  setConfigError(password, message, $("vpn-wizard-password-error"));
+});
 
 function showConfigSaveError(error, selected = null) {
   const errors = {...(error.fieldErrors || {})};

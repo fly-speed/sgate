@@ -1173,16 +1173,20 @@ footer {
 }
 .config-row .config-error,
 .proxy-mapping .config-error,
+#vpn-account-form .config-error,
 #vpn-wizard .config-error {
   display: block;
   color: var(--red, #c53030);
   margin-top: 6px;
 }
-.config-error[hidden] {
+.config-error[hidden],
+#vpn-account-form .config-error[hidden],
+#vpn-wizard .config-error[hidden] {
   display: none;
 }
 .config-row [aria-invalid="true"],
 .proxy-mapping [aria-invalid="true"],
+#vpn-account-form [aria-invalid="true"],
 #vpn-wizard [aria-invalid="true"] {
   border-color: #c53030;
 }
@@ -1451,4 +1455,31 @@ main:has(> #overview:not([hidden])) > footer {
     min-height: 36px;
     padding: 6px 8px;
   }
+}
+
+.vpn-config-server-file {
+  display: grid;
+  gap: 6px;
+  align-items: stretch;
+}
+.vpn-config-server-file > :is(input, button) {
+  min-width: 0;
+  min-height: 44px;
+}
+@media (min-width: 681px) {
+  .vpn-config-server-file {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
+
+.vpn-config-key-import {
+  display: grid;
+  gap: 6px;
+}
+.vpn-config-key-import :is(input, select, button) {
+  min-width: 0;
+  min-height: 44px;
+}
+.vpn-config-key-import [hidden] {
+  display: none;
 }

@@ -266,9 +266,10 @@
             <div class="vpn-account-credential-field">
               <label for="vpn-account-password" data-i18n="密码">密码</label>
               <div class="vpn-password-row">
-                <input id="vpn-account-password" type="password" maxlength="1024" autocomplete="new-password">
+                <input id="vpn-account-password" type="password" maxlength="1024" autocomplete="new-password" aria-describedby="vpn-account-password-error">
                 <button id="vpn-account-toggle-password" class="secondary" type="button" aria-controls="vpn-account-password" data-i18n="显示密码">显示密码</button>
               </div>
+              <small id="vpn-account-password-error" class="config-error" aria-live="polite" hidden></small>
             </div>
             <button id="vpn-account-save" class="primary" type="submit" data-i18n="保存 VPN 凭据">保存 VPN 凭据</button>
           </form>
@@ -300,9 +301,10 @@
                 <div class="vpn-account-credential-field">
                   <label for="vpn-wizard-password" data-i18n="密码">密码</label>
                   <div class="vpn-password-row">
-                    <input id="vpn-wizard-password" type="password" maxlength="1024" autocomplete="new-password">
+                    <input id="vpn-wizard-password" type="password" maxlength="1024" autocomplete="new-password" aria-describedby="vpn-wizard-password-error">
                     <button id="vpn-wizard-toggle-password" class="secondary" type="button" aria-controls="vpn-wizard-password" data-i18n="显示密码">显示密码</button>
                   </div>
+                  <small id="vpn-wizard-password-error" class="config-error" aria-live="polite" hidden></small>
                 </div>
                 <button class="secondary" type="submit" id="vpn-wizard-account-save" data-i18n="保存 VPN 凭据">保存 VPN 凭据</button>
               </form>

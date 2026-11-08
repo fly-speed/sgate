@@ -2963,3 +2963,176 @@ test("server VPN wizard marks every invalid field, clears edited errors, and ret
   assert.equal(vm.runInContext('vpnWizard.imports.get("key").secret["aria-invalid"]',context),"true");
   assert.match(vm.runInContext('vpnWizard.fields.get("vpn-key-file").error.textContent',context),/64/);
 });
+
+
+test("server wizard requires six password characters when adding an account", async () => {
+  const {context, elements} = await page();
+  vm.runInContext(`
+    state = {authenticated:true,role:"server"}; revision = "v1";
+    vpnWizard = {server:true,revision:"v1",fields:new Map(),imports:new Map(),busy:false};
+    renderVPNWizardAccount({path:"accounts.json",revision:"a1",accounts:[]});
+  `,context);
+  elements.get("vpn-wizard").querySelectorAll = () => [];
+  elements.get("vpn-wizard-user").value = "alice";
+  let saves = 0;
+  context.api = async () => {
+    saves++;
+    return {path:"accounts.json",revision:"a2",accounts:[{username:"alice"}]};
+  };
+  assert.equal(elements.get("vpn-wizard-password").minLength,6);
+  for (const password of ["", "12345", "😀😀😀"]) {
+    elements.get("vpn-wizard-password").value = password;
+    await vm.runInContext('runVPNWizard("credentials")',context);
+    assert.equal(saves,0);
+    assert.equal(elements.get("vpn-wizard-password")["aria-invalid"],"true");
+    assert.match(elements.get("vpn-wizard-password-error").textContent,/6/);
+  }
+  elements.get("vpn-wizard-password").value = "123456";
+  elements.get("vpn-wizard-password").listeners.input();
+  assert.equal(elements.get("vpn-wizard-password-error").hidden,true);
+  await vm.runInContext('runVPNWizard("credentials")',context);
+  assert.equal(saves,1);
+  assert.equal(elements.get("vpn-wizard-password").value,"");
+  assert.equal(elements.get("vpn-wizard-password-error").hidden,true);
+});
+
+test("VPN account page requires at least six password characters for new server accounts", async () => {
+  const {context,elements} = await page();
+  context.accounts = {path:"accounts.json",revision:"v1",accounts:[]};
+  vm.runInContext('state={authenticated:true,role:"server"};renderVPNAccounts(accounts)',context);
+  assert.equal(elements.get("vpn-account-password").minLength,6);
+  let saved = 0;
+  context.api = async () => { saved++; return {...context.accounts,revision:"v2",accounts:[{username:"alice"}]}; };
+  for (const password of ["", "12345", "😀😀😀"]) {
+    context.draft = password;
+    await vm.runInContext('runVPNAccountAction("save",{action:"create",username:"alice",password:draft})',context);
+    assert.equal(saved,0);
+    assert.equal(elements.get("vpn-account-password")["aria-invalid"],"true");
+    assert.match(elements.get("vpn-account-password-error").textContent,/6/);
+  }
+  elements.get("vpn-account-password").value="123456";
+  elements.get("vpn-account-password").listeners.input();
+  assert.equal(elements.get("vpn-account-password-error").hidden,true);
+  await vm.runInContext('runVPNAccountAction("save",{action:"create",username:"alice",password:"123456"})',context);
+  assert.equal(saved,1);
+  assert.equal(elements.get("vpn-account-password").value,"");
+  assert.equal(elements.get("vpn-account-password-error").hidden,true);
+});
+
+test("server VPN parameters upload certificates and private keys and preserve other drafts", async () => {
+  const {context,elements} = await page();
+  context.uploadFields = [
+    {key:"vpn-tls-cert",value:"old.pem",group:"独立 VPN"},
+    {key:"vpn-tls-key",value:"",group:"独立 VPN"},
+    {key:"vpn-mtu",value:"1280",group:"独立 VPN"},
+  ];
+  vm.runInContext('state={authenticated:true,role:"server"};revision="v1";renderConfigFields(uploadFields,{},"server")',context);
+  const calls = [];
+  context.api = async (path, options) => {
+    const body = options ? JSON.parse(options.body) : null;
+    calls.push([path,body]);
+    if (path === "config") return {revision:"v2",requires_restart:true};
+    if (!options) return {"vpn-tls-cert":{path:"/srv/old.pem",revision:"c1"},"vpn-tls-key":{path:""}};
+    return {path:body.field === "vpn-tls-cert" ? "/srv/old.pem" : "/srv/new-key.pem", revision:"f2"};
+  };
+  vm.runInContext('configInputs[2].input.value="1400";configInputs[2].input.listeners.input()',context);
+  for (const index of [0,1]) {
+    context.index = index;
+    await vm.runInContext(`
+      var entry = configInputs[index];
+      entry.uploadFile.files=[{size:10,text:async()=>"PEM"}];
+      entry.uploadFile.listeners.change();
+    `,context);
+    assert.equal(vm.runInContext('configInputs[index].dirty',context),true);
+    assert.equal(vm.runInContext('configInputs[index].saveButton.disabled',context),false);
+    assert.equal(vm.runInContext('configInputs[index].uploadButton.disabled',context),false);
+  }
+  assert.deepEqual(calls,[
+    ["vpn-server-files",null],
+    ["vpn-server-files",{field:"vpn-tls-cert",revision:"c1",content:"PEM"}],
+    ["vpn-server-files",null],
+    ["vpn-server-files",{field:"vpn-tls-key",revision:"",content:"PEM",create:true}],
+  ]);
+  assert.match(elements.get("notice").textContent,/上传完成/);
+  await vm.runInContext('saveConfigField(configInputs[1])',context);
+  assert.deepEqual(calls.at(-1),["config",{fields:{"vpn-tls-key":"/srv/new-key.pem"},revision:"v1",apply:false}]);
+  assert.equal(vm.runInContext('configInputs[2].input.value',context),"1400");
+  assert.equal(vm.runInContext('configInputs[2].dirty',context),true);
+  vm.runInContext('configInputs[0].input.value="manual.pem";configInputs[0].input.listeners.input()',context);
+  assert.equal(vm.runInContext('configInputs[0].uploadButton.disabled',context),true);
+  vm.runInContext('renderConfigFields(uploadFields,{},"client")',context);
+  assert.equal(vm.runInContext('configInputs.some(entry=>entry.uploadButton)',context),false);
+});
+
+test("VPN parameter upload failures keep the path and show an inline error", async () => {
+  const {context} = await page();
+  vm.runInContext('state={authenticated:true,role:"server"};renderConfigFields([{key:"vpn-tls-key",value:"old.key"}],{},"server")',context);
+  context.api = async (path,options) => {
+    if (!options) return {"vpn-tls-key":{path:"/srv/old.key",revision:"k1"}};
+    throw new Error("请上传有效的未加密 PEM 私钥");
+  };
+  await vm.runInContext('uploadVPNConfigFile(configInputs[0],{size:3,text:async()=>"bad"})',context);
+  assert.equal(vm.runInContext('configInputs[0].input.value',context),"old.key");
+  assert.equal(vm.runInContext('configInputs[0].input["aria-invalid"]',context),"true");
+  assert.match(vm.runInContext('configInputs[0].error.textContent',context),/PEM/);
+  assert.equal(vm.runInContext('configInputs[0].uploadButton.disabled',context),false);
+});
+
+test("VPN parameters import manual and file shared keys on both roles without losing other drafts", async () => {
+  for (const role of ["server","client"]) {
+    const {context,elements} = await page();
+    context.role = role;
+    vm.runInContext(`
+      state={authenticated:true,role};revision="v1";
+      renderConfigFields([{key:"vpn-key-file",value:"",group:"独立 VPN"},
+        {key:"vpn-mtu",value:"1280",group:"独立 VPN"}],{},role);
+      var keyEntry=configInputs.find(entry=>entry.key==="vpn-key-file");
+      var mtuEntry=configInputs.find(entry=>entry.key==="vpn-mtu");
+      mtuEntry.input.value="1400";mtuEntry.input.listeners.input();
+    `,context);
+    const calls=[];
+    let keyRevision="k1";
+    context.api = async (path,options) => {
+      const body=options?JSON.parse(options.body):null;
+      calls.push([path,body]);
+      if (!options) return {"vpn-key-file":{path:"/srv/shared.key",revision:keyRevision}};
+      keyRevision="k2";
+      return {path:role === "server"?"/srv/shared.key":"/srv/imported.key",revision:keyRevision};
+    };
+    assert.equal(vm.runInContext('keyEntry.keyImport.method.value',context),"manual");
+    assert.equal(vm.runInContext('keyEntry.keyImport.file.hidden',context),true);
+    vm.runInContext('keyEntry.keyImport.secret.value="bad"',context);
+    await vm.runInContext('importVPNConfigKey(keyEntry)',context);
+    assert.equal(calls.length,0);
+    assert.equal(vm.runInContext('keyEntry.keyImport.secret["aria-invalid"]',context),"true");
+    assert.match(vm.runInContext('keyEntry.error.textContent',context),/64/);
+    vm.runInContext('keyEntry.keyImport.secret.value="ab".repeat(32);keyEntry.keyImport.secret.listeners.input()',context);
+    await vm.runInContext('importVPNConfigKey(keyEntry)',context);
+    assert.equal(vm.runInContext('keyEntry.keyImport.secret.value',context),"");
+    assert.equal(vm.runInContext('keyEntry.error.hidden',context),true);
+    assert.equal(vm.runInContext('keyEntry.dirty',context),true);
+    assert.match(elements.get("notice").textContent,/共享密钥已导入/);
+    vm.runInContext(`
+      keyEntry.keyImport.secret.value="sensitive-draft";
+      keyEntry.keyImport.method.value="file";
+      keyEntry.keyImport.method.listeners.change();
+      keyEntry.keyImport.file.files=[{size:65,text:async()=>"CD".repeat(32)+"\\n"}];
+    `,context);
+    assert.equal(vm.runInContext('keyEntry.keyImport.secret.value',context),"");
+    assert.equal(vm.runInContext('keyEntry.keyImport.secret.hidden',context),true);
+    assert.equal(vm.runInContext('keyEntry.keyImport.file.hidden',context),false);
+    await vm.runInContext('importVPNConfigKey(keyEntry)',context);
+    assert.equal(vm.runInContext('mtuEntry.input.value',context),"1400");
+    assert.equal(vm.runInContext('mtuEntry.dirty',context),true);
+    if (role === "server") assert.deepEqual(calls,[
+      ["vpn-server-files",null],
+      ["vpn-server-files",{field:"vpn-key-file",revision:"k1",content:"ab".repeat(32)}],
+      ["vpn-server-files",null],
+      ["vpn-server-files",{field:"vpn-key-file",revision:"k2",content:"CD".repeat(32)}],
+    ]);
+    else assert.deepEqual(calls,[
+      ["vpn-client-file",{kind:"key",content:"ab".repeat(32)}],
+      ["vpn-client-file",{kind:"key",content:"CD".repeat(32)}],
+    ]);
+  }
+});
