@@ -70,6 +70,16 @@ For a two-host deployment, set the client mapping to the server's reachable addr
 
 To replace the client key from the web interface, open **Proxy configuration → Proxy connection**, edit the key contents under `key-file`, and use **Save and apply** after saving the key.
 
+## Build a private network with sgate VPN
+
+Devices on different networks can join one virtual IPv4 subnet by connecting to the same sgate server. The server assigns a VPN address to each client after authentication. With client-to-client access enabled, it relays packets to other online clients by their VPN addresses. For example, a laptop at home can reach SSH on an office workstation using the workstation’s VPN address.
+
+![sgate private VPN topology with a home laptop, an office workstation, and a cloud host connected to one server over encrypted tunnels](docs/images/sgate-vpn-network.en.svg)
+
+- Set the same `vpn-network` on the server and clients, such as `10.77.0.0/24` in the diagram. Choose a subnet that does not overlap existing networks on the devices.
+- On the server, set `vpn-mode = both` or `only` and enable `vpn-allow-client-to-client = true`. Client-to-client access is disabled by default.
+- Each client needs a route to the VPN subnet. To route only private VPN traffic through the tunnel, set `vpn-routes = 10.77.0.0/24`. After starting the VPN, check the assigned address in **Overview** and make sure the target service and host firewall allow connections from the VPN subnet.
+
 ## Enable the IPv4 VPN
 
 Use the [web setup wizard](#web-setup-wizard) below, or configure the VPN manually under **VPN parameters**.
