@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" xml:lang="zh-CN" width="960" height="382" viewBox="0 0 960 382" role="img" aria-labelledby="title desc">
+  <title id="title">sgate IPv4 VPN 内网拓扑</title>
+  <desc id="desc">三台位于不同网络的客户端连接同一台 sgate 服务端。服务端分配虚拟 IPv4 地址，开启客户端互访后按目标 VPN 地址转发报文。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+      <path d="M0 0l9 4.5L0 9z" fill="#456577"/>
+    </marker>
+    <style>
+      text { font-family: system-ui, "PingFang SC", "Microsoft YaHei", sans-serif; fill: #172f3b; text-anchor: middle; }
+      .heading { font-size: 24px; font-weight: 700; }
+      .label { font-size: 18px; font-weight: 700; }
+      .detail { font-size: 16px; fill: #375562; }
+      .tunnel { fill: none; stroke: #456577; stroke-width: 2; marker-start: url(#arrow); marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect x="1" y="1" width="958" height="380" rx="18" fill="#eff4fc" stroke="#c6d6ec"/>
+  <text x="480" y="38" class="heading">IPv4 VPN 内网 · 10.77.0.0/24</text>
+
+  <rect x="300" y="60" width="360" height="92" rx="10" fill="#edf7f4" stroke="#aacbc0"/>
+  <text x="480" y="87" class="label">sgate-server · 10.77.0.1</text>
+  <text x="480" y="113" class="detail">认证客户端并分配虚拟 IPv4 地址</text>
+  <text x="480" y="137" class="detail">开启客户端互访后转发 VPN 报文</text>
+
+  <path class="tunnel" d="M365 158 L177 252"/>
+  <path class="tunnel" d="M480 158 V252"/>
+  <path class="tunnel" d="M595 158 L783 252"/>
+  <text x="192" y="180" class="detail">加密 VPN 隧道</text>
+  <text x="768" y="180" class="detail">加密 VPN 隧道</text>
+
+  <g>
+    <rect x="35" y="258" width="260" height="71" rx="10" fill="#fff" stroke="#abc2ca"/>
+    <text x="165" y="285" class="label">居家笔记本</text>
+    <text x="165" y="312" class="detail">sgate-client · 10.77.0.2</text>
+  </g>
+  <g>
+    <rect x="350" y="258" width="260" height="71" rx="10" fill="#fff" stroke="#abc2ca"/>
+    <text x="480" y="285" class="label">办公室工作站</text>
+    <text x="480" y="312" class="detail">sgate-client · 10.77.0.3</text>
+  </g>
+  <g>
+    <rect x="665" y="258" width="260" height="71" rx="10" fill="#fff" stroke="#abc2ca"/>
+    <text x="795" y="285" class="label">云主机</text>
+    <text x="795" y="312" class="detail">sgate-client · 10.77.0.4</text>
+  </g>
+  <text x="480" y="360" class="detail">互访示例 · 10.77.0.2 → sgate-server → 10.77.0.3</text>
+</svg>
